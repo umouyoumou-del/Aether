@@ -37,11 +37,11 @@ fib(30) = 832040，80 分以上：["小明", "小红"]
 
 ```powershell
 cd E:\Aether
-go build -o bin\aether.exe .\cmd\aether     # 构建编译器
-.\bin\aether.exe run examples\hello.ae      # 运行示例
+powershell -ExecutionPolicy Bypass -File install.ps1             # 构建 bin\aether.exe 并运行 hello 示例
+powershell -ExecutionPolicy Bypass -File install.ps1 -AddToPath  # 同时把 bin 加入用户 PATH
 ```
 
-把 `E:\Aether\bin` 加入 `PATH` 后即可直接使用 `aether` 命令。
+也可以手动构建：`go build -o bin\aether.exe .\cmd\aether`。第一次运行程序时 Go 需要编译标准库，会多花几秒钟。
 
 | 命令 | 作用 |
 |---|---|

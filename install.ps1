@@ -1,4 +1,4 @@
-# 构建五行 (Aether) 编译器：  powershell -ExecutionPolicy Bypass -File install.ps1 [-AddToPath]
+﻿# 构建五行 (Aether) 编译器：  powershell -ExecutionPolicy Bypass -File install.ps1 [-AddToPath]
 param([switch]$AddToPath)
 
 $ErrorActionPreference = "Stop"
