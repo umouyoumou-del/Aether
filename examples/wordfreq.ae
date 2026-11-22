@@ -1,0 +1,27 @@
+# 文件读写 + 正则 + 字典统计 + 排序
+import os
+import re
+
+text = """
+五行是一门融合了多种语言优点的编程语言。
+It borrows the readable syntax of Python, the speed of C++,
+the goroutines of Go, the type safety of Java and the elegance of C#.
+Python Python Go Go Go 五行 五行 五行 五行
+"""
+
+path = "wordfreq_demo.txt"
+os.write_file(path, text)
+
+counts: dict[str, int] = {}
+with open(path) as f:
+    for line in f:
+        # 英文单词，或两个连续的汉字
+        for word in re.find_all(r"[A-Za-z]+|\p{Han}{2}", line):
+            w = word.lower()
+            counts[w] = counts.get(w, 0) + 1
+
+print(f"共 {sum(counts.values())} 个词，{len(counts)} 个不同的词")
+for word, n in sorted(counts.items(), key=kv => (-kv[1], kv[0]))[:8]:
+    print(f"  {word:<10} {"#" * n} {n}")
+
+os.remove(path)

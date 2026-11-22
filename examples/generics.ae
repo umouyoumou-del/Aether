@@ -1,0 +1,117 @@
+# 泛型：泛型函数、泛型类、约束、泛型枚举（Result）
+
+# 约束 Ordered：可以用 < 比较
+def max_of[T: Ordered](items: list[T]) -> T:
+    best = items[0]
+    for x in items:
+        if x > best:
+            best = x
+    return best
+
+print(max_of([3, 9, 4]), max_of(["梨", "苹果", "香蕉"]), max_of([2.5, -1.0]))
+
+# 泛型类
+class Queue[T]:
+    _items: list[T] = []
+
+    def push(self, x: T):
+        self._items.append(x)
+
+    def pop(self) -> T?:
+        if len(self._items) == 0:
+            return null
+        return self._items.pop(0)
+
+    def __len__(self) -> int:
+        return len(self._items)
+
+q = Queue[str]()
+q.push("第一")
+q.push("第二")
+print(q.pop(), len(q), q.pop(), q.pop() ?? "（空）")
+
+# 二叉搜索树：泛型 + 递归 + 可空类型
+class Node[K: Ordered, V]:
+    key: K
+    value: V
+    left: Node[K, V]? = null
+    right: Node[K, V]? = null
+
+class TreeMap[K: Ordered, V]:
+    root: Node[K, V]? = null
+    size: int = 0
+
+    def put(self, key: K, value: V):
+        if self.root == null:
+            self.root = Node(key, value)
+            self.size += 1
+            return
+        node = self.root!
+        while true:
+            if key == node.key:
+                node.value = value
+                return
+            if key < node.key:
+                if node.left == null:
+                    node.left = Node(key, value)
+                    self.size += 1
+                    return
+                node = node.left!
+            else:
+                if node.right == null:
+                    node.right = Node(key, value)
+                    self.size += 1
+                    return
+                node = node.right!
+
+    def get(self, key: K) -> V?:
+        cur = self.root
+        while cur != null:
+            if key == cur.key:
+                return cur.value
+            cur = cur.left if key < cur.key else cur.right
+        return null
+
+    def items(self) -> iter[(K, V)]:
+        stack: list[Node[K, V]] = []
+        cur = self.root
+        while cur != null or len(stack) > 0:
+            while cur != null:
+                stack.append(cur)
+                cur = cur.left
+            n = stack.pop()
+            yield (n.key, n.value)
+            cur = n.right
+
+tm = TreeMap[str, int]()
+for w in "the quick brown fox jumps over the lazy dog".split():
+    tm.put(w, (tm.get(w) ?? 0) + 1)
+print("树中键数：", tm.size, "the 出现：", tm.get("the"), "cat：", tm.get("cat"))
+print("有序遍历：", [k for k, _ in tm.items()])
+
+# 泛型枚举：Result[T]
+enum Result[T]:
+    Ok(value: T)
+    Err(message: str)
+
+def parse_age(s: str) -> Result[int]:
+    if not s.isdigit():
+        return Result[int].Err(f"'{s}' 不是数字")
+    n = int(s)
+    if n > 150:
+        return Result[int].Err(f"{n} 岁不太可能")
+    return Result.Ok(n)
+
+for text in ["18", "abc", "200"]:
+    match parse_age(text):
+        case Ok(age):
+            print(f"{text} → 年龄 {age}")
+        case Err(msg):
+            print(f"{text} → 错误：{msg}")
+
+# 泛型 + 函数参数
+def map_values[K: Hashable, V, U](d: dict[K, V], f: fn(V) -> U) -> dict[K, U]:
+    return {k: f(v) for k, v in d.items()}
+
+prices = {"苹果": 5.5, "香蕉": 3.0}
+print(map_values(prices, p => f"¥{p * 0.8:.2f}"))

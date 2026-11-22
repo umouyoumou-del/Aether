@@ -1,0 +1,33 @@
+# 康威生命游戏：struct、二维列表、集合、模块常量
+
+const W = 30
+const H = 12
+
+struct Cell:
+    x: int
+    y: int
+
+    def neighbors(self) -> list[Cell]:
+        return [Cell((self.x + dx) % W, (self.y + dy) % H)
+                for dy in range(-1, 2) for dx in range(-1, 2) if dx != 0 or dy != 0]
+
+def step(alive: set[Cell]) -> set[Cell]:
+    counts: dict[Cell, int] = {}
+    for c in alive:
+        for n in c.neighbors():
+            counts[n] = counts.get(n, 0) + 1
+    return {c for c, k in counts.items() if k == 3 or (k == 2 and c in alive)}
+
+def render(alive: set[Cell]) -> str:
+    rows: list[str] = []
+    for y in range(H):
+        rows.append("".join("█" if Cell(x, y) in alive else "·" for x in range(W)))
+    return "\n".join(rows)
+
+# 滑翔机 + 闪烁器
+board = {Cell(1, 0), Cell(2, 1), Cell(0, 2), Cell(1, 2), Cell(2, 2),
+         Cell(20, 5), Cell(21, 5), Cell(22, 5)}
+for gen in range(4):
+    print(f"第 {gen} 代（{len(board)} 个细胞）")
+    print(render(board))
+    board = step(board)

@@ -1,0 +1,8 @@
+# json 模块：JSON 编码与解码
+# loads 返回 any：对象是 dict[str, any]，数组是 list[any]，数字是 int 或 float。
+
+@go("rt.JSONDumps") def dumps(value: any, indent: int = 0, sort_keys: bool = false) -> str
+@go("rt.JSONLoads") def loads(text: str) -> any
+@go("rt.JSONLoadsDict") def loads_dict(text: str) -> dict[str, any]
+@go("rt.JSONLoadsList") def loads_list(text: str) -> list[any]
+@go("rt.JSONValid") def valid(text: str) -> bool

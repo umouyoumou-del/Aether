@@ -1,0 +1,33 @@
+# re 模块：正则表达式（RE2 语法，保证线性时间，不支持反向引用）
+
+@go("*rt.Match")
+class Match:
+    @go("Group") def group(self, i: int = 0) -> str
+    @go("GroupName") def named(self, name: str) -> str
+    @go("Groups") def groups(self) -> list[str]
+    @go("Start") def start(self, i: int = 0) -> int
+    @go("End") def end(self, i: int = 0) -> int
+    @go("Text") prop text -> str
+
+@go("*rt.Regex")
+class Regex:
+    @go("Match") def match(self, s: str) -> Match?
+    @go("FullMatch") def fullmatch(self, s: str) -> Match?
+    @go("Search") def search(self, s: str) -> Match?
+    @go("Test") def test(self, s: str) -> bool
+    @go("FindAll") def find_all(self, s: str) -> list[str]
+    @go("FindIter") def find_iter(self, s: str) -> list[Match]
+    @go("Sub") def sub(self, repl: str, s: str, count: int = 0) -> str
+    @go("SubFunc") def sub_fn(self, f: fn(Match) -> str, s: str) -> str
+    @go("Split") def split(self, s: str, maxsplit: int = 0) -> list[str]
+    @go("Pattern") prop pattern -> str
+
+@go("rt.ReCompile") def compile(pattern: str) -> Regex
+@go("rt.ReMatch") def match(pattern: str, s: str) -> Match?
+@go("rt.ReFullMatch") def fullmatch(pattern: str, s: str) -> Match?
+@go("rt.ReSearch") def search(pattern: str, s: str) -> Match?
+@go("rt.ReTest") def test(pattern: str, s: str) -> bool
+@go("rt.ReFindAll") def find_all(pattern: str, s: str) -> list[str]
+@go("rt.ReSub") def sub(pattern: str, repl: str, s: str, count: int = 0) -> str
+@go("rt.ReSplit") def split(pattern: str, s: str, maxsplit: int = 0) -> list[str]
+@go("regexp.QuoteMeta") def escape(s: str) -> str

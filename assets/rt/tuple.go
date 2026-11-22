@@ -23,6 +23,8 @@ func (t T2[A, B]) Eqꞏ(o any) bool {
 	return ok && Equal(t.V0, r.V0) && Equal(t.V1, r.V1)
 }
 
+func (t T2[A, B]) Itemsꞏ() []any { return []any{t.V0, t.V1} }
+
 func (t T2[A, B]) Cmpꞏ(o any) int {
 	r := o.(T2[A, B])
 	if c := Compare(t.V0, r.V0); c != 0 {
@@ -56,6 +58,8 @@ func (t T3[A, B, C]) Eqꞏ(o any) bool {
 	r, ok := o.(T3[A, B, C])
 	return ok && Equal(t.V0, r.V0) && Equal(t.V1, r.V1) && Equal(t.V2, r.V2)
 }
+
+func (t T3[A, B, C]) Itemsꞏ() []any { return []any{t.V0, t.V1, t.V2} }
 
 func (t T3[A, B, C]) Cmpꞏ(o any) int {
 	r := o.(T3[A, B, C])
@@ -96,6 +100,8 @@ func (t T4[A, B, C, D]) Eqꞏ(o any) bool {
 	r, ok := o.(T4[A, B, C, D])
 	return ok && Equal(t.V0, r.V0) && Equal(t.V1, r.V1) && Equal(t.V2, r.V2) && Equal(t.V3, r.V3)
 }
+
+func (t T4[A, B, C, D]) Itemsꞏ() []any { return []any{t.V0, t.V1, t.V2, t.V3} }
 
 func (t T4[A, B, C, D]) Cmpꞏ(o any) int {
 	r := o.(T4[A, B, C, D])
@@ -142,6 +148,8 @@ func (t T5[A, B, C, D, E]) Eqꞏ(o any) bool {
 	r, ok := o.(T5[A, B, C, D, E])
 	return ok && Equal(t.V0, r.V0) && Equal(t.V1, r.V1) && Equal(t.V2, r.V2) && Equal(t.V3, r.V3) && Equal(t.V4, r.V4)
 }
+
+func (t T5[A, B, C, D, E]) Itemsꞏ() []any { return []any{t.V0, t.V1, t.V2, t.V3, t.V4} }
 
 func (t T5[A, B, C, D, E]) Cmpꞏ(o any) int {
 	r := o.(T5[A, B, C, D, E])
@@ -194,6 +202,8 @@ func (t T6[A, B, C, D, E, F]) Eqꞏ(o any) bool {
 	r, ok := o.(T6[A, B, C, D, E, F])
 	return ok && Equal(t.V0, r.V0) && Equal(t.V1, r.V1) && Equal(t.V2, r.V2) && Equal(t.V3, r.V3) && Equal(t.V4, r.V4) && Equal(t.V5, r.V5)
 }
+
+func (t T6[A, B, C, D, E, F]) Itemsꞏ() []any { return []any{t.V0, t.V1, t.V2, t.V3, t.V4, t.V5} }
 
 func (t T6[A, B, C, D, E, F]) Cmpꞏ(o any) int {
 	r := o.(T6[A, B, C, D, E, F])
@@ -252,6 +262,8 @@ func (t T7[A, B, C, D, E, F, G]) Eqꞏ(o any) bool {
 	r, ok := o.(T7[A, B, C, D, E, F, G])
 	return ok && Equal(t.V0, r.V0) && Equal(t.V1, r.V1) && Equal(t.V2, r.V2) && Equal(t.V3, r.V3) && Equal(t.V4, r.V4) && Equal(t.V5, r.V5) && Equal(t.V6, r.V6)
 }
+
+func (t T7[A, B, C, D, E, F, G]) Itemsꞏ() []any { return []any{t.V0, t.V1, t.V2, t.V3, t.V4, t.V5, t.V6} }
 
 func (t T7[A, B, C, D, E, F, G]) Cmpꞏ(o any) int {
 	r := o.(T7[A, B, C, D, E, F, G])
@@ -316,6 +328,8 @@ func (t T8[A, B, C, D, E, F, G, H]) Eqꞏ(o any) bool {
 	r, ok := o.(T8[A, B, C, D, E, F, G, H])
 	return ok && Equal(t.V0, r.V0) && Equal(t.V1, r.V1) && Equal(t.V2, r.V2) && Equal(t.V3, r.V3) && Equal(t.V4, r.V4) && Equal(t.V5, r.V5) && Equal(t.V6, r.V6) && Equal(t.V7, r.V7)
 }
+
+func (t T8[A, B, C, D, E, F, G, H]) Itemsꞏ() []any { return []any{t.V0, t.V1, t.V2, t.V3, t.V4, t.V5, t.V6, t.V7} }
 
 func (t T8[A, B, C, D, E, F, G, H]) Cmpꞏ(o any) int {
 	r := o.(T8[A, B, C, D, E, F, G, H])

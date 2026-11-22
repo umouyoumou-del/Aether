@@ -1,0 +1,44 @@
+# 五行 (Aether) 入门：运行方式  aether run hello.ae
+
+print("你好，五行！")
+
+# 变量会自动推断类型；也可以写出类型
+name = "Aether"
+version: float = 0.1
+langs = ["Python", "C++", "Go", "Java", "C#"]
+
+# f-字符串（Python / C# 风格的插值）
+print(f"{name} v{version} 融合了 {len(langs)} 门语言：{", ".join(langs)}")
+
+# 函数需要标注参数类型；返回类型写在 -> 后面
+def greet(who: str, times: int = 1) -> str:
+    return " ".join([f"你好，{who}！"] * times)
+
+print(greet("世界"))
+print(greet("五行", times=2))
+
+# 列表推导式、切片、负下标
+squares = [n * n for n in range(1, 11)]
+print(squares, squares[:3], squares[-1], squares[::-3])
+
+# 字典与遍历
+scores = {"小明": 92, "小红": 88, "小刚": 75}
+for student, score in scores.items():
+    grade = "优" if score >= 90 else ("良" if score >= 80 else "中")
+    print(f"  {student:<4} {score:>3}  {grade}")
+
+# 链式方法（C# LINQ 风格）
+passed = scores.items().filter(kv => kv[1] >= 80).map(kv => kv[0])
+print("80 分以上：", passed)
+
+# 空安全：T? 表示可能为 null 的值
+def find(xs: list[str], prefix: str) -> str?:
+    for x in xs:
+        if x.startswith(prefix):
+            return x
+    return null
+
+hit = find(langs, "J")
+print(hit ?? "没找到", find(langs, "Rust") ?? "没找到")
+if hit != null:
+    print("长度：", len(hit))  # 这里 hit 自动窄化为 str

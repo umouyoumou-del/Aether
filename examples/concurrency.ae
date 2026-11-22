@@ -1,0 +1,86 @@
+# 并发：go 协程、通道、select、WaitGroup、Mutex（Go 风格），async/await（C# 风格）
+import time
+import random
+
+# ---- 工作池：多个协程从通道取任务 ----
+def worker(id: int, jobs: chan[int], results: chan[(int, int)]):
+    for n in jobs:            # 通道关闭后循环自动结束
+        time.sleep(0.001 * random.randint(1, 5))
+        results.send((n, n * n))
+
+jobs = chan[int](100)
+results = chan[(int, int)](100)
+for w in range(4):
+    go worker(w, jobs, results)
+for n in range(1, 21):
+    jobs.send(n)
+jobs.close()
+
+squares: dict[int, int] = {}
+for _ in range(20):
+    n, sq = results.recv()
+    squares[n] = sq
+print("平方和：", sum(squares.values()), "（共", len(squares), "个任务）")
+
+# ---- 互斥锁保护共享状态 ----
+counter = 0
+mu = Mutex()
+wg = WaitGroup()
+
+def add(times: int):
+    global counter
+    for _ in range(times):
+        with mu:
+            counter += 1
+    wg.done()
+
+for _ in range(8):
+    wg.add(1)
+    go add(1000)
+wg.wait()
+print("计数器：", counter)
+
+# ---- select：同时等待多个通道，带超时 ----
+def ticker(out: chan[str], name: str, every: float, count: int):
+    for i in range(count):
+        time.sleep(every)
+        out.send(f"{name}#{i}")
+
+fast = chan[str](10)
+slow = chan[str](10)
+go ticker(fast, "快", 0.01, 3)
+go ticker(slow, "慢", 0.025, 2)
+received: list[str] = []
+deadline = time.after(0.2)
+running = true
+while running:
+    select:
+        case msg = fast.recv():
+            received.append(msg)
+        case msg = slow.recv():
+            received.append(msg)
+        case deadline.recv():
+            running = false
+print("收到：", sorted(received))
+
+# ---- async / await ----
+async def download(url: str) -> int:
+    time.sleep(0.02)          # 模拟网络延迟
+    return len(url) * 100
+
+start = time.monotonic()
+tasks = [download(u) for u in ["a.com", "bb.org", "ccc.net", "dddd.io"]]
+sizes = await tasks           # 并发执行，等待全部完成
+elapsed = time.monotonic() - start
+print("下载大小：", sizes, "并发完成：", elapsed < 0.06)
+
+async def flaky() -> str:
+    raise RuntimeError("服务器错误")
+
+try:
+    await flaky()
+except RuntimeError as e:
+    print("任务中的异常在 await 处重新抛出：", e)
+
+# ---- 并行 map ----
+print([1, 2, 3, 4, 5].parallel_map(x => x ** 3))

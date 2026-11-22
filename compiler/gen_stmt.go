@@ -327,7 +327,7 @@ func (g *Gen) augAssign(s *AssignStmt) {
 		}
 	}
 	// 能用 Go 复合赋值的情形
-	if (isNumeric(tt) || isStr(tt)) && (op == TPlus || op == TMinus || op == TStar || (op == TSlash && isFloat(tt))) {
+	if (isNumeric(tt) || (isStr(tt) && isStr(val.Typ()))) && (op == TPlus || op == TMinus || op == TStar || (op == TSlash && isFloat(tt))) {
 		if _, isIdent := target.(*Ident); isIdent || (func() bool { a, ok := target.(*Attr); return ok && a.Kind == AttrField })() {
 			if isStr(tt) && op != TPlus {
 			} else {
@@ -335,6 +335,10 @@ func (g *Gen) augAssign(s *AssignStmt) {
 				return
 			}
 		}
+	}
+	if isStr(tt) && op == TPlus && basicKind(val.Typ()) == BChar {
+		put(fmt.Sprintf("(%s + %s.CharStr(%s))", cur, g.rt(), v))
+		return
 	}
 	if basicKind(tt) == BChar && (op == TPlus || op == TMinus) {
 		put(fmt.Sprintf("(%s %s %s.Char(%s))", cur, op, g.rt(), v))

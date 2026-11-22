@@ -1,0 +1,96 @@
+# 异常处理：自定义异常、try/except/else/finally、with 资源管理、defer
+
+class BankError(Exception):
+    pass
+
+class InsufficientFunds(BankError):
+    shortfall: float
+
+    def __init__(self, shortfall: float):
+        super().__init__(f"余额不足，还差 {shortfall:.2f} 元")
+        self.shortfall = shortfall
+
+class AccountFrozen(BankError):
+    pass
+
+class Account:
+    owner: str
+    _balance: float = 0.0
+    frozen: bool = false
+    history: list[str] = []
+
+    def __init__(self, owner: str, balance: float = 0.0):
+        self.owner = owner
+        self._balance = balance
+
+    prop balance -> float:
+        return self._balance
+
+    def deposit(self, amount: float):
+        if amount <= 0.0:
+            raise ValueError("存款金额必须大于 0")
+        self._balance += amount
+        self.history.append(f"+{amount:.2f}")
+
+    def withdraw(self, amount: float):
+        if self.frozen:
+            raise AccountFrozen(f"{self.owner} 的账户已冻结")
+        if amount > self._balance:
+            raise InsufficientFunds(amount - self._balance)
+        self._balance -= amount
+        self.history.append(f"-{amount:.2f}")
+
+    def __str__(self) -> str:
+        return f"{self.owner}：{self._balance:.2f} 元"
+
+def transfer(src: Account, dst: Account, amount: float) -> bool:
+    try:
+        src.withdraw(amount)
+        dst.deposit(amount)
+    except InsufficientFunds as e:
+        print(f"  转账失败：{e}（缺口 {e.shortfall:.2f}）")
+        return false
+    except BankError as e:
+        print(f"  转账失败：{type_name(e)}：{e}")
+        return false
+    else:
+        print(f"  转账成功：{src.owner} → {dst.owner} {amount:.2f} 元")
+        return true
+    finally:
+        print(f"  当前：{src} | {dst}")
+
+alice = Account("爱丽丝", 100.0)
+bob = Account("鲍勃")
+transfer(alice, bob, 30.0)
+transfer(alice, bob, 500.0)
+alice.frozen = true
+transfer(alice, bob, 1.0)
+
+try:
+    bob.deposit(-5.0)
+except ValueError as e:
+    print("参数错误：", e)
+print("鲍勃的流水：", bob.history)
+
+# with：自动调用 __enter__ / __exit__（类似 Python 的上下文管理器、C# 的 using）
+class Transaction:
+    name: str
+    def __enter__(self) -> Transaction:
+        print(f"[开始事务 {self.name}]")
+        return self
+    def __exit__(self):
+        print(f"[结束事务 {self.name}]")
+
+with Transaction("T1") as tx:
+    print("  在事务", tx.name, "中工作")
+
+# defer：函数结束时执行（Go 风格），后进先出
+def audit():
+    defer print("  审计完成")
+    defer print("  关闭日志")
+    print("  审计中……")
+
+audit()
+
+# 未捕获的异常会打印带源码行的回溯，然后程序以状态 1 退出：
+# alice.withdraw(1000.0)

@@ -1,0 +1,45 @@
+import json
+import re
+
+data = json.loads_dict("{\"name\": \"小明\", \"age\": 18, \"scores\": [90, 85.5], \"admin\": false, \"tags\": null}")
+print(data["name"], data["age"], data["scores"], data["admin"], data["tags"])
+name = data["name"] as str
+age = data["age"] as int
+print(f"{name} 明年 {age + 1} 岁")
+scores = data["scores"] as list[any]
+print(len(scores), scores[1] as float)
+print(json.dumps(data))
+print(json.dumps({"b": [1, 2, {"c": true}], "a": "x\"y"}, indent=2))
+
+class Person:
+    name: str
+    age: int
+    tags: list[str] = []
+    _secret: str = "hidden"
+
+p = Person("小红", 20, ["dev", "ops"])
+print(json.dumps(p))
+print(json.dumps([p, Person("A", 1)], sort_keys=true))
+print(json.dumps((1, "two", 3.0)))
+print(json.valid("[1, 2]"), json.valid("{bad"))
+try:
+    json.loads("{\"a\": }")
+except JSONError as e:
+    print("JSONError:", e)
+
+m = re.match(r"(\d+)-(\d+)", "123-456 rest")
+if m != null:
+    print(m.group(), m.group(1), m.group(2), m.groups(), m.start(2), m.end())
+print(re.match(r"\d+", "abc"))
+print(re.search(r"[a-z]+", "123abc456")?.text)
+print(re.find_all(r"\d+", "a1b22c333"))
+print(re.find_all(r"(\w)=", "a=1 b=2"))
+print(re.sub(r"(\w+)@(\w+)", r"\2 at \1", "me@home you@work"))
+print(re.split(r"[,;]\s*", "a, b;c,d"))
+email = re.compile(r"^[\w.]+@[\w]+\.[a-z]{2,}$")
+for e in ["a.b@x.com", "bad@", "中@x.cn"]:
+    print(e, email.test(e))
+date = re.compile(r"(?P<y>\d{4})-(?P<m>\d{2})")
+dm = date.search("日期：2026-11 结束")!
+print(dm.named("y"), dm.named("m"), dm.start(), dm.text)
+print(re.compile(r"\s+").sub_fn(mm => "_", "a  b   c"))

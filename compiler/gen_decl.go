@@ -302,6 +302,7 @@ func (g *Gen) genClassMethods(td *TypeDecl) {
 		g.genDefaultStr("*"+st, td.Name, g.allFields(td), "self.")
 	}
 	g.line("func (self *%s) TypeNameꞏ() string { return %q }", st, td.Name)
+	g.genFields("*"+st, g.allFields(td), "", "")
 	if td.IsExc {
 		g.line("func (self *%s) ExcNameꞏ() string { return %q }", st, td.Name)
 	}
@@ -350,6 +351,23 @@ func (g *Gen) allFields(td *TypeDecl) []*Field {
 		out = append(out, fw.f)
 	}
 	return out
+}
+
+// genFields 生成 Fieldsꞏ 方法（json.dumps 等使用）。
+func (g *Gen) genFields(recv string, fields []*Field, extraName, extraVal string) {
+	var names, vals []string
+	if extraName != "" {
+		names = append(names, fmt.Sprintf("%q", extraName))
+		vals = append(vals, extraVal)
+	}
+	for _, f := range fields {
+		if strings.HasPrefix(f.Name, "_") {
+			continue
+		}
+		names = append(names, fmt.Sprintf("%q", f.Name))
+		vals = append(vals, "self."+f.GoName)
+	}
+	g.line("func (self %s) Fieldsꞏ() ([]string, []any) { return []string{%s}, []any{%s} }", recv, strings.Join(names, ", "), strings.Join(vals, ", "))
 }
 
 func (g *Gen) genDefaultStr(recv, name string, fields []*Field, prefix string) {
@@ -599,6 +617,7 @@ func (g *Gen) genStruct(td *TypeDecl) {
 		g.genDefaultStr(st, td.Name, td.Fields, "self.")
 	}
 	g.line("func (self %s) TypeNameꞏ() string { return %q }", st, td.Name)
+	g.genFields(st, td.Fields, "", "")
 	if eqM != nil {
 		g.line("func (self %s) Eqꞏ(o any) bool { x, ok := o.(%s); return ok && self.__eq__(x) }", st, g.typ(eqM.Sig.Params[0].T))
 	} else {
@@ -734,6 +753,7 @@ func (g *Gen) genADT(td *TypeDecl) {
 			g.genDefaultStr(vt, td.Name+"."+v.Name, v.Fields, "self.")
 		}
 		g.line("func (self %s) TypeNameꞏ() string { return %q }", vt, td.Name)
+		g.genFields(vt, v.Fields, "kind", fmt.Sprintf("%q", v.Name))
 		var conds []string
 		for _, f := range v.Fields {
 			conds = append(conds, fmt.Sprintf("%s.Equal(self.%s, x.%s)", g.rt(), f.GoName, f.GoName))

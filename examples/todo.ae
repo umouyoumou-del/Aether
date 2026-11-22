@@ -1,0 +1,76 @@
+# 待办事项：类 + 枚举 + JSON 持久化 + 文件操作
+import json
+import os
+
+enum Priority:
+    Low
+    Medium
+    High
+
+class Task:
+    id: int
+    title: str
+    priority: Priority = Priority.Medium
+    done: bool = false
+
+    def __str__(self) -> str:
+        mark = "✔" if self.done else " "
+        stars = "!" * (self.priority.value + 1)
+        return f"[{mark}] #{self.id} {self.title} {stars}"
+
+class TodoList:
+    tasks: list[Task] = []
+    next_id: int = 1
+
+    def add(self, title: str, priority: Priority = Priority.Medium) -> Task:
+        t = Task(self.next_id, title, priority)
+        self.tasks.append(t)
+        self.next_id += 1
+        return t
+
+    def complete(self, id: int):
+        for t in self.tasks:
+            if t.id == id:
+                t.done = true
+                return
+        raise KeyError(f"没有编号为 {id} 的任务")
+
+    def pending(self) -> list[Task]:
+        return self.tasks.filter(t => not t.done).sorted_by(t => -t.priority.value)
+
+    def save(self, path: str):
+        items = [{"id": t.id, "title": t.title, "priority": t.priority.name, "done": t.done} for t in self.tasks]
+        os.write_file(path, json.dumps(items, indent=2))
+
+    static def load(path: str) -> TodoList:
+        todo = TodoList()
+        for raw in json.loads_list(os.read_file(path)):
+            d = raw as dict[str, any]
+            pr = Priority.values().first(p => p.name == (d["priority"] as str)) ?? Priority.Medium
+            t = Task(d["id"] as int, d["title"] as str, pr, d["done"] as bool)
+            todo.tasks.append(t)
+            todo.next_id = max(todo.next_id, t.id + 1)
+        return todo
+
+todo = TodoList()
+todo.add("学习五行的语法", Priority.High)
+todo.add("写一个计算器")
+todo.add("喝杯茶", Priority.Low)
+todo.complete(2)
+for t in todo.tasks:
+    print(t)
+
+path = "todo_demo.json"
+todo.save(path)
+print("已保存到", path, "：")
+print(os.read_file(path))
+
+loaded = TodoList.load(path)
+print("重新加载后待完成：")
+for t in loaded.pending():
+    print(" ", t)
+try:
+    loaded.complete(99)
+except KeyError as e:
+    print("错误：", e)
+os.remove(path)

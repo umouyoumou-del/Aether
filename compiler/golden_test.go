@@ -158,3 +158,32 @@ func TestErrors(t *testing.T) {
 func init() {
 	_ = runtime.GOOS
 }
+
+// TestExamples 确保 examples 目录下的每个示例都能编译并正常运行。
+func TestExamples(t *testing.T) {
+	files, _ := filepath.Glob("../examples/*.ae")
+	sort.Strings(files)
+	cache := testCache(t)
+	for _, f := range files {
+		f := f
+		t.Run(strings.TrimSuffix(filepath.Base(f), ".ae"), func(t *testing.T) {
+			t.Parallel()
+			diag := &Diagnostics{}
+			prog := Load(f, assets.Lib(), diag)
+			src, err := Compile(prog, false, GenOptions{})
+			if err != nil {
+				t.Fatalf("编译失败：%v\n%s", err, diag.Format(false))
+			}
+			exe, err := BuildGo(src, BuildKey(f, "example"), BuildConfig{CacheDir: cache, RT: assets.RT()})
+			if err != nil {
+				t.Fatalf("%v", err)
+			}
+			cmd := exec.Command(exe)
+			cmd.Dir = t.TempDir()
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("运行失败：%v\n%s", err, out)
+			}
+		})
+	}
+}

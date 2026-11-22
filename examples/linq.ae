@@ -1,0 +1,68 @@
+# 数据处理：推导式（Python）+ 链式查询（C# LINQ）+ 生成器
+
+class Student:
+    name: str
+    grade: int
+    score: float
+    city: str
+
+students = [
+    Student("张三", 1, 88.5, "北京"),
+    Student("李四", 2, 92.0, "上海"),
+    Student("王五", 1, 75.0, "北京"),
+    Student("赵六", 3, 64.5, "广州"),
+    Student("钱七", 2, 98.5, "上海"),
+    Student("孙八", 3, 81.0, "北京"),
+]
+
+# 推导式
+top = [s.name for s in students if s.score >= 85]
+print("85 分以上：", top)
+
+# 链式：过滤 → 排序 → 映射
+ranking = students.filter(s => s.city != "广州").sorted_by(s => -s.score).map(s => f"{s.name}({s.score:g})")
+print("排名：", ranking)
+
+# 分组与聚合
+by_city = students.group_by(s => s.city)
+for city, group in by_city.items():
+    avg = sum(s.score for s in group) / len(group)
+    print(f"{city}: {len(group)} 人，平均 {avg:.2f}，最高 {group.max_by(s => s.score).name}")
+
+print("各年级人数：", {g: len(ss) for g, ss in students.group_by(s => s.grade).items()})
+print("是否都及格：", students.all(s => s.score >= 60), "有满分吗：", students.any(s => s.score == 100.0))
+
+scores = students.map(s => s.score)
+print(f"总分 {scores.sum():g}，平均 {scores.average():.3f}，最低 {scores.min()}，最高 {scores.max()}")
+
+# 按多个键排序（元组比较）
+for s in sorted(students, key=s => (s.grade, -s.score)):
+    print(f"  {s.grade} 年级 {s.name} {s.score:g}")
+
+# 生成器：惰性求值，无限序列
+def naturals() -> iter[int]:
+    n = 1
+    while true:
+        yield n
+        n += 1
+
+def is_prime(n: int) -> bool:
+    if n < 2:
+        return false
+    for d in range(2, n):
+        if d * d > n:
+            break
+        if n % d == 0:
+            return false
+    return true
+
+first_primes = naturals().filter(is_prime).take(15).to_list()
+print("前 15 个质数：", first_primes)
+print("1..100 中能被 7 整除的数之和：", sum(n for n in range(1, 101) if n % 7 == 0))
+
+words = "to be or not to be that is the question".split()
+freq = counter(words)
+print("词频：", freq.sorted_by_value(reverse=true).take(3))
+print("去重：", words.distinct())
+print("分块：", list(range(10)).chunk(4))
+print("配对：", ["a", "b", "c"].zip([1, 2, 3]))

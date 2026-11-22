@@ -1,0 +1,31 @@
+小明 18 [90, 85.5] false null
+小明 明年 19 岁
+2 85.5
+{"name": "小明", "age": 18, "scores": [90, 85.5], "admin": false, "tags": null}
+{
+  "b": [
+    1,
+    2,
+    {
+      "c": true
+    }
+  ],
+  "a": "x\"y"
+}
+{"name": "小红", "age": 20, "tags": ["dev", "ops"]}
+[{"age": 20, "name": "小红", "tags": ["dev", "ops"]}, {"age": 1, "name": "A", "tags": []}]
+[1, "two", 3.0]
+true false
+JSONError: JSON 解析失败：missing value after object key
+123-456 123 456 ["123", "456"] 4 7
+null
+abc
+["1", "22", "333"]
+["a", "b"]
+home at me work at you
+["a", "b", "c", "d"]
+a.b@x.com true
+bad@ false
+中@x.cn false
+2026 11 3 2026-11
+a_b_c

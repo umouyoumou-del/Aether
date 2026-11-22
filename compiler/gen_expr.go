@@ -423,6 +423,12 @@ func (g *Gen) binCode(op TokKind, x string, xt Type, y string, yt Type, rt Type)
 		if _, ok := xt.(*ListT); ok {
 			return x + ".Concat(" + y + ")"
 		}
+		if isStr(xt) && basicKind(yt) == BChar {
+			return "(" + x + " + " + r + ".CharStr(" + y + "))"
+		}
+		if basicKind(xt) == BChar && isStr(yt) {
+			return "(" + r + ".CharStr(" + x + ") + " + y + ")"
+		}
 		if basicKind(xt) == BChar && !isNumeric(xt) {
 			return "(" + x + " + " + r + ".Char(" + y + "))"
 		}

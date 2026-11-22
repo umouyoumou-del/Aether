@@ -1918,7 +1918,7 @@ func (p *parser) atom() Expr {
 			items = append(items, p.expr())
 		}
 		p.expect(TRParen, "元组")
-		return &TupleLit{exprBase: exprBase{Pos: t.Pos}, Elems: items}
+		return &TupleLit{exprBase: exprBase{Pos: t.Pos}, Elems: items, Paren: true}
 	case TLBrack:
 		p.advance()
 		ll := &ListLit{exprBase: exprBase{Pos: t.Pos}}

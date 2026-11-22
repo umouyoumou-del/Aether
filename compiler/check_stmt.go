@@ -401,6 +401,13 @@ func (c *Checker) assignTuple(tl *TupleLit, valueSlot *Expr, pos Pos) {
 	}
 	vt := c.expr(*valueSlot, nil)
 	if isInvalid(vt) {
+		for _, e := range tl.Elems {
+			if id, ok := e.(*Ident); ok && id.Name != "_" && c.targetSym(id) == nil {
+				sym := c.declareLocal(id.Name, tInvalid, id.Pos, false)
+				id.Sym = sym
+				c.flow.assigned[sym] = true
+			}
+		}
 		return
 	}
 	switch x := vt.(type) {

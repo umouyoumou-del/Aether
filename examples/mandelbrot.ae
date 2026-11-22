@@ -1,0 +1,40 @@
+# 用字符画 Mandelbrot 集合，并测一测原生编译的浮点性能
+import time
+
+const CHARS = " .:-=+*#%@"
+
+def escape_time(cr: float, ci: float, limit: int) -> int:
+    zr = 0.0
+    zi = 0.0
+    for i in range(limit):
+        zr2 = zr * zr
+        zi2 = zi * zi
+        if zr2 + zi2 > 4.0:
+            return i
+        zi = 2.0 * zr * zi + ci
+        zr = zr2 - zi2 + cr
+    return limit
+
+def render(width: int, height: int, limit: int) -> list[str]:
+    lines: list[str] = []
+    for row in range(height):
+        ci = -1.2 + 2.4 * row / height
+        line = ""
+        for col in range(width):
+            cr = -2.1 + 3.0 * col / width
+            n = escape_time(cr, ci, limit)
+            line += CHARS[n * (len(CHARS) - 1) // limit]
+        lines.append(line)
+    return lines
+
+for line in render(72, 28, 200):
+    print(line)
+
+# 计时：1000x1000 像素，每点最多 500 次迭代
+start = time.monotonic()
+total = 0
+for row in range(1000):
+    ci = -1.2 + 2.4 * row / 1000
+    for col in range(1000):
+        total += escape_time(-2.1 + 3.0 * col / 1000, ci, 500)
+print(f"一百万个点共迭代 {total} 次，用时 {time.monotonic() - start:.2f} 秒")

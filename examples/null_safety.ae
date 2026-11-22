@@ -1,0 +1,59 @@
+# 空安全（C# / Kotlin 风格）：T? 类型、?.、??、!、智能窄化
+
+class Address:
+    city: str
+    street: str? = null
+
+class User:
+    name: str
+    email: str? = null
+    address: Address? = null
+
+users = [
+    User("小明", "ming@example.com", Address("北京", "长安街")),
+    User("小红", address=Address("上海")),
+    User("小刚"),
+]
+
+for u in users:
+    # ?. 安全访问：链上任何一环为 null，结果就是 null
+    city = u.address?.city ?? "未知城市"
+    street = u.address?.street ?? "（无街道）"
+    print(f"{u.name:<4} 城市：{city:<6} 街道：{street:<6} 邮箱：{u.email ?? "—"}")
+
+def email_domain(u: User) -> str?:
+    if u.email == null:
+        return null
+    # 这里 u.email 不能窄化（字段可能被修改），先存到局部变量
+    e = u.email!
+    return e.split("@")[1]
+
+for u in users:
+    print(u.name, "邮箱域名：", email_domain(u) ?? "无")
+
+def describe(x: int?) -> str:
+    if x == null:
+        return "空"
+    # 编译器知道这里 x 一定不是 null，类型已窄化为 int
+    return "正数" if x > 0 else "非正数"
+
+print(describe(null), describe(5), describe(-1))
+
+# 可空值不能直接使用——下面这行会编译报错：
+#   print(users[1].email.upper())
+#   错误: 值可能为 null，不能直接调用 .upper()
+
+lengths = [len(u.email ?? "") for u in users]
+print("邮箱长度：", lengths)
+
+# dict.get 返回可空值
+stock = {"苹果": 10, "香蕉": 0}
+for fruit in ["苹果", "榴莲"]:
+    n = stock.get(fruit)
+    print(fruit, "库存", n ?? -1, "（未上架）" if n == null else "")
+
+# ! 断言非空；断言失败抛出 NullError
+try:
+    print(users[2].email!.upper())
+except NullError as err:
+    print("NullError：", err)

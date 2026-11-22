@@ -488,8 +488,14 @@ func (c *Checker) validElem(t Type, pos Pos, what string) Type {
 	return t
 }
 
-// inferElems 检查一组表达式并求出公共类型。
-func (c *Checker) inferElems(elems []Expr, what string) Type {
+// inferElems 检查一组表达式并求出公共类型。anyCtx 为真时（期望类型是 any），
+// 元素类型不一致会退化为 any，而不是报错（便于书写 JSON 风格的数据）。
+func (c *Checker) inferElems(elems []Expr, what string, anyCtx ...bool) Type {
+	ctx := len(anyCtx) > 0 && anyCtx[0]
+	var hint Type
+	if ctx {
+		hint = tAny
+	}
 	var et Type
 	types := make([]Type, len(elems))
 	// 先检查非字面量，避免 [1, 2.5] 之类按 int 推断
@@ -497,7 +503,7 @@ func (c *Checker) inferElems(elems []Expr, what string) Type {
 		if isUntypedLit(x) {
 			continue
 		}
-		types[i] = c.validElem(c.expr(x, nil), x.P(), what)
+		types[i] = c.validElem(c.expr(x, hint), x.P(), what)
 	}
 	for i, x := range elems {
 		if types[i] != nil {
@@ -511,6 +517,10 @@ func (c *Checker) inferElems(elems []Expr, what string) Type {
 			continue
 		}
 		j := c.join(et, t)
+		if j == nil && ctx {
+			et = tAny
+			continue
+		}
 		if j == nil {
 			d := c.errorf(elems[i].P(), "%s的类型不一致：前面是 %s，这里是 %s", what, et, t)
 			d.Notes = append(d.Notes, "如果确实需要混合类型，可以把容器声明为 any 元素，例如 xs: list[any] = [...]")
@@ -519,8 +529,12 @@ func (c *Checker) inferElems(elems []Expr, what string) Type {
 		et = j
 	}
 	if isNull(et) {
-		c.errorf(elems[0].P(), "无法从 null 推断%s的类型，请写出类型注解", what)
-		return tInvalid
+		if ctx {
+			et = tAny
+		} else {
+			c.errorf(elems[0].P(), "无法从 null 推断%s的类型，请写出类型注解", what)
+			return tInvalid
+		}
 	}
 	for i := range elems {
 		c.convert(&elems[i], types[i], et, what)
@@ -550,7 +564,14 @@ func (c *Checker) listLit(e *ListLit, want Type) Type {
 		}
 		return &ListT{elemWant}
 	}
-	et := c.inferElems(e.Elems, "列表元素")
+	if isAny(want) {
+		et := c.inferElems(e.Elems, "列表元素", true)
+		if isInvalid(et) {
+			return tInvalid
+		}
+		return &ListT{et}
+	}
+	et := c.inferElems(e.Elems, "列表元素", true)
 	if isInvalid(et) {
 		return tInvalid
 	}
@@ -603,7 +624,7 @@ func (c *Checker) dictLit(e *DictLit, want Type) Type {
 		return dt
 	}
 	kt = c.inferElems(e.Keys, "字典的键")
-	vt = c.inferElems(e.Vals, "字典的值")
+	vt = c.inferElems(e.Vals, "字典的值", true)
 	if isInvalid(kt) || isInvalid(vt) {
 		return tInvalid
 	}
@@ -885,6 +906,9 @@ func (c *Checker) binary(e *Binary, want Type) Type {
 	switch e.Op {
 	case TPlus:
 		if isStr(xt) && isStr(yt) {
+			return tStr
+		}
+		if (isStr(xt) && basicKind(yt) == BChar) || (basicKind(xt) == BChar && isStr(yt)) {
 			return tStr
 		}
 		if lx, ok := xt.(*ListT); ok {
@@ -1597,7 +1621,7 @@ func exprToTypeExpr(e Expr) (TypeExpr, bool) {
 }
 
 func indexTypeArgs(idx Expr) ([]TypeExpr, bool) {
-	if tl, ok := idx.(*TupleLit); ok {
+	if tl, ok := idx.(*TupleLit); ok && !tl.Paren {
 		var out []TypeExpr
 		for _, el := range tl.Elems {
 			te, ok := exprToTypeExpr(el)

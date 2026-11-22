@@ -1,0 +1,42 @@
+# 内置测试：用  aether test testing.ae  运行文件中的 test 块
+# （用 aether run 运行时，test 块会被忽略，只执行 main）
+
+def is_palindrome(s: str) -> bool:
+    cleaned = [c.lower() for c in s if c.isalnum()]
+    return cleaned == cleaned.reversed()
+
+def fizzbuzz(n: int) -> str:
+    if n % 15 == 0:
+        return "FizzBuzz"
+    if n % 3 == 0:
+        return "Fizz"
+    if n % 5 == 0:
+        return "Buzz"
+    return str(n)
+
+def safe_div(a: int, b: int) -> int:
+    if b == 0:
+        raise ZeroDivisionError("除数为零")
+    return a // b
+
+test "回文":
+    assert is_palindrome("A man, a plan, a canal: Panama")
+    assert is_palindrome("上海自来水来自海上")
+    assert not is_palindrome("五行")
+
+test "FizzBuzz":
+    got = [fizzbuzz(i) for i in range(1, 16)]
+    assert got[2] == "Fizz"
+    assert got[4] == "Buzz"
+    assert got[14] == "FizzBuzz"
+    assert got.count("Fizz") == 4
+
+test "异常":
+    try:
+        safe_div(1, 0)
+        assert false, "应该抛出异常"
+    except ZeroDivisionError as e:
+        assert e.message == "除数为零"
+
+def main():
+    print([fizzbuzz(i) for i in range(1, 16)])

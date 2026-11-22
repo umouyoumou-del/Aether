@@ -82,6 +82,7 @@ type SetLit struct {
 type TupleLit struct {
 	exprBase
 	Elems []Expr
+	Paren bool // 写成了 (a, b)；用于区分 chan[(int, int)] 与 dict[str, int]
 }
 
 type DictLit struct {

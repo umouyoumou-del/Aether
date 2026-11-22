@@ -1,0 +1,217 @@
+# 一个小型表达式计算器：词法分析 → 语法分析 → 求值
+# 展示：枚举（代数数据类型）、模式匹配、递归、异常、类
+
+enum Token:
+    Num(value: float)
+    Ident(name: str)
+    Op(symbol: char)
+    LParen
+    RParen
+    End
+
+class CalcError(Exception):
+    pass
+
+def tokenize(src: str) -> list[Token]:
+    tokens: list[Token] = []
+    i = 0
+    while i < len(src):
+        c = src[i]
+        if c.isspace():
+            i += 1
+        elif c.isdigit() or c == '.':
+            start = i
+            while i < len(src) and (src[i].isdigit() or src[i] == '.'):
+                i += 1
+            tokens.append(Token.Num(float(src[start:i])))
+        elif c.isalpha():
+            start = i
+            while i < len(src) and src[i].isalnum():
+                i += 1
+            tokens.append(Token.Ident(src[start:i]))
+        elif c in "+-*/^%":
+            tokens.append(Token.Op(c))
+            i += 1
+        elif c == '(':
+            tokens.append(Token.LParen)
+            i += 1
+        elif c == ')':
+            tokens.append(Token.RParen)
+            i += 1
+        else:
+            raise CalcError(f"无法识别的字符 '{c}'（位置 {i}）")
+    tokens.append(Token.End)
+    return tokens
+
+enum Expr:
+    Number(value: float)
+    Var(name: str)
+    Unary(op: char, operand: Expr)
+    Binary(op: char, left: Expr, right: Expr)
+    Call(func: str, arg: Expr)
+
+class Parser:
+    tokens: list[Token]
+    pos: int = 0
+
+    def peek(self) -> Token:
+        return self.tokens[self.pos]
+
+    def advance(self) -> Token:
+        t = self.tokens[self.pos]
+        self.pos += 1
+        return t
+
+    def expect_rparen(self):
+        match self.advance():
+            case RParen:
+                pass
+            case _:
+                raise CalcError("缺少右括号 )")
+
+    # expr := term (('+' | '-') term)*
+    def expr(self) -> Expr:
+        left = self.term()
+        while true:
+            match self.peek():
+                case Op(c) if c == '+' or c == '-':
+                    self.advance()
+                    left = Expr.Binary(c, left, self.term())
+                case _:
+                    return left
+
+    # term := unary (('*' | '/' | '%') unary)*
+    def term(self) -> Expr:
+        left = self.unary()
+        while true:
+            match self.peek():
+                case Op(c) if c in "*/%":
+                    self.advance()
+                    left = Expr.Binary(c, left, self.unary())
+                case _:
+                    return left
+
+    # unary := '-' unary | power      （所以 -x^2 表示 -(x^2)）
+    def unary(self) -> Expr:
+        match self.peek():
+            case Op('-'):
+                self.advance()
+                return Expr.Unary('-', self.unary())
+            case _:
+                return self.power()
+
+    # power := atom ('^' unary)?      （右结合：2^3^2 = 2^9）
+    def power(self) -> Expr:
+        base = self.atom()
+        match self.peek():
+            case Op('^'):
+                self.advance()
+                return Expr.Binary('^', base, self.unary())
+            case _:
+                return base
+
+    def atom(self) -> Expr:
+        match self.advance():
+            case Num(v):
+                return Expr.Number(v)
+            case Ident(name):
+                match self.peek():
+                    case LParen:
+                        self.advance()
+                        arg = self.expr()
+                        self.expect_rparen()
+                        return Expr.Call(name, arg)
+                    case _:
+                        return Expr.Var(name)
+            case LParen:
+                e = self.expr()
+                self.expect_rparen()
+                return e
+            case t:
+                raise CalcError(f"意外的记号 {t}")
+
+def parse(src: str) -> Expr:
+    p = Parser(tokenize(src))
+    e = p.expr()
+    match p.peek():
+        case End:
+            return e
+        case t:
+            raise CalcError(f"表达式后面有多余的内容：{t}")
+
+import math
+
+def evaluate(e: Expr, env: dict[str, float]) -> float:
+    match e:
+        case Number(v):
+            return v
+        case Var(name):
+            if name not in env:
+                raise CalcError(f"未定义的变量 {name}")
+            return env[name]
+        case Unary(_, x):
+            return -evaluate(x, env)
+        case Binary(op, l, r):
+            a = evaluate(l, env)
+            b = evaluate(r, env)
+            match op:
+                case '+':
+                    return a + b
+                case '-':
+                    return a - b
+                case '*':
+                    return a * b
+                case '/':
+                    if b == 0.0:
+                        raise CalcError("除数不能为零")
+                    return a / b
+                case '%':
+                    return a % b
+                case _:
+                    return a ** b
+        case Call(f, x):
+            v = evaluate(x, env)
+            match f:
+                case "sqrt":
+                    return math.sqrt(v)
+                case "sin":
+                    return math.sin(v)
+                case "cos":
+                    return math.cos(v)
+                case "abs":
+                    return abs(v)
+                case _:
+                    raise CalcError(f"未知的函数 {f}")
+
+def show(e: Expr) -> str:
+    match e:
+        case Number(v):
+            return str(v)
+        case Var(n):
+            return n
+        case Unary(op, x):
+            return f"({op}{show(x)})"
+        case Binary(op, l, r):
+            return f"({show(l)} {op} {show(r)})"
+        case Call(f, x):
+            return f"{f}({show(x)})"
+
+env = {"pi": math.pi, "e": math.e, "x": 3.0}
+inputs = [
+    "1 + 2 * 3",
+    "(1 + 2) * 3",
+    "2 ^ 3 ^ 2",
+    "-x ^ 2 + 10",
+    "sqrt(16) + abs(-2.5)",
+    "sin(pi / 2) * 100",
+    "10 / (5 - 5)",
+    "y + 1",
+    "3 $ 4",
+    "(1 + 2",
+]
+for src in inputs:
+    try:
+        tree = parse(src)
+        print(f"{src:<22} => {show(tree):<28} = {evaluate(tree, env):g}")
+    except CalcError as err:
+        print(f"{src:<22} => 错误：{err}")
