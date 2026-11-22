@@ -1,0 +1,18 @@
+def find(xs: list[str], target: str) -> str?:
+    for x in xs:
+        if x == target:
+            return x
+    return null
+
+r = find(["a"], "a")
+print(r.upper())              # 错误: 值可能为 null
+print(len(r))                 # 错误: 值可能为 null
+if r != null:
+    print(r.upper())
+print(r?.upper())
+print(r ?? "默认")
+s: str = null                 # 错误: 类型不匹配
+def f(x: str?) -> int:
+    if x == null:
+        return 0
+    return len(x)

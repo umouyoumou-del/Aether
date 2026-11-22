@@ -1,0 +1,47 @@
+# 模块、标准库、文件读写
+import geo.shapes as gs
+from geo.shapes import Point, area_of_circle
+import math
+import random
+import os
+import time
+
+p = Point(3.0, 4.0)
+o = gs.origin()
+print(p.dist(o), gs.UNIT, gs.created)
+print(f"{area_of_circle(2.0):.4f}")
+print(math.sqrt(16), math.floor(2.7), math.ceil(2.1), math.gcd(12, 18), math.factorial(10))
+print(f"{math.pi:.5f} {math.e:.5f} {math.sin(0.0)} {math.log(math.e)} {math.log(8, 2)}")
+print(math.inf > 1e308, math.isnan(math.nan))
+random.seed(42)
+xs = [random.randint(1, 100) for _ in range(5)]
+print(len(xs), all(1 <= x <= 100 for x in xs))
+deck = list(range(10))
+random.shuffle(deck)
+print(sorted(deck) == list(range(10)))
+print(random.choice(["a", "b", "c"]) in ["a", "b", "c"])
+start = time.monotonic()
+time.sleep(0.01)
+print(time.monotonic() - start >= 0.01)
+
+path = "aether_test_tmp.txt"
+with open(path, "w") as f:
+    f.write("第一行\n")
+    f.write_line("第二行")
+    f.write("third line\n")
+with open(path) as f:
+    for line in f:
+        print("读取:", line)
+print(os.read_file(path).splitlines())
+os.append_file(path, "追加\n")
+print(len(os.read_lines(path)), os.exists(path), os.file_size(path) > 0)
+os.remove(path)
+print(os.exists(path))
+try:
+    open("不存在的文件.txt")
+except FileNotFoundError as e:
+    print("FileNotFoundError:", e)
+except IOError as e:
+    print("IOError", e)
+print(os.basename("a/b/c.txt"), os.extension("x.tar.gz"))
+print(os.getenv("AETHER_SURELY_UNSET_VAR") ?? "未设置")

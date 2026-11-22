@@ -1,0 +1,38 @@
+abstract class Animal:
+    abstract def speak(self) -> str
+
+class Dog(Animal):
+    def speak(self) -> str:
+        return "汪"
+
+class Cat(Animal):            # 错误: 没有实现抽象成员 speak
+    pass
+
+a = Animal()                  # 错误: 抽象类 Animal 不能被实例化
+
+interface Flyer:
+    def fly(self) -> str
+
+class Bird(Flyer):            # 错误: 声明实现接口 Flyer
+    def sing(self) -> str:
+        return "啾"
+
+class P:
+    x: int
+
+p = P(1)
+p.y = 2                       # 错误: 没有成员 y
+print(p.x.foo)                # 错误: 没有成员 foo
+
+class Q(Dog):
+    override def bark(self):  # 错误: 标记了 override
+        pass
+
+enum Color:
+    Red
+    Green
+
+c = Color.Purple              # 错误: 没有静态成员 Purple
+match Color.Red:              # 警告: match 没有覆盖
+    case Red:
+        pass

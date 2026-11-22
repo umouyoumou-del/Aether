@@ -169,6 +169,9 @@ func GoGuard() {
 	}
 }
 
+// Val 返回参数本身；用于阻止 Go 编译器以任意精度折叠常量表达式。
+func Val[T any](x T) T { return x }
+
 // If 是简单条件表达式的辅助函数（两个分支都已求值）。
 func If[T any](c bool, a, b T) T {
 	if c {

@@ -1,0 +1,150 @@
+# 异常处理、finally、with、defer
+class InsufficientFunds(Exception):
+    needed: float
+
+    def __init__(self, needed: float):
+        super().__init__(f"余额不足，还差 {needed}")
+        self.needed = needed
+
+def withdraw(balance: float, amount: float) -> float:
+    if amount <= 0:
+        raise ValueError("金额必须为正数")
+    if amount > balance:
+        raise InsufficientFunds(amount - balance)
+    return balance - amount
+
+for amt in [30.0, -5.0, 500.0]:
+    try:
+        print("剩余", withdraw(100.0, amt))
+    except InsufficientFunds as e:
+        print("失败：", e.message, e.needed)
+    except ValueError as e:
+        print("参数错误：", e)
+    finally:
+        print("  (本次处理结束)")
+
+def risky(n: int) -> int:
+    xs = [1, 2, 3]
+    return xs[n]
+
+try:
+    risky(10)
+except IndexError as e:
+    print("捕获 IndexError:", e)
+
+try:
+    d = {"a": 1}
+    print(d["b"])
+except KeyError as e:
+    print("捕获 KeyError:", e)
+
+try:
+    print(10 // 0)
+except ZeroDivisionError as e:
+    print("捕获:", e)
+
+try:
+    print(int("abc"))
+except ValueError as e:
+    print("捕获:", e)
+else:
+    print("不会执行")
+
+try:
+    print(int("42"))
+except ValueError:
+    print("不会执行")
+else:
+    print("没有异常，执行 else")
+
+def find(xs: list[int], target: int) -> int:
+    for i, x in enumerate(xs):
+        try:
+            if x == target:
+                return i
+        finally:
+            pass
+    return -1
+
+print(find([5, 6, 7], 6), find([5, 6, 7], 9))
+
+def loop_with_try() -> list[int]:
+    out: list[int] = []
+    for i in range(10):
+        try:
+            if i == 2:
+                continue
+            if i == 5:
+                break
+            out.append(i)
+        except Exception:
+            pass
+    return out
+
+print(loop_with_try())
+
+def nested() -> str:
+    try:
+        try:
+            raise RuntimeError("内层")
+        except ValueError:
+            return "错误的处理器"
+        finally:
+            print("内层 finally")
+    except RuntimeError as e:
+        return "外层捕获：" + e.message
+    return "不会到这里"
+
+print(nested())
+
+def reraise():
+    try:
+        raise TypeError("原始错误")
+    except TypeError:
+        print("记录后重新抛出")
+        raise
+
+try:
+    reraise()
+except TypeError as e:
+    print("最终捕获:", e)
+
+class Resource:
+    name: str
+    def __enter__(self) -> Resource:
+        print("打开", self.name)
+        return self
+    def __exit__(self):
+        print("关闭", self.name)
+
+with Resource("A") as r, Resource("B"):
+    print("使用", r.name)
+
+def with_return() -> int:
+    with Resource("C"):
+        return 42
+    return 0
+
+print(with_return())
+
+def deferred():
+    defer print("defer 1")
+    defer print("defer 2")
+    print("函数体")
+
+deferred()
+
+def null_demo(s: str?) -> int:
+    return len(s ?? "")
+
+print(null_demo(null), null_demo("abc"))
+try:
+    x: str? = null
+    print(x!)
+except NullError as e:
+    print("捕获 NullError:", e)
+
+try:
+    raise Exception("普通异常")
+except Exception as e:
+    print(type_name(e), e)

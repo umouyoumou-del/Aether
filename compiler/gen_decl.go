@@ -8,6 +8,7 @@ import (
 
 func (g *Gen) genTypeDecl(td *TypeDecl) {
 	g.w = &g.decls
+	g.resetLine()
 	g.subst = nil
 	g.self = nil
 	switch td.Kind {
@@ -138,6 +139,7 @@ func (g *Gen) genFunc(fd *FuncDecl) {
 	g.funcBody(fd.Fn, fd.Body, sig)
 	g.ind--
 	g.line("}")
+	g.resetLine()
 	g.line("")
 }
 
@@ -391,6 +393,7 @@ func (g *Gen) genMethodCopy(w methodWork) {
 		}
 		g.ind--
 		g.line("}")
+		g.resetLine()
 		g.line("")
 		g.subst, g.self, g.fn = saveSubst, saveSelf, saveFn
 		return
@@ -404,6 +407,7 @@ func (g *Gen) genMethodCopy(w methodWork) {
 	g.funcBody(fd.Fn, fd.Body, sig)
 	g.ind--
 	g.line("}")
+	g.resetLine()
 	g.line("")
 	g.subst, g.self, g.fn = saveSubst, saveSelf, saveFn
 }
@@ -475,6 +479,7 @@ func (g *Gen) genCtor(td *TypeDecl) {
 	g.line("return self")
 	g.ind--
 	g.line("}")
+	g.resetLine()
 	g.line("")
 }
 
@@ -517,6 +522,7 @@ func (g *Gen) genFreeMethod(td *TypeDecl, m *Method) {
 	g.funcBody(fd.Fn, fd.Body, sig)
 	g.ind--
 	g.line("}")
+	g.resetLine()
 	g.line("")
 	g.subst, g.self = saveSubst, saveSelf
 }
@@ -560,6 +566,7 @@ func (g *Gen) genStruct(td *TypeDecl) {
 		g.funcBody(fd.Fn, fd.Body, m.Sig)
 		g.ind--
 		g.line("}")
+		g.resetLine()
 		g.line("")
 	}
 	for _, p := range td.PropList {
@@ -599,11 +606,11 @@ func (g *Gen) genStruct(td *TypeDecl) {
 		for _, f := range td.Fields {
 			conds = append(conds, fmt.Sprintf("%s.Equal(self.%s, x.%s)", g.rt(), f.GoName, f.GoName))
 		}
-		c := "true"
 		if len(conds) > 0 {
-			c = strings.Join(conds, " && ")
+			g.line("func (self %s) Eqꞏ(o any) bool { x, ok := o.(%s); return ok && %s }", st, st, strings.Join(conds, " && "))
+		} else {
+			g.line("func (self %s) Eqꞏ(o any) bool { _, ok := o.(%s); return ok }", st, st)
 		}
-		g.line("func (self %s) Eqꞏ(o any) bool { x, ok := o.(%s); return ok && %s }", st, st, c)
 	}
 	for _, f := range td.Fields {
 		if g.ifaceProps[f.Name] && td.Props[f.Name] == nil {
@@ -670,6 +677,7 @@ func (g *Gen) genEnum(td *TypeDecl) {
 		g.funcBody(fd.Fn, fd.Body, m.Sig)
 		g.ind--
 		g.line("}")
+		g.resetLine()
 		g.line("")
 	}
 	for _, p := range td.PropList {
@@ -730,11 +738,11 @@ func (g *Gen) genADT(td *TypeDecl) {
 		for _, f := range v.Fields {
 			conds = append(conds, fmt.Sprintf("%s.Equal(self.%s, x.%s)", g.rt(), f.GoName, f.GoName))
 		}
-		c := "true"
 		if len(conds) > 0 {
-			c = strings.Join(conds, " && ")
+			g.line("func (self %s) Eqꞏ(o any) bool { x, ok := o.(%s); return ok && %s }", vt, vt, strings.Join(conds, " && "))
+		} else {
+			g.line("func (self %s) Eqꞏ(o any) bool { _, ok := o.(%s); return ok }", vt, vt)
 		}
-		g.line("func (self %s) Eqꞏ(o any) bool { x, ok := o.(%s); return ok && %s }", vt, vt, c)
 		for _, m := range td.MethodList {
 			if m.Static || len(m.Sig.TParams) > 0 || m.Name == "__str__" {
 				continue
@@ -786,6 +794,7 @@ func (g *Gen) genADT(td *TypeDecl) {
 		g.funcBody(fd.Fn, fd.Body, m.Sig)
 		g.ind--
 		g.line("}")
+		g.resetLine()
 		g.line("")
 	}
 	for _, p := range td.PropList {
@@ -829,6 +838,7 @@ func (g *Gen) genExt(x *ExtBlock) {
 		g.funcBody(fd.Fn, fd.Body, m.Sig)
 		g.ind--
 		g.line("}")
+		g.resetLine()
 		g.line("")
 	}
 	names := make([]string, 0, len(x.Props))

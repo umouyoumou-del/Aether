@@ -310,9 +310,9 @@ func AssertFail(src string, msg string) {
 
 // AssertEqFail 抛出带有左右值的 AssertionError。
 func AssertEqFail(src, op, left, right, msg string) {
-	text := fmt.Sprintf("断言失败：%s\n    左边：%s\n    右边：%s", src, left, right)
+	text := fmt.Sprintf("断言失败：%s\n  左边：%s\n  右边：%s", src, left, right)
 	if msg != "" {
-		text = msg + "\n    " + text
+		text = fmt.Sprintf("%s（%s）\n  左边：%s\n  右边：%s", msg, src, left, right)
 	}
 	panic(&Thrown{Exc: &Error{Kind: "AssertionError", Msg: text}, PCs: callers(3)})
 }

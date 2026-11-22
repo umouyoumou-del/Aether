@@ -253,9 +253,14 @@ func Check(mods []*Module, diag *Diagnostics, testMode bool) (c *Checker) {
 	c = &Checker{diag: diag, Mods: mods, exts: map[string][]*ExtBlock{}, implCache: map[string]bool{}, TestMode: testMode, constBusy: map[*ConstDecl]bool{}}
 	defer func() {
 		if r := recover(); r != nil {
-			if _, ok := r.(tooManyErrors); !ok {
-				panic(r)
+			if _, ok := r.(tooManyErrors); ok {
+				return
 			}
+			if diag.HasErrors() {
+				// 已有错误时，后续阶段的崩溃通常是连锁反应，忽略即可
+				return
+			}
+			panic(r)
 		}
 	}()
 	c.setupUniverse()
@@ -289,9 +294,6 @@ func Check(mods []*Module, diag *Diagnostics, testMode bool) (c *Checker) {
 		}
 	}
 	c.resolveAll()
-	if diag.HasErrors() {
-		return c
-	}
 	c.checkFieldDefaults()
 	// __init__ 方法体（字段推断）
 	c.initPhase = true

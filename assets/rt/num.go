@@ -2,6 +2,7 @@ package rt
 
 import (
 	"math"
+	"strconv"
 )
 
 // FloorDiv 实现整数的 //（向下取整，与 Python 一致）。
@@ -142,10 +143,16 @@ func Round(x float64) int {
 	return int(math.RoundToEven(x))
 }
 
-// RoundN 实现 round(x, n)。
+// RoundN 实现 round(x, n)：按浮点数的精确值四舍六入五取偶（与 Python 一致）。
 func RoundN(x float64, n int) float64 {
 	if math.IsNaN(x) || math.IsInf(x, 0) {
 		return x
+	}
+	if n >= 0 && n <= 17 {
+		v, err := strconv.ParseFloat(strconv.FormatFloat(x, 'f', n, 64), 64)
+		if err == nil {
+			return v
+		}
 	}
 	p := math.Pow(10, float64(n))
 	v := math.RoundToEven(x * p)

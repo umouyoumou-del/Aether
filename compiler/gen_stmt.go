@@ -633,7 +633,7 @@ func (g *Gen) loopHead(target Expr, iter Expr, info *LoopInfo, body []Stmt) (str
 		default:
 			src = inner
 		}
-		return fmt.Sprintf("for %s, %s := range %s.Enumerate(%s, %s)", "_", cnt, rt, src, start), func() {
+		return fmt.Sprintf("for %s := range %s.Enumerate(%s, %s)", cnt, rt, src, start), func() {
 			g.line("%s, %s := %s.V0, %s.V1", idx, val, cnt, cnt)
 			bind()
 		}
@@ -913,6 +913,7 @@ func (g *Gen) withStmt(s *WithStmt, items []*WithItem) {
 	g.line("{")
 	g.ind++
 	w := g.tmp()
+	g.posAgain(item.Pos)
 	g.line("%s := %s", w, g.expr(item.X))
 	wx := &goExpr{exprBase{Pos: item.X.P(), T: item.X.Typ()}, w}
 	val := w
@@ -979,6 +980,7 @@ func (g *Gen) goDefer(e Expr, word string) {
 	if len(pre) > 0 {
 		g.line("{")
 		g.ind++
+		g.posAgain(e.P())
 		for _, p := range pre {
 			g.line("%s", p)
 		}
@@ -1022,6 +1024,7 @@ func (g *Gen) assertStmt(s *AssertStmt) {
 				test := g.expr(cmp)
 				cmp.Xs = save
 				g.line("if %s, %s := %s, %s; !%s {", l, r, g.expr(a), g.expr(b), test)
+				g.posAgain(s.Pos)
 				g.line("\t%s.AssertEqFail(%q, %q, %s.Repr(%s), %s.Repr(%s), %s)", rt, s.Src, cmp.Ops[0].String(), rt, l, rt, r, msg)
 				g.line("}")
 				return
@@ -1029,6 +1032,7 @@ func (g *Gen) assertStmt(s *AssertStmt) {
 		}
 	}
 	g.line("if !(%s) {", g.cond(s.Cond))
+	g.posAgain(s.Pos)
 	g.line("\t%s.AssertFail(%q, %s)", rt, s.Src, msg)
 	g.line("}")
 }
@@ -1104,6 +1108,7 @@ func (g *Gen) matchStmt(s *MatchStmt) {
 	g.line("{")
 	g.ind++
 	subj := g.tmp()
+	g.posAgain(s.Pos)
 	g.line("%s := %s", subj, g.expr(s.Subject))
 	g.line("_ = %s", subj)
 	done := ""

@@ -1,0 +1,139 @@
+# 生成器、闭包、协程、通道、select、async/await、扩展方法
+import time
+
+def countdown(n: int) -> iter[int]:
+    while n > 0:
+        yield n
+        n -= 1
+
+print(list(countdown(5)))
+
+def fib_gen() -> iter[int]:
+    a, b = 0, 1
+    while true:
+        yield a
+        a, b = b, a + b
+
+print(fib_gen().take(10).to_list())
+for i, f in enumerate(fib_gen()):
+    if i >= 5:
+        break
+    print(f)
+
+def make_counter() -> fn() -> int:
+    count = 0
+    def inc() -> int:
+        count += 1
+        return count
+    return inc
+
+counter1 = make_counter()
+counter1()
+counter1()
+print("计数器:", counter1())
+
+adders = [(x: int) => x + n for n in range(3)]
+print([f(10) for f in adders])
+
+def apply_twice(f: fn(int) -> int, x: int) -> int:
+    return f(f(x))
+
+print(apply_twice(x => x * 3, 2))
+
+def worker(id: int, jobs: chan[int], results: chan[str]):
+    for j in jobs:
+        results.send(f"工人{id} 处理了任务{j}")
+
+jobs = chan[int](10)
+results = chan[str](10)
+for w in range(3):
+    go worker(w, jobs, results)
+for j in range(6):
+    jobs.send(j)
+jobs.close()
+out: list[str] = []
+for _ in range(6):
+    out.append(results.recv())
+print(len(out), "个结果")
+
+wg = WaitGroup()
+mu = Mutex()
+total = 0
+
+def add_one():
+    with mu:
+        total += 1
+    wg.done()
+
+for i in range(100):
+    wg.add(1)
+    go add_one()
+wg.wait()
+print("total =", total)
+
+# select 与超时
+fast = chan[str](1)
+def producer(ch: chan[str], delay: float, msg: str):
+    time.sleep(delay)
+    ch.send(msg)
+
+go producer(fast, 0.01, "快")
+select:
+    case m = fast.recv():
+        print("收到", m)
+    case time.after(1.0).recv():
+        print("超时")
+
+slow = chan[str](1)
+go producer(slow, 0.5, "慢")
+select:
+    case m = slow.recv():
+        print("收到", m)
+    case time.after(0.05).recv():
+        print("超时了")
+
+# async / await
+async def square(x: int) -> int:
+    time.sleep(0.01)
+    return x * x
+
+tasks = [square(i) for i in range(5)]
+print("结果:", await tasks)
+t = square(7)
+print("单个:", await t)
+
+async def fails() -> int:
+    raise ValueError("任务失败")
+
+try:
+    await fails()
+except ValueError as e:
+    print("捕获任务异常:", e)
+
+# 扩展方法
+extend str:
+    def shout(self) -> str:
+        return self.upper() + "!"
+
+extend[T] list[T]:
+    def second(self) -> T:
+        return self[1]
+
+print("hello".shout(), [1, 2, 3].second(), ["a", "b"].second())
+
+extend int:
+    def times(self, f: fn(int)):
+        for i in range(self):
+            f(i)
+
+3.times(i => print("第", i, "次"))
+
+# 原子计数
+counter = AtomicInt()
+wg2 = WaitGroup()
+for i in range(50):
+    wg2.spawn(() => counter.incr())
+wg2.wait()
+print("atomic =", counter.get())
+results2 = [1, 2, 3, 4].parallel_map(x => x * x)
+print(results2)

@@ -80,6 +80,7 @@ type Gen struct {
 	work     []methodWork
 	srcPath  map[*SourceFile]string
 	Options  GenOptions
+	inConst  bool
 }
 
 type GenOptions struct {
@@ -224,6 +225,22 @@ func (g *Gen) pos(p Pos) {
 		g.srcPath[p.File] = path
 	}
 	fmt.Fprintf(g.w, "//line %s:%d\n", path, p.Line)
+}
+
+// posAgain 再次输出当前位置的 //line 指令（用于多行生成代码中的后续行）。
+func (g *Gen) posAgain(p Pos) {
+	g.lastLine = 0
+	g.pos(p)
+}
+
+// resetLine 让之后生成的辅助代码不再映射到 .ae 源文件。
+func (g *Gen) resetLine() {
+	if g.Options.NoLines || g.curFile == nil {
+		return
+	}
+	g.curFile = nil
+	g.lastLine = 0
+	g.w.WriteString("//line aether-generated.go:1\n")
 }
 
 func (g *Gen) tmp() string {
@@ -714,7 +731,9 @@ func (g *Gen) genGlobals() {
 					saveW := g.w
 					var b strings.Builder
 					g.w = &b
+					g.inConst = true
 					val := g.expr(cd.Value)
+					g.inConst = false
 					g.w = saveW
 					consts = append(consts, fmt.Sprintf("const %s %s = %s", name, g.typ(sym.T), val))
 					continue
@@ -773,12 +792,14 @@ func (g *Gen) genModuleInit(m *Module) {
 	g.stmts(m.TopStmts)
 	g.ind--
 	g.line("}")
+	g.resetLine()
 	g.line("")
 	g.fn = nil
 }
 
 func (g *Gen) genHooks() {
 	g.w = &g.decls
+	g.resetLine()
 	exc := g.c.excTD
 	if exc == nil {
 		return
@@ -828,6 +849,7 @@ func (g *Gen) genHooks() {
 
 func (g *Gen) genMain() {
 	g.w = &g.decls
+	g.resetLine()
 	rt := g.rt()
 	g.line("func main() {")
 	g.ind++
@@ -891,6 +913,7 @@ func (g *Gen) genTests() {
 			g.stmts(t.Body)
 			g.ind--
 			g.line("}")
+			g.resetLine()
 			g.line("")
 			g.fn = nil
 		}

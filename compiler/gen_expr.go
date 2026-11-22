@@ -63,7 +63,11 @@ func (g *Gen) expr(e Expr) string {
 			}
 			return g.methodOn(x.X, x.Op2, g.expr(x.X), []string{g.expr(x.Y)}, nil)
 		}
-		return g.binCode(x.Op, g.expr(x.X), x.X.Typ(), g.expr(x.Y), x.Y.Typ(), x.T)
+		xc := g.expr(x.X)
+		if !g.inConst && isConstExpr(x.X) && isConstExpr(x.Y) && isNumeric(x.X.Typ()) {
+			xc = g.rt() + ".Val[" + g.typ(x.X.Typ()) + "](" + xc + ")"
+		}
+		return g.binCode(x.Op, xc, x.X.Typ(), g.expr(x.Y), x.Y.Typ(), x.T)
 	case *Compare:
 		return g.compare(x)
 	case *Logical:

@@ -1,0 +1,57 @@
+# 列表、字典、集合、元组、推导式
+xs = [3, 1, 4, 1, 5, 9, 2, 6]
+print(xs, len(xs), xs[0], xs[-1], xs[2:5], xs[::2])
+xs.append(10)
+xs.sort()
+print(xs)
+print(sorted(xs, reverse=true), xs.index(4), 9 in xs, 7 not in xs)
+squares = [x * x for x in range(6)]
+evens = [x for x in xs if x % 2 == 0]
+print(squares, evens)
+pairs = [(i, j) for i in range(3) for j in range(i)]
+print(pairs)
+d = {"apple": 3, "banana": 5}
+d["cherry"] = 7
+d["apple"] += 1
+print(d, len(d), d["banana"], "apple" in d)
+for k, v in d.items():
+    print(k, v)
+print(d.get("durian"), d.get("durian", 0), d.keys(), d.values())
+del d["banana"]
+print(d)
+inv = {v: k for k, v in d.items()}
+print(inv)
+s = {1, 2, 3}
+s.add(4)
+t = {3, 4, 5}
+print(s, s | t, s & t, s - t, 2 in s)
+empty: list[str] = []
+print(empty, len(empty))
+nums: dict[str, list[int]] = {}
+nums.setdefault("a", []).append(1)
+nums.setdefault("a", []).append(2)
+print(nums)
+point = (3, 4)
+px, py = point
+print(point, px, py, point[0])
+a, b = 1, 2
+a, b = b, a
+print(a, b)
+words = "the quick brown fox jumps over the lazy dog".split()
+lens = {w: len(w) for w in words}
+print(lens)
+print(counter(words))
+print([w.upper() for w in words if len(w) > 4])
+print(sum(xs), sum(x for x in xs if x > 3), any(x > 9 for x in xs), all(x > 0 for x in xs))
+matrix = [[i * 3 + j for j in range(3)] for i in range(3)]
+print(matrix, matrix[1][2])
+for i, w in enumerate(words[:3]):
+    print(i, w)
+for x, y in zip([1, 2, 3], ["a", "b", "c"]):
+    print(x, y)
+print(list(range(5)), list(reversed([1, 2, 3])), sorted(["b", "c", "a"]))
+gen = (x * 2 for x in range(4))
+print(list(gen))
+print(xs.map(x => x * 10).filter(x => x > 50))
+print(words.group_by(w => len(w)))
+print(words.sorted_by(w => len(w)), words.max_by(w => len(w)))

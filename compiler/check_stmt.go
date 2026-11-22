@@ -139,7 +139,16 @@ func (c *Checker) exprStmt(s *ExprStmt) {
 // ===== 赋值 =====
 
 func (c *Checker) isShadowable(sym *Symbol) bool {
-	return sym.Universe
+	if sym.Universe {
+		return true
+	}
+	// prelude 中的名字（例如 counter、repeat）可以被用户变量遮蔽
+	if sym.Mod != nil && sym.Mod.IsPrelude && c.mod != nil && !c.mod.IsPrelude && sym.Kind != SVar {
+		if c.mod.Scope.Syms[sym.Name] != sym {
+			return true
+		}
+	}
+	return false
 }
 
 // assignableTargetSym 查找赋值目标符号；返回 nil 表示需要声明新变量。

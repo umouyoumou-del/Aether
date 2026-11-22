@@ -31,6 +31,10 @@ func runOne(fn func()) (err any, pcs []uintptr) {
 
 // RunTests 运行所有测试并打印结果；有失败时以状态 1 退出。
 func RunTests(init func(), tests []TestCase) {
+	green, red, gray, reset := "\x1b[32m", "\x1b[31m", "\x1b[90m", "\x1b[0m"
+	if !interactive {
+		green, red, gray, reset = "", "", "", ""
+	}
 	if err, pcs := runOne(init); err != nil {
 		Flush()
 		os.Stderr.WriteString("模块初始化失败：\n")
@@ -48,11 +52,11 @@ func RunTests(init func(), tests []TestCase) {
 		d := time.Since(t0)
 		if err == nil {
 			passed++
-			fmt.Printf("  \x1b[32m✓\x1b[0m %s \x1b[90m(%s)\x1b[0m\n", t.Name, fmtDur(d))
+			fmt.Printf("  %s✓%s %s %s(%s)%s\n", green, reset, t.Name, gray, fmtDur(d), reset)
 			continue
 		}
 		failed++
-		fmt.Printf("  \x1b[31m✗\x1b[0m %s\n", t.Name)
+		fmt.Printf("  %s✗%s %s\n", red, reset, t.Name)
 		tb := FormatTraceback(err, pcs)
 		var sb strings.Builder
 		for _, line := range strings.Split(strings.TrimRight(tb, "\n"), "\n") {
@@ -69,10 +73,10 @@ func RunTests(init func(), tests []TestCase) {
 	fmt.Println()
 	total := passed + failed
 	if failed == 0 {
-		fmt.Printf("\x1b[32m全部通过\x1b[0m：%d 个测试，用时 %s\n", total, fmtDur(time.Since(start)))
+		fmt.Printf("%s全部通过%s：%d 个测试，用时 %s\n", green, reset, total, fmtDur(time.Since(start)))
 		return
 	}
-	fmt.Printf("\x1b[31m%d 个失败\x1b[0m，%d 个通过，共 %d 个测试\n", failed, passed, total)
+	fmt.Printf("%s%d 个失败%s，%d 个通过，共 %d 个测试\n", red, failed, reset, passed, total)
 	os.Exit(1)
 }
 

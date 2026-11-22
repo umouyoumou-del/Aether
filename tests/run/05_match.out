@@ -1,0 +1,19 @@
+Color.Green Green 1 false true
+[Color.Red, Color.Green, Color.Blue] Color.Blue
+冷色
+Shape.Circle(r=1.0) 3.14
+Shape.Rect(w=2.0, h=3.0) 6.00
+Shape.Empty 0.00
+正方形 2.0 矩形 1.0x2.0 大圆 圆 空
+true false
+["零", "小", "负数 -5", "大"]
+空列表 只有 7 首个 1，其余 [2, 3]
+整数 1 字符串 a 列表 2 空值 其他
+在 x 轴上 1
+结果 5
+除数为零
+7 z 1.5
+3 3 2 ["<1>", "<2>"]
+空栈
+(1, "one") ([1], 2.5)
+Pair(first=1, second="x") Pair(first="x", second=1)

@@ -1,0 +1,18 @@
+5.0 1.0 1
+12.5664
+4.0 2 3 6 3628800
+3.14159 2.71828 0.0 1.0 3.0
+true true
+5 true
+true
+true
+true
+读取: 第一行
+读取: 第二行
+读取: third line
+["第一行", "第二行", "third line"]
+4 true true
+false
+FileNotFoundError: 文件不存在：不存在的文件.txt
+c.txt .gz
+未设置

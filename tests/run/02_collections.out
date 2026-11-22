@@ -1,0 +1,33 @@
+[3, 1, 4, 1, 5, 9, 2, 6] 8 3 6 [4, 1, 5] [3, 4, 5, 2]
+[1, 1, 2, 3, 4, 5, 6, 9, 10]
+[10, 9, 6, 5, 4, 3, 2, 1, 1] 4 true true
+[0, 1, 4, 9, 16, 25] [2, 4, 6, 10]
+[(1, 0), (2, 0), (2, 1)]
+{"apple": 4, "banana": 5, "cherry": 7} 3 5 true
+apple 4
+banana 5
+cherry 7
+null 0 ["apple", "banana", "cherry"] [4, 5, 7]
+{"apple": 4, "cherry": 7}
+{4: "apple", 7: "cherry"}
+{1, 2, 3, 4} {1, 2, 3, 4, 5} {3, 4} {1, 2} true
+[] 0
+{"a": [1, 2]}
+(3, 4) 3 4 3
+2 1
+{"the": 3, "quick": 5, "brown": 5, "fox": 3, "jumps": 5, "over": 4, "lazy": 4, "dog": 3}
+{"the": 2, "quick": 1, "brown": 1, "fox": 1, "jumps": 1, "over": 1, "lazy": 1, "dog": 1}
+["QUICK", "BROWN", "JUMPS"]
+41 34 true true
+[[0, 1, 2], [3, 4, 5], [6, 7, 8]] 5
+0 the
+1 quick
+2 brown
+1 a
+2 b
+3 c
+[0, 1, 2, 3, 4] [3, 2, 1] ["a", "b", "c"]
+[0, 2, 4, 6]
+[60, 90, 100]
+{3: ["the", "fox", "the", "dog"], 5: ["quick", "brown", "jumps"], 4: ["over", "lazy"]}
+["the", "fox", "the", "dog", "over", "lazy", "quick", "brown", "jumps"] quick

@@ -312,7 +312,14 @@ func optWant(want Type) Type {
 }
 
 func (c *Checker) narrowable(sym *Symbol) bool {
-	return sym != nil && sym.Kind == SVar && !sym.Global && !sym.IsSelf && !sym.ClosureAssigned
+	if sym == nil || sym.Kind != SVar || sym.IsSelf || sym.ClosureAssigned {
+		return false
+	}
+	if sym.Global {
+		// 模块顶层代码中可以窄化本模块的全局变量（脚本写法）
+		return c.fn != nil && c.fn.IsModInit && sym.Mod == c.mod && sym.Field == nil
+	}
+	return true
 }
 
 func (c *Checker) ident(e *Ident, want Type) Type {
@@ -367,7 +374,7 @@ func (c *Checker) ident(e *Ident, want Type) Type {
 			} else {
 				e.Narrow = NarrowCast
 			}
-			if sym.Fn != c.fn && c.fn != nil {
+			if !sym.Global && sym.Fn != c.fn && c.fn != nil {
 				c.fn.narrowedCaptures = append(c.fn.narrowedCaptures, sym)
 			}
 			return nt
@@ -2345,6 +2352,13 @@ func (c *Checker) unify(p, a Type, m Subst, free map[*TypeParam]bool) bool {
 		if !free[x.P] {
 			if y, ok := a.(*TParamT); ok && y.P == x.P {
 				return true
+			}
+			if bound := m[x.P]; bound != nil {
+				if identical(bound, a) {
+					return true
+				}
+				_, ok := c.assignable(a, bound)
+				return ok
 			}
 			return identical(p, a)
 		}

@@ -1,0 +1,172 @@
+# 枚举、代数数据类型、模式匹配、泛型
+enum Color:
+    Red
+    Green
+    Blue
+
+    def is_warm(self) -> bool:
+        return self == Color.Red
+
+c = Color.Green
+print(c, c.name, c.value, c.is_warm(), Color.Red.is_warm())
+print(Color.values(), Color.from_value(2))
+match c:
+    case Red:
+        print("红色")
+    case Green | Blue:
+        print("冷色")
+
+enum Shape:
+    Circle(r: float)
+    Rect(w: float, h: float)
+    Empty
+
+    def area(self) -> float:
+        match self:
+            case Circle(r):
+                return 3.14159 * r * r
+            case Rect(w, h):
+                return w * h
+            case Empty:
+                return 0.0
+
+shapes = [Shape.Circle(1.0), Shape.Rect(2.0, 3.0), Shape.Empty]
+for s in shapes:
+    print(s, f"{s.area():.2f}")
+
+def describe(s: Shape) -> str:
+    match s:
+        case Rect(w, h) if w == h:
+            return f"正方形 {w}"
+        case Rect(w=w, h=h):
+            return f"矩形 {w}x{h}"
+        case Circle(r) if r > 10.0:
+            return "大圆"
+        case Circle(_):
+            return "圆"
+        case _:
+            return "空"
+
+print(describe(Shape.Rect(2.0, 2.0)), describe(Shape.Rect(1.0, 2.0)), describe(Shape.Circle(20.0)), describe(Shape.Circle(1.0)), describe(Shape.Empty))
+print(Shape.Circle(1.0) == Shape.Circle(1.0), Shape.Circle(1.0) == Shape.Circle(2.0))
+
+def classify(x: int) -> str:
+    match x:
+        case 0:
+            return "零"
+        case 1 | 2 | 3:
+            return "小"
+        case n if n < 0:
+            return f"负数 {n}"
+        case _:
+            return "大"
+
+print([classify(x) for x in [0, 2, -5, 100]])
+
+def head(xs: list[int]) -> str:
+    match xs:
+        case []:
+            return "空列表"
+        case [x]:
+            return f"只有 {x}"
+        case [first, *rest]:
+            return f"首个 {first}，其余 {rest}"
+
+print(head([]), head([7]), head([1, 2, 3]))
+
+def what(v: any) -> str:
+    match v:
+        case int n:
+            return f"整数 {n}"
+        case str s:
+            return f"字符串 {s}"
+        case list[int] xs:
+            return f"列表 {len(xs)}"
+        case null:
+            return "空值"
+        case _:
+            return "其他"
+
+print(what(1), what("a"), what([1, 2]), what(null), what(2.5))
+
+point = (1, 0)
+match point:
+    case (0, 0):
+        print("原点")
+    case (x, 0):
+        print(f"在 x 轴上 {x}")
+    case (0, y):
+        print(f"在 y 轴上 {y}")
+    case _:
+        print("其他")
+
+enum Option[T]:
+    Some(value: T)
+    Nothing
+
+def safe_div(a: int, b: int) -> Option[int]:
+    if b == 0:
+        return Option[int].Nothing
+    return Option.Some(a // b)
+
+for b in [2, 0]:
+    match safe_div(10, b):
+        case Some(v):
+            print("结果", v)
+        case Nothing:
+            print("除数为零")
+
+def max_of[T: Ordered](xs: list[T]) -> T:
+    best = xs[0]
+    for x in xs:
+        if x > best:
+            best = x
+    return best
+
+print(max_of([3, 7, 2]), max_of(["b", "z", "a"]), max_of([1.5, 0.5]))
+
+class Stack[T]:
+    items: list[T] = []
+
+    def push(self, x: T):
+        self.items.append(x)
+
+    def pop(self) -> T:
+        return self.items.pop()
+
+    def peek(self) -> T?:
+        if len(self.items) == 0:
+            return null
+        return self.items[-1]
+
+    def __len__(self) -> int:
+        return len(self.items)
+
+    def map[U](self, f: fn(T) -> U) -> Stack[U]:
+        out = Stack[U]()
+        for x in self.items:
+            out.push(f(x))
+        return out
+
+st = Stack[int]()
+st.push(1)
+st.push(2)
+st.push(3)
+print(len(st), st.pop(), st.peek(), st.map(x => f"<{x}>").items)
+empty = Stack[str]()
+print(empty.peek() ?? "空栈")
+
+def pair_up[A, B](a: A, b: B) -> (A, B):
+    return (a, b)
+
+print(pair_up(1, "one"), pair_up([1], 2.5))
+
+struct Pair[A, B]:
+    first: A
+    second: B
+
+    def swap(self) -> Pair[B, A]:
+        return Pair(self.second, self.first)
+
+pp = Pair(1, "x")
+print(pp, pp.swap())

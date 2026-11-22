@@ -12,6 +12,7 @@ type parser struct {
 	// 不允许解析三元表达式（推导式的 in 子句中）
 	noTernary int
 	inClass   int
+	noAs      int
 }
 
 type parseBail struct{}
@@ -1101,7 +1102,9 @@ func (p *parser) withStmt() *WithStmt {
 	ws := &WithStmt{Pos: pos}
 	for {
 		ip := p.tok().Pos
+		p.noAs++
 		x := p.expr()
+		p.noAs--
 		item := &WithItem{X: x, Pos: ip}
 		if p.got(KAs) {
 			item.Name = p.expectIdent("with 变量").Text
@@ -1605,7 +1608,7 @@ func (p *parser) term() Expr {
 
 func (p *parser) castExpr() Expr {
 	x := p.unary()
-	for p.at(KAs) {
+	for p.at(KAs) && p.noAs == 0 {
 		pos := p.advance().Pos
 		safe := p.got(TQuestion)
 		t := p.typeExpr()
@@ -1882,7 +1885,10 @@ func (p *parser) atom() Expr {
 		if p.got(TRParen) {
 			return &TupleLit{exprBase: exprBase{Pos: t.Pos}}
 		}
+		saveAs := p.noAs
+		p.noAs = 0
 		x := p.expr()
+		p.noAs = saveAs
 		if p.at(KFor) {
 			c := p.comprehension(CompGen, x, nil, t.Pos)
 			p.expect(TRParen, "生成器表达式")

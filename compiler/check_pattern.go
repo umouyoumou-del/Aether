@@ -18,6 +18,8 @@ func (c *Checker) matchStmt(s *MatchStmt) {
 	covered := map[*Variant]bool{}
 	bools := map[bool]bool{}
 	nullCovered := false
+	listLens := map[int]bool{}
+	listMin := -1
 	for i, cs := range s.Cases {
 		if exhaustive {
 			c.warnf(cs.Pos, "前面的 case 已经匹配了所有情况，这个 case 永远不会执行")
@@ -37,6 +39,34 @@ func (c *Checker) matchStmt(s *MatchStmt) {
 				exhaustive = true
 			}
 			collectCovered(cs.Pat, covered, bools, &nullCovered)
+			if lp, ok := cs.Pat.(*ListPat); ok {
+				all := true
+				for _, e := range lp.Elems {
+					if !irrefutable(e) {
+						all = false
+					}
+				}
+				if all {
+					if lp.RestIdx >= 0 {
+						if listMin < 0 || len(lp.Elems) < listMin {
+							listMin = len(lp.Elems)
+						}
+					} else {
+						listLens[len(lp.Elems)] = true
+					}
+				}
+				if listMin >= 0 {
+					full := true
+					for k := 0; k < listMin; k++ {
+						if !listLens[k] {
+							full = false
+						}
+					}
+					if full {
+						exhaustive = true
+					}
+				}
+			}
 		}
 		_ = i
 	}

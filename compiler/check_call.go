@@ -25,6 +25,15 @@ func (c *Checker) call(e *Call, want Type) Type {
 		case *MetaT:
 			return c.staticCall(e, fn, r.T, want)
 		case *GenericT:
+			if td := r.Sym.TD; td != nil && td.Kind == DEnum {
+				if v := td.VariantMap[fn.Name]; v != nil && v.HasPayload {
+					fn.Kind = AttrVariantCtor
+					fn.Variant = v
+					fn.Owner = &NamedT{D: td}
+					fn.T = &FuncT{}
+					return c.variantCall(e, fn, want)
+				}
+			}
 			c.errorf(fn.Pos, "访问 %s 的静态成员需要先给出类型实参", r.Sym.Name)
 			c.checkArgsQuiet(e)
 			return tInvalid

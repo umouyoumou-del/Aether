@@ -1,0 +1,22 @@
+def no_return(x: int) -> int:  # 错误: 缺少 return
+    if x > 0:
+        return 1
+
+def maybe(c: bool) -> int:
+    if c:
+        v = 1
+    return v                  # 错误: 可能还没有被赋值
+
+break                         # 错误: break 只能用在循环中
+
+def gen() -> int:             # 错误: 返回类型必须是 iter[T]
+    yield 1
+
+def void_fn():
+    return 5                  # 错误: 没有声明返回类型
+
+def ok(c: bool) -> int:
+    if c:
+        return 1
+    else:
+        return 2
