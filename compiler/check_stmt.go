@@ -1897,22 +1897,30 @@ func (c *Checker) checkStructIfaces() {
 		if seen[si.pos] {
 			continue
 		}
-		methods, _, _ := c.ifaceMembers(si.iface)
-		names := make([]string, 0, len(methods))
-		for n := range methods {
-			names = append(names, n)
-		}
-		sort.Strings(names)
-		for _, n := range names {
-			mem, _, _ := c.findMember(si.st, n)
-			if mt, ok := mem.(*Method); ok && mt.Mutating {
-				seen[si.pos] = true
-				d := c.errorf(si.pos, "结构体 %s 不能当作接口 %s 使用：接口要求的方法 %s 会修改 self，而结构体转换为接口时会被复制", si.st, si.iface, n)
-				d.Notes = append(d.Notes, "把 "+si.st.D.Name+" 改为 class（引用语义），或者让 "+n+" 不修改 self")
-				break
-			}
+		if n := c.mutatingFor(si.st, si.iface); n != "" {
+			seen[si.pos] = true
+			d := c.errorf(si.pos, "结构体 %s 不能当作接口 %s 使用：接口要求的方法 %s 会修改 self，而结构体转换为接口时会被复制", si.st, si.iface, n)
+			d.Notes = append(d.Notes, "把 "+si.st.D.Name+" 改为 class（引用语义），或者让 "+n+" 不修改 self")
 		}
 	}
+}
+
+// mutatingFor 返回接口 iface 要求的、在结构体 st 中会修改 self 的方法名（没有时返回 ""）。
+// 需要在可变方法分析之后调用。
+func (c *Checker) mutatingFor(st, iface *NamedT) string {
+	methods, _, _ := c.ifaceMembers(iface)
+	names := make([]string, 0, len(methods))
+	for n := range methods {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		mem, _, _ := c.findMember(st, n)
+		if mt, ok := mem.(*Method); ok && mt.Mutating {
+			return n
+		}
+	}
+	return ""
 }
 
 func addressable(e Expr) bool {

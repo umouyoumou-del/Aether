@@ -159,6 +159,16 @@ func lessParam(m *Method) (Type, bool) {
 	return m.Sig.Params[0].T, true
 }
 
+// genCmpLess 在 Lessꞏ 之外再为类型生成 Cmpꞏ：rt.Compare 用它比较元组中的元素、key 函数
+// 返回的值等。只在 __lt__ 能双向比较时生成（见 lessSymmetric）。recv 是 Go 接收者类型，
+// selfT 是该类型，pt 是 __lt__ 的参数类型（ptGo 是它的 Go 写法）。
+func (g *Gen) genCmpLess(recv string, selfT, pt Type, ptGo string) {
+	if !g.c.lessSymmetric(selfT, pt) {
+		return
+	}
+	g.line("func (self %s) Cmpꞏ(o any) int { x := o.(%s); if self.Lessꞏ(x) { return -1 }; if x.Lessꞏ(self) { return 1 }; return 0 }", recv, ptGo)
+}
+
 func (g *Gen) genIface(td *TypeDecl) {
 	g.line("type %s%s interface {", td.GoName, g.tparamDecl(td.TParams))
 	g.ind++
@@ -339,6 +349,7 @@ func (g *Gen) genClassMethods(td *TypeDecl) {
 			pt := g.typ(ltT)
 			g.subst = save
 			g.line("func (self *%s) Lessꞏ(o %s) bool { return self.__lt__(o) }", st, pt)
+			g.genCmpLess("*"+st, nt, subst(ltT, makeSubst(anc.D.TParams, anc.Args)), pt)
 		}
 	}
 	// 接口要求的属性由字段满足时，生成访问方法
@@ -649,6 +660,7 @@ func (g *Gen) genStruct(td *TypeDecl) {
 		// 总是值接收者：即使 __lt__ 修改 self（指针接收者），Lessꞏ 也在副本上调用，
 		// 这样结构体的值类型本身满足 rt.Lesser
 		g.line("func (self %s) Lessꞏ(o %s) bool { return self.__lt__(o) }", st, g.typ(pt))
+		g.genCmpLess(st, g.selfNT(td), pt, g.typ(pt))
 	}
 	if eqM != nil {
 		g.line("func (self %s) Eqꞏ(o any) bool { x, ok := o.(%s); return ok && self.__eq__(x) }", st, g.typ(eqM.Sig.Params[0].T))
@@ -733,6 +745,7 @@ func (g *Gen) genEnum(td *TypeDecl) {
 	}
 	if pt, ok := lessParam(td.Methods["__lt__"]); ok {
 		g.line("func (self %s) Lessꞏ(o %s) bool { return self.__lt__(o) }", td.GoName, g.typ(pt))
+		g.genCmpLess(td.GoName, g.selfNT(td), pt, g.typ(pt))
 		g.line("")
 	}
 	for _, p := range td.PropList {
@@ -825,6 +838,7 @@ func (g *Gen) genADT(td *TypeDecl) {
 		}
 		if hasLt {
 			g.line("func (self %s) Lessꞏ(o %s) bool { return self.%s(o) }", vt, g.typ(ltT), memberName("__lt__"))
+			g.genCmpLess(vt, g.selfNT(td), ltT, g.typ(ltT))
 		}
 		for _, p := range td.PropList {
 			g.line("func (self %s) ꞏget_%s() %s { return %sꞏget_%s%s(self) }", vt, p.Name, g.typ(p.T), td.GoName, p.Name, tpu)

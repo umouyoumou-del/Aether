@@ -1535,6 +1535,42 @@ func (c *Checker) hasLess(t Type) bool {
 	return m != nil && len(sig.Params) == 1 && identical(sig.Params[0].T, t) && isBool(sig.Ret)
 }
 
+// sortable 判断不带 key 时类型 t 的值能否比较大小：Ordered、实现了 Comparable[t]，
+// 或者由这样的类型组成的元组（运行时由 rt.Compare 逐个元素比较）。
+func (c *Checker) sortable(t Type) bool {
+	if tt, ok := t.(*TupleT); ok {
+		for _, el := range tt.Elems {
+			if !c.sortable(el) {
+				return false
+			}
+		}
+		return true
+	}
+	return isOrdered(t) || c.hasLess(t)
+}
+
+// lessSymmetric 判断类型 selfT（其 __lt__ 的参数类型是 pt）的两个值能否互相比较：
+// selfT 的值可以当作 pt，并且 pt 也有接受 selfT 的 __lt__。这时代码生成为 selfT 生成 Cmpꞏ，
+// 让 rt.Compare 能比较元组中的这类元素、key 函数返回的这类值。在可变方法分析之后调用。
+func (c *Checker) lessSymmetric(selfT, pt Type) bool {
+	ok := func(from, to Type) bool {
+		if _, good := c.assignable(from, to); !good {
+			return false
+		}
+		st, ok1 := from.(*NamedT)
+		it, ok2 := to.(*NamedT)
+		return !(ok1 && ok2 && st.D.Kind == DStruct && it.D.Kind == DInterface && c.mutatingFor(st, it) != "")
+	}
+	if !ok(selfT, pt) {
+		return false
+	}
+	m, sig := c.orderMethod(pt, "__lt__")
+	if _, good := lessParam(m); !good || len(sig.Params) != 1 {
+		return false
+	}
+	return ok(selfT, sig.Params[0].T)
+}
+
 // lessNote 当 t 有 __lt__、但参数类型不是 t 本身（例如从基类继承的 __lt__）时，返回说明。
 func (c *Checker) lessNote(t Type) string {
 	m, sig := c.orderMethod(t, "__lt__")
@@ -1559,17 +1595,17 @@ func (c *Checker) keyFunc(a *Arg, et Type) Type {
 	if !identical(ft.Params[0], et) {
 		c.errorf(a.X.P(), "key 函数的参数类型应为 %s", et)
 	}
-	if !isOrdered(ft.Ret) {
+	if !c.sortable(ft.Ret) {
 		if tt, ok := ft.Ret.(*TupleT); ok {
 			for _, el := range tt.Elems {
-				if !isOrdered(el) {
+				if !c.sortable(el) {
 					c.errorf(a.X.P(), "key 返回的元组中 %s 不可比较", el)
 				}
 			}
 			return ft.Ret
 		}
 		if !isInvalid(ft.Ret) {
-			c.errorf(a.X.P(), "key 函数必须返回可比较的值（数字、str、char 或它们组成的元组），得到 %s", ft.Ret)
+			c.errorf(a.X.P(), "key 函数必须返回可比较的值（数字、str、char、实现了 Comparable 的类型，或它们组成的元组），得到 %s", ft.Ret)
 		}
 		return tInvalid
 	}

@@ -160,3 +160,35 @@ extend Sq:
 
 base: Base = Sq(1.0)
 print(Sq(1.0).tag(), Sq(1.0).tag(3), Tri(2.0).tag(), base.tag(), Tri(8.0).twice, [b.tag() for b in bs])
+
+# 元组中的元素、key 函数的返回值也可以是实现了 Comparable 的类型
+class Job:
+    name: str
+    ver: V
+    def __str__(self) -> str:
+        return self.name
+
+ps = [(V(2), 1), (V(1), 2), (V(1), 1)]
+print(sorted(ps), min(ps), max(ps), (V(1), 2) < (V(1), 3), (V(2), 0) <= (V(1), 9))
+jobs = [Job("甲", V(3)), Job("乙", V(1)), Job("丙", V(2))]
+print(sorted(jobs, key=j => j.ver), min(jobs, key=j => j.ver), max(jobs, key=j => (j.ver, j.name)))
+jobs.sort(key=j => j.ver, reverse=true)
+print(jobs, jobs.min_by(j => j.ver), jobs.sorted_by(j => j.ver))
+pairs: list[(Ranked, int)] = [(Player("丙", 9), 1), (Player("丁", 1), 2)]
+print(sorted(pairs), sorted([(Level.High, 1), (Level.Low, 2)]))
+
+def by_key[T, K: Comparable[K]](xs: list[T], f: fn(T) -> K) -> list[T]:
+    return sorted(xs, key=f)
+
+class Animal:
+    age: int
+    def __lt__(self, o: Animal) -> bool:
+        return self.age < o.age
+    def __str__(self) -> str:
+        return f"{type_name(self)}{self.age}"
+
+class Dog(Animal):
+    pass
+
+dogs = [Dog(3), Dog(1)]
+print(by_key(jobs, j => j.ver), sorted([(d, 0) for d in dogs]), sorted(dogs, key=d => d as Animal))

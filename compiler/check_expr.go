@@ -1264,7 +1264,7 @@ func (c *Checker) checkOrdering(e *Compare, i int, a, b Type) {
 	}
 	if ta, ok := a.(*TupleT); ok && identical(a, b) {
 		for _, el := range ta.Elems {
-			if !isOrdered(el) {
+			if !c.sortable(el) {
 				c.errorf(e.Pos, "元组比较大小要求每个元素都可比较，%s 不行", el)
 				return
 			}

@@ -9,3 +9,8 @@ V5 V4 true true false
 [Level.Low, Level.High, Level.High] [Level.High, Level.High, Level.Low] Level.Low Level.High
 [V1, V2] [V1, V2] [V7, V9] V9
 S B3 B面积 1.0 B面积 1.0 8.0 ["B面积 1.0", "B面积 1.0"]
+[(V1, 1), (V1, 2), (V2, 1)] (V1, 1) (V2, 1) true false
+[乙, 丙, 甲] 乙 甲
+[甲, 丙, 乙] 乙 [乙, 丙, 甲]
+[(丁, 2), (丙, 1)] [(Level.Low, 2), (Level.High, 1)]
+[乙, 丙, 甲] [(Dog1, 0), (Dog3, 0)] [Dog1, Dog3]
