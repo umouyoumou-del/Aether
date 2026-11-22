@@ -2315,13 +2315,15 @@ type extCand struct {
 }
 
 // extBlocks 返回可能为类型 t 提供成员 name 的扩展块：先是 t 自身类型的扩展块，
-// 再是各接口的扩展块（是否真的适用由 extApplies 判断）。
+// 然后是基类的扩展块（近的在前），最后是各接口的扩展块（是否真的适用由 extApplies 判断）。
 func (c *Checker) extBlocks(t Type, name string) []*ExtBlock {
 	var out []*ExtBlock
 	key := typeHead(t)
-	for _, blk := range c.exts[key] {
-		if len(blk.Methods[name]) > 0 || blk.Props[name] != nil {
-			out = append(out, blk)
+	for _, k := range extKeys(t) {
+		for _, blk := range c.exts[k] {
+			if len(blk.Methods[name]) > 0 || blk.Props[name] != nil {
+				out = append(out, blk)
+			}
 		}
 	}
 	for _, blk := range c.ifaceExts {
@@ -2333,6 +2335,17 @@ func (c *Checker) extBlocks(t Type, name string) []*ExtBlock {
 		}
 	}
 	return out
+}
+
+// extKeys 返回类型 t 自身及其基类（近的在前）的扩展键：基类的扩展也适用于子类。
+func extKeys(t Type) []string {
+	keys := []string{typeHead(t)}
+	if nt, ok := t.(*NamedT); ok && nt.D.Kind == DClass {
+		for _, anc := range supertypes(nt)[1:] {
+			keys = append(keys, typeHead(anc))
+		}
+	}
+	return keys
 }
 
 // extApplies 把扩展块的目标类型与 t 合一，返回类型代换（不检查类型参数约束）。
@@ -2540,7 +2553,10 @@ func (c *Checker) suggestMember(t Type, name string) string {
 			}
 		}
 	}
-	blocks := append([]*ExtBlock(nil), c.exts[typeHead(t)]...)
+	var blocks []*ExtBlock
+	for _, k := range extKeys(t) {
+		blocks = append(blocks, c.exts[k]...)
+	}
 	for _, blk := range c.ifaceExts {
 		if _, ok := c.extApplies(blk, t); ok {
 			blocks = append(blocks, blk)

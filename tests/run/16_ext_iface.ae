@@ -144,3 +144,19 @@ lv.sort()
 print(lv, lv.sorted(reverse=true), lv.min(), lv.max())
 vv = [V(2), V(1)]
 print(sorted(vv), sorted(v for v in vv if v.n > 0), sorted({V(9), V(7)}), max(V(1), V(9), V(3)))
+
+# 基类的扩展也适用于子类（近的优先，再到接口的扩展）；按静态类型选择
+extend Base:
+    def tag(self) -> str:
+        return "B" + self.describe()
+    def tag(self, k: int) -> str:
+        return f"B{k}"
+    prop twice -> float:
+        return self.area() * 2.0
+
+extend Sq:
+    def tag(self) -> str:
+        return "S"
+
+base: Base = Sq(1.0)
+print(Sq(1.0).tag(), Sq(1.0).tag(3), Tri(2.0).tag(), base.tag(), Tri(8.0).twice, [b.tag() for b in bs])
