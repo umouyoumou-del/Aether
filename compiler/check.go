@@ -337,6 +337,7 @@ func Check(mods []*Module, diag *Diagnostics, testMode bool) (c *Checker) {
 			c.checkTest(t)
 		}
 	}
+	c.checkRecursiveStructs()
 	c.analyzeMutating()
 	c.checkStructCalls()
 	c.checkStructIfaces()

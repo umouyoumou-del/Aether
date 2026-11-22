@@ -286,6 +286,55 @@ func (c *Checker) fieldsHashable(x *NamedT, vs []*Variant) bool {
 	return true
 }
 
+// checkRecursiveStructs 检查结构体是否（经由可空、元组或其他结构体的字段）包含自身。
+// 结构体是值类型，这样的类型大小无限（Go 也拒绝编译）。
+func (c *Checker) checkRecursiveStructs() {
+	for _, td := range c.Types {
+		if td.Kind != DStruct {
+			continue
+		}
+		for _, f := range td.Fields {
+			if f.T != nil && containsStruct(f.T, td, map[string]bool{}) {
+				d := c.errorf(f.Pos, "结构体 %s 的字段 %s 包含了 %s 自身：结构体是值类型，不能直接或间接地包含自己", td.Name, f.Name, td.Name)
+				d.Notes = append(d.Notes, "把 "+td.Name+" 改为 class（引用语义），或者把它放进列表等容器中")
+				break
+			}
+		}
+	}
+}
+
+// containsStruct 判断类型 t 的值是否按值包含结构体 target（列表、类等是引用，不算）。
+func containsStruct(t Type, target *TypeDecl, seen map[string]bool) bool {
+	switch x := t.(type) {
+	case *OptT:
+		return containsStruct(x.Elem, target, seen)
+	case *TupleT:
+		for _, el := range x.Elems {
+			if containsStruct(el, target, seen) {
+				return true
+			}
+		}
+	case *NamedT:
+		if x.D.Kind != DStruct {
+			return false
+		}
+		if x.D == target {
+			return true
+		}
+		if seen[x.String()] {
+			return false
+		}
+		seen[x.String()] = true
+		m := makeSubst(x.D.TParams, x.Args)
+		for _, f := range x.D.Fields {
+			if f.T != nil && containsStruct(subst(f.T, m), target, seen) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // satisfies 判断类型 t 是否满足类型参数 tp 的约束。
 func (c *Checker) satisfies(t Type, tp *TypeParam) (bool, string) {
 	return c.satisfiesIn(t, tp, nil)

@@ -36,3 +36,7 @@ c = Color.Purple              # 错误: 没有静态成员 Purple
 match Color.Red:              # 警告: match 没有覆盖
     case Red:
         pass
+
+struct Node:
+    v: int
+    next: Node?               # 错误: 不能直接或间接地包含自己
