@@ -246,9 +246,13 @@ func (c *Checker) matchArgs(e *Call, sig *FuncSig, what string, quiet bool) ([]b
 	pos := 0
 	ok := true
 	vi := -1 // 可变参数的位置；其后的参数只能用关键字传递
+	kw := n   // 第一个只能用关键字传递的参数
 	for i, p := range sig.Params {
 		if p.Variadic {
 			vi = i
+		}
+		if p.KwOnly && !p.Variadic && i < kw {
+			kw = i
 		}
 	}
 	report := func(p Pos, format string, args ...any) {
@@ -260,7 +264,7 @@ func (c *Checker) matchArgs(e *Call, sig *FuncSig, what string, quiet bool) ([]b
 	for i := range e.Args {
 		a := e.Args[i]
 		if a.Name == "" && !a.Star {
-			if pos < n && !sig.Params[pos].Variadic && (vi < 0 || pos < vi) {
+			if pos < n && pos < kw && !sig.Params[pos].Variadic && (vi < 0 || pos < vi) {
 				bound[pos] = boundArg{x: &e.Args[i].X, set: true}
 				pos++
 				continue
@@ -271,7 +275,17 @@ func (c *Checker) matchArgs(e *Call, sig *FuncSig, what string, quiet bool) ([]b
 				pos = vi
 				continue
 			}
-			report(a.Pos, "%s最多接受 %d 个参数，但给了 %d 个", what, n, countPositional(e.Args))
+			if kw < n {
+				var names []string
+				for _, p := range sig.Params[kw:] {
+					if !p.Variadic {
+						names = append(names, p.Name)
+					}
+				}
+				report(a.Pos, "%s最多接受 %d 个位置参数，但给了 %d 个（%s 只能用关键字传递，例如 %s=...）", what, kw, countPositional(e.Args), strings.Join(names, "、"), names[0])
+			} else {
+				report(a.Pos, "%s最多接受 %d 个参数，但给了 %d 个", what, n, countPositional(e.Args))
+			}
 			continue
 		}
 		if a.Star {

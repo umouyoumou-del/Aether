@@ -428,15 +428,17 @@ type CallPat struct {
 	Variant *Variant
 	TD      *NamedT
 	Fields  []*Field // 每个参数对应的字段
+	Total   bool     // 主体类型恰好是该类型（不需要类型判断）
 }
 
 // TypePat：Dog d、str s、int n
 type TypePat struct {
-	Pos  Pos
-	Type TypeExpr
-	Name string
-	Sym  *Symbol
-	To   Type
+	Pos   Pos
+	Type  TypeExpr
+	Name  string
+	Sym   *Symbol
+	To    Type
+	Total bool
 }
 
 type AsPat struct {
@@ -699,6 +701,7 @@ type Param struct {
 	Type     TypeExpr
 	Default  Expr
 	Variadic bool
+	KwOnly   bool // 位于单独的 * 之后，只能用关键字传递
 	Sym      *Symbol
 }
 

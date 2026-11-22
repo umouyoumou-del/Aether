@@ -1,0 +1,4 @@
+VERSION = "1.0"
+def helper() -> str:
+    return "帮手"
+_hidden = 1

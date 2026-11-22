@@ -1133,7 +1133,7 @@ func (g *Gen) matchStmt(s *MatchStmt) {
 	g.ind++
 	subj := g.tmp()
 	g.posAgain(s.Pos)
-	g.line("%s := %s", subj, g.expr(s.Subject))
+	g.line("var %s %s = %s", subj, g.typ(s.SubjT), g.expr(s.Subject))
 	g.line("_ = %s", subj)
 	done := ""
 	if len(s.Cases) > 1 {

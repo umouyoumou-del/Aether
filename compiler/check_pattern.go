@@ -125,6 +125,18 @@ func irrefutable(p Pattern) bool {
 			}
 		}
 		return true
+	case *CallPat:
+		if !x.Total {
+			return false
+		}
+		for _, a := range x.Args {
+			if !irrefutable(a) {
+				return false
+			}
+		}
+		return true
+	case *TypePat:
+		return x.Total
 	}
 	return false
 }
@@ -242,6 +254,7 @@ func (c *Checker) pattern(p Pattern, t Type) {
 		x.To = to
 		if !isInvalid(to) {
 			c.checkTypeTest(x.Pos, t, to)
+			x.Total = identical(t, to)
 		}
 		x.Sym = c.bindPat(x.Name, to, x.Pos)
 	case *AsPat:
@@ -535,6 +548,8 @@ func (c *Checker) classPattern(x *CallPat, t Type, nt *NamedT) {
 	x.TD = nt
 	if !identical(optElem(t), nt) {
 		c.checkTypeTest(x.Pos, t, nt)
+	} else if !isOpt(t) {
+		x.Total = true
 	}
 	if nt.D.Kind != DClass && nt.D.Kind != DStruct {
 		c.errorf(x.Pos, "%s 不能用作结构模式", nt)

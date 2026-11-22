@@ -478,14 +478,27 @@ func (p *parser) funcDecl(decs []*Decorator, async bool) *FuncDecl {
 // params 解析形参列表。lambda 为 true 时类型可以省略。
 func (p *parser) params(lambda bool) []*Param {
 	var ps []*Param
+	kwOnly := false
 	for !p.at(TRParen) {
 		pos := p.tok().Pos
+		if p.at(TStar) && (p.peek(1).Kind == TComma || p.peek(1).Kind == TRParen) {
+			// 单独的 *：之后的参数只能用关键字传递
+			p.advance()
+			kwOnly = true
+			if !p.got(TComma) {
+				break
+			}
+			continue
+		}
 		if p.at(TDStar) {
 			p.fail("五行不支持 **kwargs；可以改用 dict[str, any] 参数或带默认值的参数")
 		}
 		variadic := p.got(TStar)
 		nt := p.expectIdent("参数")
-		prm := &Param{Pos: pos, Name: nt.Text, Variadic: variadic}
+		prm := &Param{Pos: pos, Name: nt.Text, Variadic: variadic, KwOnly: kwOnly}
+		if variadic {
+			kwOnly = true
+		}
 		if p.got(TColon) {
 			prm.Type = p.typeExpr()
 		} else if !lambda && nt.Text != "self" {

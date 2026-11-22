@@ -1,0 +1,94 @@
+from mods.util import *
+print(VERSION, helper())
+
+enum Color:
+    Red
+    Green = 5
+    Blue
+
+c = Color.Blue
+print(c, c.name, c.value, c as int, 5 as Color, Color.from_value(5))
+
+class R:
+    w: float
+    h: float
+    prop area -> float => self.w * self.h
+print(R(2.0, 3.0).area)
+
+t = (1, "二", 3.0)
+print(t.0, t.1, t[2])
+
+enum Shape:
+    Circle(r: float)
+    Rect(w: float, h: float)
+match Shape.Circle(2.0):
+    case Circle(r) as whole:
+        print("圆", r, whole)
+    case _:
+        pass
+
+class Point:
+    x: int
+    y: int
+def where(p: Point) -> str:
+    match p:
+        case Point(0, 0):
+            return "原点"
+        case Point(x, 0):
+            return f"x 轴 {x}"
+        case Point(y=yy):
+            return f"y={yy}"
+print(where(Point(0, 0)), where(Point(3, 0)), where(Point(1, 2)))
+
+interface Named:
+    prop name -> str
+class Square(Named):
+    side: float
+    name: str = "正方形"
+def show(n: Named) -> str:
+    return n.name
+print(show(Square(1.0)))
+
+def total[T: Number](xs: list[T]) -> T:
+    s: T = 0
+    for x in xs:
+        s += x
+    return s
+print(total([1, 2, 3]), total([1.5, 2.5]))
+
+class Conn:
+    id: int
+    def close(self):
+        print("关闭连接", self.id)
+with Conn(7) as cn:
+    print("使用连接", cn.id)
+
+x: int? = null
+print(x is null, x is not null)
+
+def risky():
+    raise ValueError("坏")
+try:
+    risky()
+except:
+    print("裸 except 捕获")
+
+def show_defer():
+    n = 1
+    defer print("defer 看到的 n =", n)
+    n = 2
+show_defer()
+
+ch = chan[int](1)
+print(ch.try_recv())
+ch.send(9)
+print(ch.try_recv())
+
+async def slow() -> int:
+    return 1
+tk = slow()
+print(tk.wait_for(1.0), tk.done(), await tk)
+rw = RWMutex()
+rw.rlock()
+rw.runlock()
+print(1 if 0 <= 5 < 10 else 0)

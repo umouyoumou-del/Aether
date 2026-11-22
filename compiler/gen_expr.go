@@ -902,7 +902,7 @@ func (g *Gen) attr(a *Attr) string {
 			if nt, ok := a.T.(*NamedT); ok {
 				args = nt.Args
 			}
-			return v.GoName + g.targs(args) + "{}"
+			return g.typ(a.T) + "(" + v.GoName + g.targs(args) + "{})"
 		}
 		return v.GoName
 	case AttrVariantCtor:
@@ -922,7 +922,7 @@ func (g *Gen) attr(a *Attr) string {
 		return fmt.Sprintf("%s.V%s", g.expr(a.X), a.Name)
 	case AttrBuiltinProp:
 		if a.Name == "name" {
-			return g.expr(a.X) + ".nameꞏ()"
+			return g.expr(a.X) + ".EnumNameꞏ()"
 		}
 		return "int(" + g.expr(a.X) + ")"
 	case AttrMethodValue:
@@ -1179,7 +1179,8 @@ func (g *Gen) call(e *Call) string {
 		if e.Ctor != nil {
 			args = e.Ctor.Args
 		}
-		return e.Variant.GoName + g.targs(args) + "{" + strings.Join(g.argList(e), ", ") + "}"
+		lit := e.Variant.GoName + g.targs(args) + "{" + strings.Join(g.argList(e), ", ") + "}"
+		return g.typ(e.T) + "(" + lit + ")"
 	case CallConv:
 		return g.convCall(e)
 	case CallBuiltin:

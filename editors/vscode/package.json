@@ -1,0 +1,26 @@
+{
+  "name": "aether",
+  "displayName": "五行 (Aether)",
+  "description": "五行 (Aether) 编程语言的语法高亮",
+  "version": "0.1.0",
+  "publisher": "aether-lang",
+  "engines": { "vscode": "^1.60.0" },
+  "categories": ["Programming Languages"],
+  "contributes": {
+    "languages": [
+      {
+        "id": "aether",
+        "aliases": ["五行", "Aether", "aether"],
+        "extensions": [".ae"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "aether",
+        "scopeName": "source.aether",
+        "path": "./syntaxes/aether.tmLanguage.json"
+      }
+    ]
+  }
+}

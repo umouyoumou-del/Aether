@@ -800,7 +800,7 @@ func (c *Checker) resolveSig(fd *FuncDecl, parent *Scope, owner *TypeDecl) *Func
 			c.errorf(p.Pos, "参数 '%s' 重复", p.Name)
 		}
 		seen[p.Name] = true
-		pi := &ParamInfo{Name: p.Name, Variadic: p.Variadic, Default: p.Default, Mod: c.mod, Pos: p.Pos}
+		pi := &ParamInfo{Name: p.Name, Variadic: p.Variadic, KwOnly: p.KwOnly, Default: p.Default, Mod: c.mod, Pos: p.Pos}
 		if p.Type == nil {
 			c.errorf(p.Pos, "参数 '%s' 需要类型注解", p.Name)
 			pi.T = tInvalid
@@ -821,7 +821,7 @@ func (c *Checker) resolveSig(fd *FuncDecl, parent *Scope, owner *TypeDecl) *Func
 		}
 		if p.Default != nil {
 			sawDefault = true
-		} else if sawDefault && !p.Variadic && !sawVariadic {
+		} else if sawDefault && !p.Variadic && !sawVariadic && !p.KwOnly {
 			c.errorf(p.Pos, "没有默认值的参数 '%s' 不能出现在有默认值的参数之后", p.Name)
 		}
 		_ = i

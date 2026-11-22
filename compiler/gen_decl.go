@@ -654,7 +654,7 @@ func (g *Gen) genEnum(td *TypeDecl) {
 	}
 	g.line(")")
 	g.line("")
-	g.line("func (self %s) nameꞏ() string {", td.GoName)
+	g.line("func (self %s) EnumNameꞏ() string {", td.GoName)
 	g.line("\tswitch self {")
 	for _, v := range td.Variants {
 		g.line("\tcase %s:", v.GoName)
@@ -666,7 +666,7 @@ func (g *Gen) genEnum(td *TypeDecl) {
 	g.line("")
 	hasStr := td.Methods["__str__"] != nil
 	if !hasStr {
-		g.line("func (self %s) String() string { return %q + self.nameꞏ() }", td.GoName, td.Name+".")
+		g.line("func (self %s) String() string { return %q + self.EnumNameꞏ() }", td.GoName, td.Name+".")
 	}
 	g.line("func (self %s) TypeNameꞏ() string { return %q }", td.GoName, td.Name)
 	g.line("")

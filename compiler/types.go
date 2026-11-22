@@ -221,6 +221,7 @@ type ParamInfo struct {
 	T        Type
 	Default  Expr
 	Variadic bool
+	KwOnly   bool
 	Mod      *Module
 	Pos      Pos
 }

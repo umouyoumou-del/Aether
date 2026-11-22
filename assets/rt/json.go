@@ -183,6 +183,10 @@ func (e *jsonEnc) value(v any, depth int) {
 		e.object(names, vals, depth)
 		return
 	}
+	if en, ok := v.(interface{ EnumNameꞏ() string }); ok {
+		e.sb.WriteString(jsonQuote(en.EnumNameꞏ()))
+		return
+	}
 	if iv, ok, _ := toInt(v); ok {
 		if _, isEnum := v.(fmt.Stringer); isEnum {
 			e.sb.WriteString(jsonQuote(Str(v)))
