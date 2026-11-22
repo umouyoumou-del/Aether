@@ -1273,10 +1273,10 @@ func (c *Checker) builtinCall(e *Call, name string, want Type) Type {
 			kt := c.keyFunc(a, et)
 			e.TArgs = []Type{et, kt}
 			e.Final[1] = a.X
-		} else if !isOrdered(et) {
+		} else if !isOrdered(et) && !c.hasLess(et) {
 			if _, ok := et.(*TupleT); !ok {
 				d := c.errorf(pos[0].X.P(), "元素类型 %s 不能直接排序", et)
-				d.Notes = append(d.Notes, "请提供 key，例如 sorted(xs, key=x => x.age)")
+				d.Notes = append(d.Notes, "请提供 key，例如 sorted(xs, key=x => x.age)，或为类型定义 __lt__")
 			}
 		}
 		if a := kw["reverse"]; a != nil {
@@ -1519,6 +1519,12 @@ func (c *Checker) builtinCall(e *Call, name string, want Type) Type {
 	return tInvalid
 }
 
+// hasLess 判断类型是否定义了 __lt__(self, other: 同类型)。
+func (c *Checker) hasLess(t Type) bool {
+	m, sig := c.operatorMethod(t, "__lt__")
+	return m != nil && len(sig.Params) == 1 && identical(sig.Params[0].T, t)
+}
+
 // keyFunc 检查 key= 参数，返回键类型。
 func (c *Checker) keyFunc(a *Arg, et Type) Type {
 	want := &FuncT{Params: []Type{et}}
@@ -1574,8 +1580,10 @@ func (c *Checker) minMax(e *Call, name string, pos []*Arg, kw map[string]*Arg, w
 			kt := c.keyFunc(a, et)
 			e.TArgs = []Type{et, kt}
 			e.Final[1] = a.X
-		} else if !isOrdered(et) {
-			c.errorf(pos[0].X.P(), "元素类型 %s 不可比较；请提供 key=", et)
+		} else if !isOrdered(et) && !c.hasLess(et) {
+			if _, ok := et.(*TupleT); !ok {
+				c.errorf(pos[0].X.P(), "元素类型 %s 不可比较；请提供 key= 或定义 __lt__", et)
+			}
 		}
 		if a := kw["default"]; a != nil {
 			c.exprTo(&a.X, et, "default")
@@ -1603,8 +1611,10 @@ func (c *Checker) minMax(e *Call, name string, pos []*Arg, kw map[string]*Arg, w
 		kt := c.keyFunc(a, et)
 		e.TArgs = []Type{et, kt}
 		e.Extra = a.X
-	} else if !isOrdered(et) {
-		c.errorf(e.Pos, "%s 的参数类型 %s 不可比较", name, et)
+	} else if !isOrdered(et) && !c.hasLess(et) {
+		if _, ok := et.(*TupleT); !ok {
+			c.errorf(e.Pos, "%s 的参数类型 %s 不可比较", name, et)
+		}
 	}
 	return et
 }

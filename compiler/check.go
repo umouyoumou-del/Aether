@@ -214,6 +214,7 @@ type Checker struct {
 	Main      *Module
 	universe  *Scope
 	exts      map[string][]*ExtBlock
+	ifaceExts []*ExtBlock // 目标为接口的扩展块
 	Types     []*TypeDecl
 	TestMode  bool
 

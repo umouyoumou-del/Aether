@@ -92,6 +92,11 @@ class AtomicInt:
     @go("Incr") def incr(self) -> int
     @go("CompareAndSwap") def compare_and_swap(self, old: int, new: int) -> bool
 
+# ===== 可比较接口（定义了 __lt__ 的类型可以排序） =====
+
+interface Comparable[T]:
+    def __lt__(self, other: T) -> bool
+
 # ===== 内置泛型函数 =====
 
 @go("rt.AwaitAll") def gather[T](tasks: list[Task[T]]) -> list[T]
@@ -237,6 +242,12 @@ extend[T: Ordered] list[T]:
     @go("rt.ListSorted") def sorted(self, reverse: bool = false) -> list[T]
     @go("rt.ListMin") def min(self) -> T
     @go("rt.ListMax") def max(self) -> T
+
+extend[T: Comparable[T]] list[T]:
+    @go("rt.ListSortLess") def sort(self, reverse: bool = false)
+    @go("rt.ListSortedLess") def sorted(self, reverse: bool = false) -> list[T]
+    @go("rt.ListMinLess") def min(self) -> T
+    @go("rt.ListMaxLess") def max(self) -> T
 
 extend[T: Number] list[T]:
     @go("rt.ListSum") def sum(self) -> T

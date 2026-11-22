@@ -2282,7 +2282,17 @@ type extCand struct {
 func (c *Checker) extCandidates(t Type, name string) []extCand {
 	var out []extCand
 	key := typeHead(t)
-	for _, blk := range c.exts[key] {
+	blocks := c.exts[key]
+	for _, blk := range c.ifaceExts {
+		if blk.Key == key {
+			continue
+		}
+		if len(blk.Methods[name]) == 0 && blk.Props[name] == nil {
+			continue
+		}
+		blocks = append(blocks, blk)
+	}
+	for _, blk := range blocks {
 		ms := blk.Methods[name]
 		p := blk.Props[name]
 		if len(ms) == 0 && p == nil {
@@ -2309,6 +2319,11 @@ func (c *Checker) extCandidates(t Type, name string) []extCand {
 		}
 		if !ok {
 			continue
+		}
+		if td := namedDecl(blk.Target); td != nil && td.Kind == DInterface && blk.Key != key {
+			if good, _ := c.implements(t, subst(blk.Target, m).(*NamedT)); !good {
+				continue
+			}
 		}
 		if !c.privateOK(name, blk.Mod) {
 			continue

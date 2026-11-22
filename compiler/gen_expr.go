@@ -1404,6 +1404,9 @@ func (g *Gen) builtin(e *Call) string {
 				if isOrdered(et) {
 					return fmt.Sprintf("%s.%sIter(%s, %s)", rt, cap, arg(0), def)
 				}
+				if g.c.hasLess(et) {
+					return fmt.Sprintf("%s.%sIterLess(%s, %s)", rt, cap, arg(0), def)
+				}
 				return fmt.Sprintf("%s.%sIterCmp(%s, %s)", rt, cap, arg(0), def)
 			}
 			var args []string
@@ -1412,6 +1415,9 @@ func (g *Gen) builtin(e *Call) string {
 			}
 			if isOrdered(et) {
 				return fmt.Sprintf("%s.%s[%s](%s)", rt, cap, g.typ(et), strings.Join(args, ", "))
+			}
+			if g.c.hasLess(et) {
+				return fmt.Sprintf("%s.%sLess[%s](%s)", rt, cap, g.typ(et), strings.Join(args, ", "))
 			}
 			return fmt.Sprintf("%s.%sCmp[%s](%s)", rt, cap, g.typ(et), strings.Join(args, ", "))
 		case Expr:
@@ -1439,6 +1445,9 @@ func (g *Gen) builtin(e *Call) string {
 		}
 		if isOrdered(elemOfIter(0)) {
 			return fmt.Sprintf("%s.Sorted(%s, %s)", rt, arg(0), rev)
+		}
+		if g.c.hasLess(elemOfIter(0)) {
+			return fmt.Sprintf("%s.SortedLess(%s, %s)", rt, arg(0), rev)
 		}
 		return fmt.Sprintf("%s.SortedCmp(%s, %s)", rt, arg(0), rev)
 	case "reversed":

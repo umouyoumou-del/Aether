@@ -315,8 +315,9 @@ func (c *Checker) satisfies(t Type, tp *TypeParam) (bool, string) {
 		}
 		return false, fmt.Sprintf("%s 不是整数类型", t)
 	case BoundIface:
-		if ok, miss := c.implements(t, tp.Iface); !ok {
-			return false, fmt.Sprintf("%s 没有实现接口 %s（%s）", t, tp.Iface, miss)
+		iface := subst(tp.Iface, Subst{tp: t}).(*NamedT)
+		if ok, miss := c.implements(t, iface); !ok {
+			return false, fmt.Sprintf("%s 没有实现接口 %s（%s）", t, iface, miss)
 		}
 		return true, ""
 	}
@@ -1012,6 +1013,9 @@ func (c *Checker) resolveExt(x *ExtBlock) {
 	}
 	x.Key = typeHead(x.Target)
 	c.exts[x.Key] = append(c.exts[x.Key], x)
+	if d := namedDecl(x.Target); d != nil && d.Kind == DInterface {
+		c.ifaceExts = append(c.ifaceExts, x)
+	}
 	td := namedDecl(x.Target)
 	for _, fd := range xd.Methods {
 		m := &Method{Name: fd.Name, Decl: fd, Ext: x, Static: fd.Static, Extern: fd.GoExtern, Pos: fd.NamePos}

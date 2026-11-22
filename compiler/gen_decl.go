@@ -211,6 +211,11 @@ func (g *Gen) genClass(td *TypeDecl) {
 				continue
 			}
 			g.line("%s", g.methodSigLine(m.GoName, nil, m.Sig))
+			if m.Name == "__lt__" && len(m.Sig.Params) == 1 && !m.Abstract {
+				g.line("Lessꞏ(%s) bool", g.typ(m.Sig.Params[0].T))
+			} else if m.Name == "__lt__" && len(m.Sig.Params) == 1 {
+				g.line("Lessꞏ(%s) bool", g.typ(m.Sig.Params[0].T))
+			}
 		}
 		for _, p := range td.PropList {
 			if p.Static {
@@ -313,6 +318,16 @@ func (g *Gen) genClassMethods(td *TypeDecl) {
 		pt := g.typ(eqM.Sig.Params[0].T)
 		g.subst = save
 		g.line("func (self *%s) Eqꞏ(o any) bool { x, ok := o.(%s); return ok && self.__eq__(x) }", st, pt)
+	}
+	if mem, _, _ := g.c.findMember(nt, "__lt__"); mem != nil {
+		if lt, ok := mem.(*Method); ok && len(lt.Sig.Params) == 1 {
+			anc := ancestorOf(td, lt.Owner)
+			save := g.subst
+			g.subst = makeSubst(anc.D.TParams, anc.Args)
+			pt := g.typ(lt.Sig.Params[0].T)
+			g.subst = save
+			g.line("func (self *%s) Lessꞏ(o %s) bool { return self.__lt__(o) }", st, pt)
+		}
 	}
 	// 接口要求的属性由字段满足时，生成访问方法
 	for _, f := range g.allFieldsWithOwner(td) {
@@ -618,6 +633,13 @@ func (g *Gen) genStruct(td *TypeDecl) {
 	}
 	g.line("func (self %s) TypeNameꞏ() string { return %q }", st, td.Name)
 	g.genFields(st, td.Fields, "", "")
+	if lt := td.Methods["__lt__"]; lt != nil && len(lt.Sig.Params) == 1 {
+		recv := st
+		if lt.Mutating {
+			recv = "*" + st
+		}
+		g.line("func (self %s) Lessꞏ(o %s) bool { return self.__lt__(o) }", recv, g.typ(lt.Sig.Params[0].T))
+	}
 	if eqM != nil {
 		g.line("func (self %s) Eqꞏ(o any) bool { x, ok := o.(%s); return ok && self.__eq__(x) }", st, g.typ(eqM.Sig.Params[0].T))
 	} else {
