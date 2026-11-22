@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"sort"
 	"strings"
 )
 
@@ -1873,6 +1874,43 @@ func (c *Checker) checkStructCalls() {
 		}
 		if !addressable(sc.recv) {
 			c.errorf(sc.pos, "方法 %s 会修改结构体，但这里的接收者是临时值（函数返回值、字典元素等），修改不会生效；请先赋给变量", sc.method.Name)
+		}
+	}
+}
+
+// noteStructIface 记录结构体（或可空结构体）的值被当作接口 to 使用的地方：转换为接口、
+// 作为接口扩展方法的接收者、作为带接口约束的类型实参。哪些方法会修改 self 要等全部
+// 函数体检查完才知道，所以由 checkStructIfaces 最后检查。
+func (c *Checker) noteStructIface(from, to Type, pos Pos) {
+	st, ok1 := optElem(from).(*NamedT)
+	it, ok2 := optElem(to).(*NamedT)
+	if ok1 && ok2 && st.D.Kind == DStruct && it.D.Kind == DInterface {
+		c.structIfaces = append(c.structIfaces, structIface{st: st, iface: it, pos: pos})
+	}
+}
+
+// checkStructIfaces 检查当作接口使用的结构体：接口要求的方法不能修改 self
+// （结构体转换为接口时会被复制，通过接口的修改不会作用到原来的值上）。
+func (c *Checker) checkStructIfaces() {
+	seen := map[Pos]bool{}
+	for _, si := range c.structIfaces {
+		if seen[si.pos] {
+			continue
+		}
+		methods, _, _ := c.ifaceMembers(si.iface)
+		names := make([]string, 0, len(methods))
+		for n := range methods {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+		for _, n := range names {
+			mem, _, _ := c.findMember(si.st, n)
+			if mt, ok := mem.(*Method); ok && mt.Mutating {
+				seen[si.pos] = true
+				d := c.errorf(si.pos, "结构体 %s 不能当作接口 %s 使用：接口要求的方法 %s 会修改 self，而结构体转换为接口时会被复制", si.st, si.iface, n)
+				d.Notes = append(d.Notes, "把 "+si.st.D.Name+" 改为 class（引用语义），或者让 "+n+" 不修改 self")
+				break
+			}
 		}
 	}
 }

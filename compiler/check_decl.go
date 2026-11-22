@@ -343,8 +343,15 @@ func (c *Checker) checkTArgs(tps []*TypeParam, args []Type, pos Pos) bool {
 			break
 		}
 		if good, why := c.satisfiesIn(args[i], tp, env); !good {
-			c.errorf(pos, "类型实参 %s 不满足约束 %s: %s", args[i], tp.Name+": "+tp.BoundName(), why)
+			d := c.errorf(pos, "类型实参 %s 不满足约束 %s: %s", args[i], tp.Name+": "+tp.BoundName(), why)
+			if tp.Bound == BoundIface && isOrdered(args[i]) {
+				if lt, _, _ := c.findIfaceMember(tp.Iface, "__lt__", map[*TypeDecl]bool{}); lt != nil {
+					d.Notes = append(d.Notes, "数字、str、char 等内置类型没有 __lt__ 方法，不能实现 Comparable；只需要支持这些类型时请用约束 Ordered")
+				}
+			}
 			ok = false
+		} else if tp.Bound == BoundIface {
+			c.noteStructIface(args[i], subst(tp.Iface, env), pos)
 		}
 	}
 	return ok

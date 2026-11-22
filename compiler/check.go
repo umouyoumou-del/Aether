@@ -231,6 +231,7 @@ type Checker struct {
 	implCache map[string]bool
 	initPhase bool
 	structCalls []structCall
+	structIfaces []structIface
 	AllFuncs  []*FuncCtx
 	Lambdas   []*Lambda
 	constBusy map[*ConstDecl]bool
@@ -241,6 +242,13 @@ type structCall struct {
 	recv   Expr
 	method *Method
 	pos    Pos
+}
+
+// structIface 是结构体的值被当作接口使用的地方（见 noteStructIface）。
+type structIface struct {
+	st    *NamedT
+	iface *NamedT
+	pos   Pos
 }
 
 func (c *Checker) errorf(pos Pos, format string, args ...any) *Diag {
@@ -331,6 +339,7 @@ func Check(mods []*Module, diag *Diagnostics, testMode bool) (c *Checker) {
 	}
 	c.analyzeMutating()
 	c.checkStructCalls()
+	c.checkStructIfaces()
 	return c
 }
 

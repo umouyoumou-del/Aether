@@ -691,6 +691,7 @@ func (c *Checker) methodCall0(e *Call, fn *Attr, rt Type, want Type) Type {
 			if cd.prop != nil && len(matching) == 0 {
 				pt := subst(cd.prop.T, cd.subst)
 				if f, ok := pt.(*FuncT); ok {
+					c.noteExtUse(cd, rt, fn.NamePos)
 					fn.Kind = AttrProp
 					fn.Prop = cd.prop
 					e.Kind = CallValue
@@ -721,6 +722,7 @@ func (c *Checker) methodCall0(e *Call, fn *Attr, rt Type, want Type) Type {
 		}
 	}
 	if chosen != nil {
+		c.noteExtUse(chosen, rt, fn.NamePos)
 		mm := chosen.method
 		fn.Kind = AttrMethodValue
 		fn.Method = mm
@@ -736,11 +738,7 @@ func (c *Checker) methodCall0(e *Call, fn *Attr, rt Type, want Type) Type {
 		return tInvalid
 	}
 	d := c.errorf(fn.NamePos, "类型 %s 没有方法 %s", rt, fn.Name)
-	if note := c.extIfaceNote(rt, fn.Name); note != "" {
-		d.Notes = append(d.Notes, note)
-	} else if s := c.suggestMember(rt, fn.Name); s != "" {
-		d.Notes = append(d.Notes, "是不是想用 "+s+"？")
-	}
+	d.Notes = append(d.Notes, c.extMissingNotes(rt, fn.Name, func(s string) string { return "是不是想用 " + s + "？" })...)
 	c.checkArgsQuiet(e)
 	return tInvalid
 }
@@ -1283,7 +1281,11 @@ func (c *Checker) builtinCall(e *Call, name string, want Type) Type {
 		} else if !isOrdered(et) && !c.hasLess(et) {
 			if _, ok := et.(*TupleT); !ok {
 				d := c.errorf(pos[0].X.P(), "元素类型 %s 不能直接排序", et)
-				d.Notes = append(d.Notes, "请提供 key，例如 sorted(xs, key=x => x.age)，或为类型定义 __lt__")
+				if note := c.lessNote(et); note != "" {
+					d.Notes = append(d.Notes, note)
+				} else {
+					d.Notes = append(d.Notes, "请提供 key，例如 sorted(xs, key=x => x.age)，或为类型定义 __lt__")
+				}
 			}
 		}
 		if a := kw["reverse"]; a != nil {
@@ -1533,6 +1535,16 @@ func (c *Checker) hasLess(t Type) bool {
 	return m != nil && len(sig.Params) == 1 && identical(sig.Params[0].T, t) && isBool(sig.Ret)
 }
 
+// lessNote 当 t 有 __lt__、但参数类型不是 t 本身（例如从基类继承的 __lt__）时，返回说明。
+func (c *Checker) lessNote(t Type) string {
+	m, sig := c.orderMethod(t, "__lt__")
+	if m == nil || len(sig.Params) != 1 || identical(sig.Params[0].T, t) {
+		return ""
+	}
+	pt := sig.Params[0].T
+	return fmt.Sprintf("%s 的 __lt__ 的参数类型是 %s，而直接排序、求最值要求它就是元素类型本身；可以把元素类型写成 %s（例如 list[%s]），或者提供 key", t, pt, pt, pt)
+}
+
 // keyFunc 检查 key= 参数，返回键类型。
 func (c *Checker) keyFunc(a *Arg, et Type) Type {
 	want := &FuncT{Params: []Type{et}}
@@ -1590,7 +1602,10 @@ func (c *Checker) minMax(e *Call, name string, pos []*Arg, kw map[string]*Arg, w
 			e.Final[1] = a.X
 		} else if !isOrdered(et) && !c.hasLess(et) {
 			if _, ok := et.(*TupleT); !ok {
-				c.errorf(pos[0].X.P(), "元素类型 %s 不可比较；请提供 key= 或定义 __lt__", et)
+				d := c.errorf(pos[0].X.P(), "元素类型 %s 不可比较；请提供 key= 或定义 __lt__", et)
+				if note := c.lessNote(et); note != "" {
+					d.Notes = append(d.Notes, note)
+				}
 			}
 		}
 		if a := kw["default"]; a != nil {
@@ -1621,7 +1636,10 @@ func (c *Checker) minMax(e *Call, name string, pos []*Arg, kw map[string]*Arg, w
 		e.Extra = a.X
 	} else if !isOrdered(et) && !c.hasLess(et) {
 		if _, ok := et.(*TupleT); !ok {
-			c.errorf(e.Pos, "%s 的参数类型 %s 不可比较；请提供 key= 或定义 __lt__", name, et)
+			d := c.errorf(e.Pos, "%s 的参数类型 %s 不可比较；请提供 key= 或定义 __lt__", name, et)
+			if note := c.lessNote(et); note != "" {
+				d.Notes = append(d.Notes, note)
+			}
 		}
 	}
 	return et

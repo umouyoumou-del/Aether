@@ -60,6 +60,7 @@ func (c *Checker) convert(slot *Expr, from, to Type, ctx string) bool {
 		return false
 	}
 	if k != ConvNone {
+		c.noteStructIface(from, to, (*slot).P())
 		ce := &ConvExpr{exprBase: exprBase{Pos: (*slot).P(), T: to}, X: *slot, Kind: k, From: from}
 		if k == ConvWrap {
 			ce.Inner, _ = c.assignable(from, optElem(to))
@@ -2282,6 +2283,7 @@ func (c *Checker) member(e *Attr, t Type) Type {
 			c.extAmbiguous(e.NamePos, t, e.Name, cd, rival)
 			return tInvalid
 		}
+		c.noteExtUse(cd, t, e.NamePos)
 		if cd.prop != nil {
 			e.Kind = AttrProp
 			e.Prop = cd.prop
@@ -2300,11 +2302,7 @@ func (c *Checker) member(e *Attr, t Type) Type {
 		return tInvalid
 	}
 	d := c.errorf(e.NamePos, "类型 %s 没有成员 %s", t, e.Name)
-	if note := c.extIfaceNote(t, e.Name); note != "" {
-		d.Notes = append(d.Notes, note)
-	} else if s := c.suggestMember(t, e.Name); s != "" {
-		d.Notes = append(d.Notes, "是不是想写 ."+s+"？")
-	}
+	d.Notes = append(d.Notes, c.extMissingNotes(t, e.Name, func(s string) string { return "是不是想写 ." + s + "？" })...)
 	return tInvalid
 }
 
@@ -2417,6 +2415,23 @@ func (c *Checker) pickExt(ms []*extCand) (best, rival *extCand) {
 	return best, nil
 }
 
+// noteExtUse 记录选中的扩展成员中结构体被当作接口使用的地方：接口扩展的接收者
+// （生成的函数以接口类型接收 self），以及扩展块中带接口约束的类型参数。
+// 用 @go 实现的扩展由运行时库决定参数类型，不记录。
+func (c *Checker) noteExtUse(cd *extCand, recvT Type, pos Pos) {
+	if cd.method != nil && cd.method.Extern != "" || cd.prop != nil && cd.prop.Extern != "" {
+		return
+	}
+	if cd.viaIface {
+		c.noteStructIface(recvT, subst(cd.block.Target, cd.subst), pos)
+	}
+	for _, tp := range cd.block.TParams {
+		if tp.Bound == BoundIface && cd.subst[tp] != nil {
+			c.noteStructIface(cd.subst[tp], subst(tp.Iface, cd.subst), pos)
+		}
+	}
+}
+
 // extMoreSpecific 判断候选 a 的接口是否包含候选 b 的接口（实现 a 的接口就一定实现 b 的）。
 func (c *Checker) extMoreSpecific(a, b *extCand) bool {
 	ta, ok1 := subst(a.block.Target, a.subst).(*NamedT)
@@ -2451,6 +2466,34 @@ func (c *Checker) extIfaceNote(t Type, name string) string {
 		return note
 	}
 	return ""
+}
+
+// extPrivateNote 当适用于 t 的扩展成员 name 是其他模块的私有成员时，返回说明。
+func (c *Checker) extPrivateNote(t Type, name string) string {
+	for _, blk := range c.extBlocks(t, name) {
+		if c.privateOK(name, blk.Mod) {
+			continue
+		}
+		if _, ok := c.extApplies(blk, t); ok {
+			return fmt.Sprintf("'%s' 是模块 %s 中的私有扩展成员，只能在该模块中使用", name, blk.Mod.Name)
+		}
+	}
+	return ""
+}
+
+// extMissingNotes 返回“没有成员 name”错误的说明：私有扩展成员、不适用的接口扩展，
+// 或者拼写相近的成员（suggest 把它包装成提示）。
+func (c *Checker) extMissingNotes(t Type, name string, suggest func(string) string) []string {
+	if note := c.extPrivateNote(t, name); note != "" {
+		return []string{note}
+	}
+	if note := c.extIfaceNote(t, name); note != "" {
+		return []string{note}
+	}
+	if s := c.suggestMember(t, name); s != "" {
+		return []string{suggest(s)}
+	}
+	return nil
 }
 
 // extUnsatisfied 若存在同名扩展但约束不满足，返回说明（多个扩展块时列出全部约束）。
