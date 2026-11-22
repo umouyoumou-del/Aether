@@ -1,7 +1,7 @@
 # http 模块：HTTP 服务器与客户端（基于 Go 的 net/http）
 # 路由模式支持 Go 1.22 语法，例如 "/users/{id}"，用 req.param("id") 取值。
 
-@go("*rt.HTTPRequest")
+@go("*rthttp.HTTPRequest")
 class Request:
     @go("Method") prop method -> str
     @go("Path") prop path -> str
@@ -13,7 +13,7 @@ class Request:
     @go("Form") def form(self, name: str) -> str?
     @go("JSON") def json(self) -> any
 
-@go("*rt.HTTPResponse")
+@go("*rthttp.HTTPResponse")
 class Response:
     @go("Status") prop status -> int
     @go("Text") prop text -> str
@@ -22,13 +22,13 @@ class Response:
     @go("Header") def header(self, name: str) -> str?
     @go("SetHeader") def set_header(self, name: str, value: str) -> Response
 
-@go("rt.HTTPText") def text(body: str, status: int = 200) -> Response
-@go("rt.HTTPHTML") def html(body: str, status: int = 200) -> Response
-@go("rt.HTTPJSON") def json(value: any, status: int = 200) -> Response
-@go("rt.HTTPStatus") def status(code: int, message: str = "") -> Response
-@go("rt.HTTPRedirect") def redirect(url: str) -> Response
+@go("rthttp.HTTPText") def text(body: str, status: int = 200) -> Response
+@go("rthttp.HTTPHTML") def html(body: str, status: int = 200) -> Response
+@go("rthttp.HTTPJSON") def json(value: any, status: int = 200) -> Response
+@go("rthttp.HTTPStatus") def status(code: int, message: str = "") -> Response
+@go("rthttp.HTTPRedirect") def redirect(url: str) -> Response
 
-@go("*rt.HTTPServer", ctor="rt.NewHTTPServer")
+@go("*rthttp.HTTPServer", ctor="rthttp.NewHTTPServer")
 class Server:
     def __init__(self)
     @go("Get") def get(self, pattern: str, handler: fn(Request) -> Response)
@@ -40,5 +40,5 @@ class Server:
     @go("Stop") def stop(self)
     @go("SetQuiet") def quiet(self, on: bool = true)
 
-@go("rt.HTTPGet") def get(url: str, timeout: float = 30.0) -> Response
-@go("rt.HTTPPost") def post(url: str, body: str, content_type: str = "application/json", timeout: float = 30.0) -> Response
+@go("rthttp.HTTPGet") def get(url: str, timeout: float = 30.0) -> Response
+@go("rthttp.HTTPPost") def post(url: str, body: str, content_type: str = "application/json", timeout: float = 30.0) -> Response

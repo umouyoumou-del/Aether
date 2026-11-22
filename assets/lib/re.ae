@@ -1,6 +1,6 @@
 # re 模块：正则表达式（RE2 语法，保证线性时间，不支持反向引用）
 
-@go("*rt.Match")
+@go("*rtre.Match")
 class Match:
     @go("Group") def group(self, i: int = 0) -> str
     @go("GroupName") def named(self, name: str) -> str
@@ -9,7 +9,7 @@ class Match:
     @go("End") def end(self, i: int = 0) -> int
     @go("Text") prop text -> str
 
-@go("*rt.Regex")
+@go("*rtre.Regex")
 class Regex:
     @go("Match") def match(self, s: str) -> Match?
     @go("FullMatch") def fullmatch(self, s: str) -> Match?
@@ -22,12 +22,12 @@ class Regex:
     @go("Split") def split(self, s: str, maxsplit: int = 0) -> list[str]
     @go("Pattern") prop pattern -> str
 
-@go("rt.ReCompile") def compile(pattern: str) -> Regex
-@go("rt.ReMatch") def match(pattern: str, s: str) -> Match?
-@go("rt.ReFullMatch") def fullmatch(pattern: str, s: str) -> Match?
-@go("rt.ReSearch") def search(pattern: str, s: str) -> Match?
-@go("rt.ReTest") def test(pattern: str, s: str) -> bool
-@go("rt.ReFindAll") def find_all(pattern: str, s: str) -> list[str]
-@go("rt.ReSub") def sub(pattern: str, repl: str, s: str, count: int = 0) -> str
-@go("rt.ReSplit") def split(pattern: str, s: str, maxsplit: int = 0) -> list[str]
+@go("rtre.ReCompile") def compile(pattern: str) -> Regex
+@go("rtre.ReMatch") def match(pattern: str, s: str) -> Match?
+@go("rtre.ReFullMatch") def fullmatch(pattern: str, s: str) -> Match?
+@go("rtre.ReSearch") def search(pattern: str, s: str) -> Match?
+@go("rtre.ReTest") def test(pattern: str, s: str) -> bool
+@go("rtre.ReFindAll") def find_all(pattern: str, s: str) -> list[str]
+@go("rtre.ReSub") def sub(pattern: str, repl: str, s: str, count: int = 0) -> str
+@go("rtre.ReSplit") def split(pattern: str, s: str, maxsplit: int = 0) -> list[str]
 @go("regexp.QuoteMeta") def escape(s: str) -> str

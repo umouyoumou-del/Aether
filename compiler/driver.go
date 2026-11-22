@@ -287,28 +287,39 @@ func BuildGo(goSrc string, key string, cfg BuildConfig) (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
-	if _, err := writeIfChanged(filepath.Join(dir, "go.mod"), []byte("module aeprog\n\ngo 1.23\n")); err != nil {
+	if _, err := writeIfChanged(filepath.Join(dir, "go.mod"), []byte("module aether/assets\n\ngo 1.23\n")); err != nil {
 		return "", err
 	}
 	var rtParts [][]byte
 	if cfg.RT != nil {
-		entries, err := fs.ReadDir(cfg.RT, ".")
+		want := map[string]bool{}
+		err := fs.WalkDir(cfg.RT, ".", func(p string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() || !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") {
+				return nil
+			}
+			data, err := fs.ReadFile(cfg.RT, p)
+			if err != nil {
+				return err
+			}
+			rtParts = append(rtParts, []byte(p), data)
+			dst := filepath.Join(dir, "rt", filepath.FromSlash(p))
+			want[strings.ToLower(dst)] = true
+			_, err = writeIfChanged(dst, data)
+			return err
+		})
 		if err != nil {
 			return "", err
 		}
-		for _, e := range entries {
-			if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
-				continue
+		// 删除旧版本留下的多余文件
+		filepath.WalkDir(filepath.Join(dir, "rt"), func(p string, d os.DirEntry, err error) error {
+			if err == nil && !d.IsDir() && !want[strings.ToLower(p)] {
+				os.Remove(p)
 			}
-			data, err := fs.ReadFile(cfg.RT, e.Name())
-			if err != nil {
-				return "", err
-			}
-			rtParts = append(rtParts, []byte(e.Name()), data)
-			if _, err := writeIfChanged(filepath.Join(dir, "rt", e.Name()), data); err != nil {
-				return "", err
-			}
-		}
+			return nil
+		})
 	}
 	if _, err := writeIfChanged(filepath.Join(dir, "main.go"), []byte(goSrc)); err != nil {
 		return "", err

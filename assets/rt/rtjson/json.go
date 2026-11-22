@@ -1,6 +1,7 @@
-package rt
+package rtjson
 
 import (
+	"aether/assets/rt"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,31 +15,6 @@ import (
 type fielder interface{ Fieldsꞏ() ([]string, []any) }
 type itemser interface{ Itemsꞏ() []any }
 type pairser interface{ Pairsꞏ() ([]any, []any) }
-
-func (l *List[T]) Itemsꞏ() []any {
-	out := make([]any, len(l.S))
-	for i, x := range l.S {
-		out[i] = x
-	}
-	return out
-}
-
-func (s *Set[T]) Itemsꞏ() []any {
-	var out []any
-	for x := range s.All() {
-		out = append(out, x)
-	}
-	return out
-}
-
-func (d *Dict[K, V]) Pairsꞏ() ([]any, []any) {
-	var ks, vs []any
-	for k, v := range d.All() {
-		ks = append(ks, k)
-		vs = append(vs, v)
-	}
-	return ks, vs
-}
 
 type jsonEnc struct {
 	sb     strings.Builder
@@ -143,19 +119,19 @@ func (e *jsonEnc) array(items []any, depth int) {
 
 func (e *jsonEnc) value(v any, depth int) {
 	if depth > 200 {
-		Raise("JSONError", "JSON 嵌套太深（可能存在循环引用）")
+		rt.Raise("JSONError", "JSON 嵌套太深（可能存在循环引用）")
 	}
 	switch x := v.(type) {
 	case nil:
 		e.sb.WriteString("null")
 		return
 	case bool:
-		e.sb.WriteString(BoolStr(x))
+		e.sb.WriteString(rt.BoolStr(x))
 		return
 	case string:
 		e.sb.WriteString(jsonQuote(x))
 		return
-	case Char:
+	case rt.Char:
 		e.sb.WriteString(jsonQuote(string(rune(x))))
 		return
 	case float64:
@@ -171,7 +147,7 @@ func (e *jsonEnc) value(v any, depth int) {
 		ks, vs := x.Pairsꞏ()
 		keys := make([]string, len(ks))
 		for i, k := range ks {
-			keys[i] = Str(k)
+			keys[i] = rt.Str(k)
 		}
 		e.object(keys, vs, depth)
 		return
@@ -187,9 +163,9 @@ func (e *jsonEnc) value(v any, depth int) {
 		e.sb.WriteString(jsonQuote(en.EnumNameꞏ()))
 		return
 	}
-	if iv, ok, _ := toInt(v); ok {
+	if iv, ok, _ := rt.ToInt(v); ok {
 		if _, isEnum := v.(fmt.Stringer); isEnum {
-			e.sb.WriteString(jsonQuote(Str(v)))
+			e.sb.WriteString(jsonQuote(rt.Str(v)))
 			return
 		}
 		e.sb.WriteString(strconv.FormatInt(iv, 10))
@@ -208,7 +184,7 @@ func (e *jsonEnc) value(v any, depth int) {
 		e.array(items, depth)
 		return
 	}
-	e.sb.WriteString(jsonQuote(Str(v)))
+	e.sb.WriteString(jsonQuote(rt.Str(v)))
 }
 
 func (e *jsonEnc) float(f float64) {
@@ -220,7 +196,7 @@ func (e *jsonEnc) float(f float64) {
 	case math.IsInf(f, -1):
 		e.sb.WriteString("-Infinity")
 	default:
-		e.sb.WriteString(FloatStr(f))
+		e.sb.WriteString(rt.FloatStr(f))
 	}
 }
 
@@ -230,10 +206,10 @@ func JSONLoads(s string) any {
 	dec.UseNumber()
 	v, err := jsonParse(dec)
 	if err != nil {
-		Raise("JSONError", "JSON 解析失败：%v", err)
+		rt.Raise("JSONError", "JSON 解析失败：%v", err)
 	}
 	if _, err := dec.Token(); err != io.EOF {
-		Raise("JSONError", "JSON 解析失败：末尾有多余的内容")
+		rt.Raise("JSONError", "JSON 解析失败：末尾有多余的内容")
 	}
 	return v
 }
@@ -251,7 +227,7 @@ func jsonFromToken(dec *json.Decoder, tok json.Token) (any, error) {
 	case json.Delim:
 		switch t {
 		case '{':
-			d := NewDict[string, any](0)
+			d := rt.NewDict[string, any](0)
 			for dec.More() {
 				kt, err := dec.Token()
 				if err != nil {
@@ -272,7 +248,7 @@ func jsonFromToken(dec *json.Decoder, tok json.Token) (any, error) {
 			}
 			return d, nil
 		case '[':
-			l := NewList[any](0)
+			l := rt.NewList[any](0)
 			for dec.More() {
 				v, err := jsonParse(dec)
 				if err != nil {
@@ -304,20 +280,20 @@ func jsonFromToken(dec *json.Decoder, tok json.Token) (any, error) {
 	return nil, fmt.Errorf("无法识别的 JSON 值")
 }
 
-func JSONLoadsDict(s string) *Dict[string, any] {
+func JSONLoadsDict(s string) *rt.Dict[string, any] {
 	v := JSONLoads(s)
-	d, ok := v.(*Dict[string, any])
+	d, ok := v.(*rt.Dict[string, any])
 	if !ok {
-		Raise("JSONError", "JSON 的顶层不是对象，而是 %s", TypeName(v))
+		rt.Raise("JSONError", "JSON 的顶层不是对象，而是 %s", rt.TypeName(v))
 	}
 	return d
 }
 
-func JSONLoadsList(s string) *List[any] {
+func JSONLoadsList(s string) *rt.List[any] {
 	v := JSONLoads(s)
-	l, ok := v.(*List[any])
+	l, ok := v.(*rt.List[any])
 	if !ok {
-		Raise("JSONError", "JSON 的顶层不是数组，而是 %s", TypeName(v))
+		rt.Raise("JSONError", "JSON 的顶层不是数组，而是 %s", rt.TypeName(v))
 	}
 	return l
 }

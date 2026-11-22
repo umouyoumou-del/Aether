@@ -1221,3 +1221,9 @@ func reprGuard(v any) string {
 	}
 	return Repr(v)
 }
+
+// RuneIndex 把字节偏移转换为字符下标（供 rt 的子包使用）。
+func RuneIndex(s string, byteOff int) int { return runeIndex(s, byteOff) }
+
+// ToInt 尝试把值转换为整数（供 rt 的子包使用）。
+func ToInt(v any) (int64, bool, bool) { return toInt(v) }

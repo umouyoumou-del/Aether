@@ -6,13 +6,13 @@ import (
 	"io/fs"
 )
 
-//go:embed rt/*.go
+//go:embed rt
 var rtFS embed.FS
 
 //go:embed lib
 var libFS embed.FS
 
-// RT 返回运行时源码目录（rt/*.go）。
+// RT 返回运行时源码目录（rt/*.go 及其子包）。
 func RT() fs.FS {
 	sub, err := fs.Sub(rtFS, "rt")
 	if err != nil {

@@ -1,6 +1,8 @@
-package rt
+package rthttp
 
 import (
+	"aether/assets/rt"
+	"aether/assets/rt/rtjson"
 	"context"
 	"fmt"
 	"io"
@@ -23,28 +25,28 @@ func (q *HTTPRequest) Method() string { return q.r.Method }
 func (q *HTTPRequest) Path() string   { return q.r.URL.Path }
 func (q *HTTPRequest) URL() string    { return q.r.URL.String() }
 
-func (q *HTTPRequest) Query(name string) Opt[string] {
+func (q *HTTPRequest) Query(name string) rt.Opt[string] {
 	vals := q.r.URL.Query()
 	if !vals.Has(name) {
-		return Opt[string]{}
+		return rt.Opt[string]{}
 	}
-	return Opt[string]{V: vals.Get(name), Ok: true}
+	return rt.Opt[string]{V: vals.Get(name), Ok: true}
 }
 
-func (q *HTTPRequest) Param(name string) Opt[string] {
+func (q *HTTPRequest) Param(name string) rt.Opt[string] {
 	v := q.r.PathValue(name)
 	if v == "" {
-		return Opt[string]{}
+		return rt.Opt[string]{}
 	}
-	return Opt[string]{V: v, Ok: true}
+	return rt.Opt[string]{V: v, Ok: true}
 }
 
-func (q *HTTPRequest) Header(name string) Opt[string] {
+func (q *HTTPRequest) Header(name string) rt.Opt[string] {
 	v := q.r.Header.Get(name)
 	if v == "" {
-		return Opt[string]{}
+		return rt.Opt[string]{}
 	}
-	return Opt[string]{V: v, Ok: true}
+	return rt.Opt[string]{V: v, Ok: true}
 }
 
 func (q *HTTPRequest) Body() string {
@@ -56,14 +58,14 @@ func (q *HTTPRequest) Body() string {
 	return q.body
 }
 
-func (q *HTTPRequest) JSON() any { return JSONLoads(q.Body()) }
+func (q *HTTPRequest) JSON() any { return rtjson.JSONLoads(q.Body()) }
 
-func (q *HTTPRequest) Form(name string) Opt[string] {
+func (q *HTTPRequest) Form(name string) rt.Opt[string] {
 	q.r.ParseForm()
 	if !q.r.Form.Has(name) {
-		return Opt[string]{}
+		return rt.Opt[string]{}
 	}
-	return Opt[string]{V: q.r.Form.Get(name), Ok: true}
+	return rt.Opt[string]{V: q.r.Form.Get(name), Ok: true}
 }
 
 func (q *HTTPRequest) String() string { return "<请求 " + q.r.Method + " " + q.r.URL.Path + ">" }
@@ -85,16 +87,16 @@ func newResp(status int, body, ctype string) *HTTPResponse {
 
 func (p *HTTPResponse) Status() int    { return p.status }
 func (p *HTTPResponse) Text() string   { return p.body }
-func (p *HTTPResponse) JSON() any      { return JSONLoads(p.body) }
+func (p *HTTPResponse) JSON() any      { return rtjson.JSONLoads(p.body) }
 func (p *HTTPResponse) Ok() bool       { return p.status >= 200 && p.status < 300 }
 func (p *HTTPResponse) String() string { return fmt.Sprintf("<响应 %d，%d 字节>", p.status, len(p.body)) }
 
-func (p *HTTPResponse) Header(name string) Opt[string] {
+func (p *HTTPResponse) Header(name string) rt.Opt[string] {
 	v := p.headers.Get(name)
 	if v == "" {
-		return Opt[string]{}
+		return rt.Opt[string]{}
 	}
-	return Opt[string]{V: v, Ok: true}
+	return rt.Opt[string]{V: v, Ok: true}
 }
 
 func (p *HTTPResponse) SetHeader(name, value string) *HTTPResponse {
@@ -111,7 +113,7 @@ func HTTPHTML(body string, status int) *HTTPResponse {
 }
 
 func HTTPJSON(v any, status int) *HTTPResponse {
-	return newResp(status, JSONDumps(v, 0, false), "application/json; charset=utf-8")
+	return newResp(status, rtjson.JSONDumps(v, 0, false), "application/json; charset=utf-8")
 }
 
 func HTTPStatus(code int, msg string) *HTTPResponse {
@@ -155,7 +157,7 @@ func (s *HTTPServer) Handle(method, pattern string, h func(*HTTPRequest) *HTTPRe
 		w.WriteHeader(resp.status)
 		io.WriteString(w, resp.body)
 		if !s.Quiet {
-			fmt.Fprintf(os.Stderr, "[http] %s %s → %d（%s）\n", r.Method, r.URL.Path, resp.status, fmtDur(time.Since(start)))
+			fmt.Fprintf(os.Stderr, "[http] %s %s → %d（%s）\n", r.Method, r.URL.Path, resp.status, rt.FmtDur(time.Since(start)))
 		}
 	})
 }
@@ -163,13 +165,13 @@ func (s *HTTPServer) Handle(method, pattern string, h func(*HTTPRequest) *HTTPRe
 func (s *HTTPServer) call(h func(*HTTPRequest) *HTTPResponse, r *http.Request) (resp *HTTPResponse) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			pcs := PCsOf(rec)
+			pcs := rt.PCsOf(rec)
 			if pcs == nil {
-				pcs = callers(3)
+				pcs = rt.Callers(3)
 			}
-			Flush()
-			os.Stderr.WriteString("[http] 处理请求时出现异常：\n" + FormatTraceback(rec, pcs))
-			resp = HTTPStatus(500, "服务器内部错误："+ExcMessage(Catch(rec)))
+			rt.Flush()
+			os.Stderr.WriteString("[http] 处理请求时出现异常：\n" + rt.FormatTraceback(rec, pcs))
+			resp = HTTPStatus(500, "服务器内部错误："+rt.ExcMessage(rt.Catch(rec)))
 		}
 	}()
 	resp = h(&HTTPRequest{r: r})
@@ -206,10 +208,10 @@ func (s *HTTPServer) Listen(addr string) {
 	s.srv = &http.Server{Addr: a, Handler: s.mux}
 	srv := s.srv
 	s.mu.Unlock()
-	Flush()
+	rt.Flush()
 	fmt.Fprintf(os.Stderr, "[http] 服务器运行在 http://localhost%s\n", a)
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		Raise("IOError", "服务器启动失败：%v", err)
+		rt.Raise("IOError", "服务器启动失败：%v", err)
 	}
 }
 
@@ -217,7 +219,7 @@ func (s *HTTPServer) Listen(addr string) {
 func (s *HTTPServer) Start(addr string) string {
 	l, err := net.Listen("tcp", normAddr(addr))
 	if err != nil {
-		Raise("IOError", "服务器启动失败：%v", err)
+		rt.Raise("IOError", "服务器启动失败：%v", err)
 	}
 	s.mu.Lock()
 	s.srv = &http.Server{Handler: s.mux}
@@ -249,7 +251,7 @@ func httpDo(method, url, body, ctype string, timeout float64) *HTTPResponse {
 	}
 	req, err := http.NewRequest(method, url, rd)
 	if err != nil {
-		Raise("ValueError", "无效的请求：%v", err)
+		rt.Raise("ValueError", "无效的请求：%v", err)
 	}
 	if ctype != "" && body != "" {
 		req.Header.Set("Content-Type", ctype)
@@ -258,14 +260,14 @@ func httpDo(method, url, body, ctype string, timeout float64) *HTTPResponse {
 	resp, err := client.Do(req)
 	if err != nil {
 		if strings.Contains(err.Error(), "Timeout") || strings.Contains(err.Error(), "deadline") {
-			Raise("TimeoutError", "请求超时：%s", url)
+			rt.Raise("TimeoutError", "请求超时：%s", url)
 		}
-		Raise("IOError", "请求失败：%v", err)
+		rt.Raise("IOError", "请求失败：%v", err)
 	}
 	defer resp.Body.Close()
 	b, err := io.ReadAll(resp.Body)
 	if err != nil {
-		Raise("IOError", "读取响应失败：%v", err)
+		rt.Raise("IOError", "读取响应失败：%v", err)
 	}
 	return &HTTPResponse{status: resp.StatusCode, body: string(b), headers: resp.Header}
 }

@@ -1,6 +1,7 @@
-package rt
+package rtre
 
 import (
+	"aether/assets/rt"
 	"regexp"
 	"strings"
 	"sync"
@@ -34,7 +35,7 @@ func ReCompile(pattern string) *Regex {
 	}
 	re, err := regexp.Compile(pattern)
 	if err != nil {
-		Raise("ValueError", "无效的正则表达式 %s：%v", QuoteStr(pattern), err)
+		rt.Raise("ValueError", "无效的正则表达式 %s：%v", rt.QuoteStr(pattern), err)
 	}
 	r := &Regex{re: re, pattern: pattern}
 	if len(reCache) < 256 {
@@ -57,31 +58,31 @@ func (r *Regex) fullRe() *regexp.Regexp {
 	return r.full
 }
 
-func mkMatch(re *regexp.Regexp, s string, loc []int) Opt[*Match] {
+func mkMatch(re *regexp.Regexp, s string, loc []int) rt.Opt[*Match] {
 	if loc == nil {
-		return Opt[*Match]{}
+		return rt.Opt[*Match]{}
 	}
-	return Opt[*Match]{V: &Match{s: s, loc: loc, re: re}, Ok: true}
+	return rt.Opt[*Match]{V: &Match{s: s, loc: loc, re: re}, Ok: true}
 }
 
-func (r *Regex) Match(s string) Opt[*Match] {
+func (r *Regex) Match(s string) rt.Opt[*Match] {
 	re := r.anchored()
 	return mkMatch(re, s, re.FindStringSubmatchIndex(s))
 }
 
-func (r *Regex) FullMatch(s string) Opt[*Match] {
+func (r *Regex) FullMatch(s string) rt.Opt[*Match] {
 	re := r.fullRe()
 	return mkMatch(re, s, re.FindStringSubmatchIndex(s))
 }
 
-func (r *Regex) Search(s string) Opt[*Match] {
+func (r *Regex) Search(s string) rt.Opt[*Match] {
 	return mkMatch(r.re, s, r.re.FindStringSubmatchIndex(s))
 }
 
 func (r *Regex) Test(s string) bool { return r.re.MatchString(s) }
 
 // FindAll 返回所有匹配：没有分组时是整个匹配，有一个分组时是该分组的内容。
-func (r *Regex) FindAll(s string) *List[string] {
+func (r *Regex) FindAll(s string) *rt.List[string] {
 	ms := r.re.FindAllStringSubmatch(s, -1)
 	out := make([]string, 0, len(ms))
 	for _, m := range ms {
@@ -91,16 +92,16 @@ func (r *Regex) FindAll(s string) *List[string] {
 			out = append(out, m[0])
 		}
 	}
-	return &List[string]{S: out}
+	return &rt.List[string]{S: out}
 }
 
-func (r *Regex) FindIter(s string) *List[*Match] {
+func (r *Regex) FindIter(s string) *rt.List[*Match] {
 	locs := r.re.FindAllStringSubmatchIndex(s, -1)
 	out := make([]*Match, 0, len(locs))
 	for _, loc := range locs {
 		out = append(out, &Match{s: s, loc: loc, re: r.re})
 	}
-	return &List[*Match]{S: out}
+	return &rt.List[*Match]{S: out}
 }
 
 // pyRepl 把 Python 风格的替换模板（\1、\g<name>）转换为 Go 的 ${1}、${name}。
@@ -171,20 +172,20 @@ func (r *Regex) SubFunc(f func(*Match) string, s string) string {
 	return sb.String()
 }
 
-func (r *Regex) Split(s string, maxsplit int) *List[string] {
+func (r *Regex) Split(s string, maxsplit int) *rt.List[string] {
 	n := -1
 	if maxsplit > 0 {
 		n = maxsplit + 1
 	}
-	return &List[string]{S: r.re.Split(s, n)}
+	return &rt.List[string]{S: r.re.Split(s, n)}
 }
 
 func (r *Regex) Pattern() string { return r.pattern }
-func (r *Regex) String() string  { return "re.compile(" + QuoteStr(r.pattern) + ")" }
+func (r *Regex) String() string  { return "re.compile(" + rt.QuoteStr(r.pattern) + ")" }
 
 func (m *Match) Group(i int) string {
 	if i < 0 || 2*i+1 >= len(m.loc) {
-		Raise("IndexError", "没有第 %d 个分组", i)
+		rt.Raise("IndexError", "没有第 %d 个分组", i)
 	}
 	if m.loc[2*i] < 0 {
 		return ""
@@ -195,45 +196,45 @@ func (m *Match) Group(i int) string {
 func (m *Match) GroupName(name string) string {
 	i := m.re.SubexpIndex(name)
 	if i < 0 {
-		Raise("IndexError", "没有名为 %s 的分组", name)
+		rt.Raise("IndexError", "没有名为 %s 的分组", name)
 	}
 	return m.Group(i)
 }
 
-func (m *Match) Groups() *List[string] {
+func (m *Match) Groups() *rt.List[string] {
 	n := len(m.loc)/2 - 1
 	out := make([]string, n)
 	for i := 1; i <= n; i++ {
 		out[i-1] = m.Group(i)
 	}
-	return &List[string]{S: out}
+	return &rt.List[string]{S: out}
 }
 
 func (m *Match) Start(i int) int {
 	if i < 0 || 2*i >= len(m.loc) || m.loc[2*i] < 0 {
 		return -1
 	}
-	return runeIndex(m.s, m.loc[2*i])
+	return rt.RuneIndex(m.s, m.loc[2*i])
 }
 
 func (m *Match) End(i int) int {
 	if i < 0 || 2*i+1 >= len(m.loc) || m.loc[2*i+1] < 0 {
 		return -1
 	}
-	return runeIndex(m.s, m.loc[2*i+1])
+	return rt.RuneIndex(m.s, m.loc[2*i+1])
 }
 
 func (m *Match) Text() string   { return m.Group(0) }
-func (m *Match) String() string { return "<匹配 " + QuoteStr(m.Group(0)) + ">" }
+func (m *Match) String() string { return "<匹配 " + rt.QuoteStr(m.Group(0)) + ">" }
 
-func ReMatch(pattern, s string) Opt[*Match]     { return ReCompile(pattern).Match(s) }
-func ReFullMatch(pattern, s string) Opt[*Match] { return ReCompile(pattern).FullMatch(s) }
-func ReSearch(pattern, s string) Opt[*Match]    { return ReCompile(pattern).Search(s) }
+func ReMatch(pattern, s string) rt.Opt[*Match]     { return ReCompile(pattern).Match(s) }
+func ReFullMatch(pattern, s string) rt.Opt[*Match] { return ReCompile(pattern).FullMatch(s) }
+func ReSearch(pattern, s string) rt.Opt[*Match]    { return ReCompile(pattern).Search(s) }
 func ReTest(pattern, s string) bool             { return ReCompile(pattern).Test(s) }
-func ReFindAll(pattern, s string) *List[string] { return ReCompile(pattern).FindAll(s) }
+func ReFindAll(pattern, s string) *rt.List[string] { return ReCompile(pattern).FindAll(s) }
 func ReSub(pattern, repl, s string, count int) string {
 	return ReCompile(pattern).Sub(repl, s, count)
 }
-func ReSplit(pattern, s string, maxsplit int) *List[string] {
+func ReSplit(pattern, s string, maxsplit int) *rt.List[string] {
 	return ReCompile(pattern).Split(s, maxsplit)
 }

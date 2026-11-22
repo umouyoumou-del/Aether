@@ -321,3 +321,6 @@ func AssertEqFail(src, op, left, right, msg string) {
 func Unreachable() any {
 	return &Error{Kind: "RuntimeError", Msg: "内部错误：执行到了不可达的位置"}
 }
+
+// Callers 返回调用栈（供 rt 的子包使用）。
+func Callers(skip int) []uintptr { return callers(skip + 1) }

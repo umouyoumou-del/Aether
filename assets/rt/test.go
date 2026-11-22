@@ -89,3 +89,6 @@ func fmtDur(d time.Duration) string {
 	}
 	return fmt.Sprintf("%.2fs", d.Seconds())
 }
+
+// FmtDur 格式化时长（供 rt 的子包使用）。
+func FmtDur(d time.Duration) string { return fmtDur(d) }

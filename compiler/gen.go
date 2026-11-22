@@ -11,7 +11,9 @@ import (
 )
 
 // RTPath 是生成程序中运行时包的导入路径。
-const RTPath = "aeprog/rt"
+// 生成的程序使用模块路径 aether/assets，使运行时及其子包的导入路径
+// 与五行源码树中一致（子包可以导入 aether/assets/rt）。
+const RTPath = "aether/assets/rt"
 
 var goKeywords = map[string]bool{
 	"break": true, "case": true, "chan": true, "const": true, "continue": true, "default": true,
@@ -30,7 +32,7 @@ var goPredeclared = []string{
 
 // 生成代码可能导入的包名。
 var knownPkgs = map[string]string{
-	"rt": RTPath, "fmt": "fmt", "math": "math", "strings": "strings", "strconv": "strconv",
+	"rt": RTPath, "rtjson": RTPath + "/rtjson", "rthttp": RTPath + "/rthttp", "rtre": RTPath + "/rtre", "fmt": "fmt", "math": "math", "strings": "strings", "strconv": "strconv",
 	"unicode": "unicode", "utf8": "unicode/utf8", "os": "os", "time": "time", "sort": "sort",
 	"slices": "slices", "maps": "maps", "cmp": "cmp", "iter": "iter", "sync": "sync", "atomic": "sync/atomic",
 	"runtime": "runtime", "errors": "errors", "reflect": "reflect", "regexp": "regexp",
