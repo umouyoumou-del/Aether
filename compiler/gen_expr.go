@@ -739,6 +739,25 @@ func (g *Gen) index(x *Index) string {
 	return xc
 }
 
+// addrExpr 返回可寻址形式的表达式代码：列表中的结构体元素使用 Ptr(i)。
+func (g *Gen) addrExpr(e Expr) string {
+	switch x := e.(type) {
+	case *Index:
+		if _, ok := x.X.Typ().(*ListT); ok && x.Ovl == nil {
+			if d := namedDecl(x.T); d != nil && d.Kind == DStruct {
+				return g.expr(x.X) + ".Ptr(" + g.expr(x.Idx) + ")"
+			}
+		}
+	case *Attr:
+		if x.Kind == AttrField && !x.Safe {
+			if d := namedDecl(x.T); d != nil && d.Kind == DStruct {
+				return g.fieldRefOnCode(g.addrExpr(x.X), x.X, x)
+			}
+		}
+	}
+	return g.expr(e)
+}
+
 func (g *Gen) isConcreteSelf(e Expr) bool {
 	id, ok := e.(*Ident)
 	return ok && id.Sym != nil && id.Sym.IsSelf && g.self != nil
@@ -751,6 +770,13 @@ func (g *Gen) fieldRef(a *Attr) string {
 
 func (g *Gen) fieldRefOn(recv Expr, a *Attr) string {
 	rc := g.expr(recv)
+	if d := namedDecl(recv.Typ()); d != nil && d.Kind == DStruct {
+		rc = g.addrExpr(recv)
+	}
+	return g.fieldRefOnCode(rc, recv, a)
+}
+
+func (g *Gen) fieldRefOnCode(rc string, recv Expr, a *Attr) string {
 	f := a.Field
 	rt := a.RecvT
 	if rt == nil {
@@ -1119,6 +1145,9 @@ func (g *Gen) call(e *Call) string {
 		}
 		recv := e.Recv
 		rc := g.expr(recv)
+		if e.Method != nil && e.Method.Mutating {
+			rc = g.addrExpr(recv)
+		}
 		rx := recv
 		if fa != nil && fa.RecvT != nil && !identical(fa.RecvT, recv.Typ()) {
 			rx = &goExpr{exprBase{Pos: recv.P(), T: fa.RecvT}, rc}
@@ -1576,6 +1605,10 @@ func (g *Gen) convCode(code string, k ConvKind, from, to Type) string {
 			return rt + ".ChanIter(" + code + ")"
 		case *Basic:
 			return rt + ".StrIter(" + code + ")"
+		case *NamedT:
+			if m, _ := g.c.operatorMethod(from, "__iter__"); m != nil {
+				return g.methodOn(&goExpr{exprBase{T: from}, code}, m, code, nil, nil)
+			}
 		}
 		return code
 	case ConvTruthy:

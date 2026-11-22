@@ -99,6 +99,23 @@ func (c *Checker) stmt(s Stmt) {
 		c.yieldStmt(s)
 	case *FuncDeclStmt:
 		c.nestedFunc(s)
+	case *GlobalStmt:
+		if s.Nonlocal {
+			return
+		}
+		if c.fn == nil || c.fn.IsModInit {
+			c.warnf(s.Pos, "global 只在函数中有意义")
+			return
+		}
+		for _, n := range s.Names {
+			sym := c.mod.Scope.Syms[n]
+			if sym == nil || sym.Kind != SVar {
+				if c.mod.pendingGlobals[n] {
+					continue
+				}
+				c.errorf(s.Pos, "模块中没有全局变量 %s", n)
+			}
+		}
 	case *FuncDecl, *ClassDecl, *EnumDecl, *ExtendDecl, *ImportStmt, *TestDecl:
 		// 顶层声明已在收集阶段处理
 	default:
@@ -160,7 +177,27 @@ func (c *Checker) targetSym(id *Ident) *Symbol {
 	if c.isShadowable(sym) {
 		return nil
 	}
+	if c.globalNeedsDecl(sym) {
+		// 函数中给模块级变量赋值：没有 global 声明时创建局部变量（与 Python 相同）
+		if p, ok := c.fn.globalReads[id.Name]; ok {
+			d := c.errorf(id.Pos, "%s 在第 %d 行作为全局变量读取，这里又赋值，会产生同名的局部变量", id.Name, p.Line)
+			d.Notes = append(d.Notes, "如需修改全局变量，请在函数开头写 global "+id.Name)
+		}
+		return nil
+	}
 	return sym
+}
+
+// globalNeedsDecl 判断在当前函数中给 sym 赋值是否需要 global 声明。
+func (c *Checker) globalNeedsDecl(sym *Symbol) bool {
+	if !sym.Global || sym.Kind != SVar || sym.Field != nil {
+		return false
+	}
+	f := c.fn
+	if f == nil || f.IsModInit {
+		return false
+	}
+	return !f.globals[sym.Name]
 }
 
 func (c *Checker) assign(s *AssignStmt) {
@@ -583,6 +620,12 @@ func (c *Checker) augAssign(s *AssignStmt) {
 		sym := c.scope.lookup(t.Name)
 		if sym == nil {
 			c.undefined(t.Pos, t.Name)
+			c.expr(s.Value, nil)
+			return
+		}
+		if c.globalNeedsDecl(sym) {
+			d := c.errorf(t.Pos, "不能在函数中直接修改全局变量 %s", t.Name)
+			d.Notes = append(d.Notes, "请在函数开头写 global "+t.Name)
 			c.expr(s.Value, nil)
 			return
 		}

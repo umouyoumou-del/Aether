@@ -61,6 +61,7 @@ mu = Mutex()
 total = 0
 
 def add_one():
+    global total
     with mu:
         total += 1
     wg.done()

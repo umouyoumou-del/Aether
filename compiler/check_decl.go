@@ -767,6 +767,7 @@ func (c *Checker) resolveSig(fd *FuncDecl, parent *Scope, owner *TypeDecl) *Func
 		params = params[1:]
 	}
 	sawDefault := false
+	sawVariadic := false
 	for i, p := range params {
 		if p.Name == "self" {
 			c.errorf(p.Pos, "self 只能是第一个参数")
@@ -786,18 +787,20 @@ func (c *Checker) resolveSig(fd *FuncDecl, parent *Scope, owner *TypeDecl) *Func
 			c.errorf(p.Pos, "参数类型不能是 void")
 		}
 		if p.Variadic {
-			if i != len(params)-1 {
-				c.errorf(p.Pos, "可变参数 *%s 必须是最后一个参数", p.Name)
+			if sawVariadic {
+				c.errorf(p.Pos, "只能有一个可变参数")
 			}
+			sawVariadic = true
 			if p.Default != nil {
 				c.errorf(p.Pos, "可变参数不能有默认值")
 			}
 		}
 		if p.Default != nil {
 			sawDefault = true
-		} else if sawDefault && !p.Variadic {
+		} else if sawDefault && !p.Variadic && !sawVariadic {
 			c.errorf(p.Pos, "没有默认值的参数 '%s' 不能出现在有默认值的参数之后", p.Name)
 		}
+		_ = i
 		sig.Params = append(sig.Params, pi)
 	}
 	if fd.Ret != nil {
@@ -1644,6 +1647,15 @@ func (c *Checker) assignable(from, to Type) (ConvKind, bool) {
 		case *Basic:
 			if f.Kind == BStr {
 				elem = tChar
+			}
+		}
+		if nf, ok := from.(*NamedT); ok {
+			if mem, _, m := c.findMember(nf, "__iter__"); mem != nil {
+				if mt, ok := mem.(*Method); ok {
+					if it, ok := subst(mt.Sig.Ret, m).(*IterT); ok {
+						elem = it.Elem
+					}
+				}
 			}
 		}
 		if elem != nil && identical(elem, tt.Elem) {

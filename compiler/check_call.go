@@ -245,6 +245,12 @@ func (c *Checker) matchArgs(e *Call, sig *FuncSig, what string, quiet bool) ([]b
 	bound := make([]boundArg, n)
 	pos := 0
 	ok := true
+	vi := -1 // 可变参数的位置；其后的参数只能用关键字传递
+	for i, p := range sig.Params {
+		if p.Variadic {
+			vi = i
+		}
+	}
 	report := func(p Pos, format string, args ...any) {
 		ok = false
 		if !quiet {
@@ -254,32 +260,32 @@ func (c *Checker) matchArgs(e *Call, sig *FuncSig, what string, quiet bool) ([]b
 	for i := range e.Args {
 		a := e.Args[i]
 		if a.Name == "" && !a.Star {
-			if pos < n && !sig.Params[pos].Variadic {
+			if pos < n && !sig.Params[pos].Variadic && (vi < 0 || pos < vi) {
 				bound[pos] = boundArg{x: &e.Args[i].X, set: true}
 				pos++
 				continue
 			}
-			if n > 0 && sig.Params[n-1].Variadic && pos >= n-1 {
-				bound[n-1].extras = append(bound[n-1].extras, a)
-				bound[n-1].set = true
-				pos = n - 1
+			if vi >= 0 && pos >= vi {
+				bound[vi].extras = append(bound[vi].extras, a)
+				bound[vi].set = true
+				pos = vi
 				continue
 			}
 			report(a.Pos, "%s最多接受 %d 个参数，但给了 %d 个", what, n, countPositional(e.Args))
 			continue
 		}
 		if a.Star {
-			if n == 0 || !sig.Params[n-1].Variadic {
+			if vi < 0 {
 				report(a.Pos, "%s没有可变参数，不能使用 *展开", what)
 				continue
 			}
-			if len(bound[n-1].extras) > 0 || bound[n-1].spread {
+			if len(bound[vi].extras) > 0 || bound[vi].spread {
 				report(a.Pos, "*展开必须是传给可变参数的唯一实参")
 				continue
 			}
-			bound[n-1] = boundArg{x: &e.Args[i].X, spread: true, set: true}
+			bound[vi] = boundArg{x: &e.Args[i].X, spread: true, set: true}
 			e.Spread = true
-			pos = n
+			pos = vi
 			continue
 		}
 		idx := -1

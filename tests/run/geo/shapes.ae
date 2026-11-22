@@ -13,6 +13,7 @@ struct Point:
         return math.hypot(self.x - o.x, self.y - o.y)
 
 def origin() -> Point:
+    global created
     created += 1
     return Point(0.0, 0.0)
 

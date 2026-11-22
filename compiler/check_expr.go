@@ -367,6 +367,11 @@ func (c *Checker) ident(e *Ident, want Type) Type {
 		if !sym.Global && sym.Fn != nil && sym.Fn != c.fn {
 			sym.Captured = true
 		}
+		if sym.Global && sym.Kind == SVar && c.fn != nil && !c.fn.IsModInit && c.fn.globalReads != nil {
+			if _, ok := c.fn.globalReads[e.Name]; !ok {
+				c.fn.globalReads[e.Name] = e.Pos
+			}
+		}
 		if nt, ok := c.flow.narrow[sym]; ok && c.narrowable(sym) {
 			e.From = sym.T
 			if o, ok := sym.T.(*OptT); ok && identical(o.Elem, nt) {

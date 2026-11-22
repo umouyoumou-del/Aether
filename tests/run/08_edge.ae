@@ -1,0 +1,153 @@
+# 边界情况与更多特性
+# 链式比较
+x = 5
+print(1 < x < 10, 1 < x > 10, 0 <= x <= 5 < 6)
+# 可变参数与关键字参数
+def total(*nums: int, scale: int = 1) -> int:
+    s = 0
+    for n in nums:
+        s += n
+    return s * scale
+
+print(total(), total(1, 2, 3), total(1, 2, scale=10), total(*[4, 5]))
+def greet(name: str, greeting: str = "你好", punct: str = "！") -> str:
+    return greeting + "，" + name + punct
+
+print(greet("小明"), greet("Tom", greeting="Hi", punct="!"), greet(punct="~", name="猫"))
+# 下标、in、长度协议
+class Grid:
+    w: int
+    h: int
+    cells: list[int] = []
+
+    def __init__(self, w: int, h: int):
+        self.w = w
+        self.h = h
+        self.cells = [0] * (w * h)
+
+    def __getitem__(self, p: (int, int)) -> int:
+        return self.cells[p[1] * self.w + p[0]]
+
+    def __setitem__(self, p: (int, int), v: int):
+        self.cells[p[1] * self.w + p[0]] = v
+
+    def __len__(self) -> int:
+        return self.w * self.h
+
+    def __contains__(self, v: int) -> bool:
+        return v in self.cells
+
+    def __iter__(self) -> iter[int]:
+        for c in self.cells:
+            yield c
+
+g = Grid(3, 2)
+g[(1, 1)] = 7
+g[(0, 0)] += 2
+print(g[(1, 1)], g[(0, 0)], len(g), 7 in g, 9 in g, list(g))
+if g:
+    print("非空网格")
+# is 与 as、窄化
+class Animal:
+    name: str
+class Dog(Animal):
+    def bark(self) -> str:
+        return self.name + " 汪"
+class Cat(Animal):
+    pass
+
+pets: list[Animal] = [Dog("旺财"), Cat("咪咪")]
+for p in pets:
+    if p is Dog:
+        print(p.bark())
+    else:
+        print(p.name, "不会叫")
+    d = p as? Dog
+    print(d?.bark() ?? "不是狗")
+val: any = 42
+if val is int:
+    print("整数加一：", val + 1)
+print((val as int) * 2)
+try:
+    s = val as str
+except TypeError as e:
+    print("转换失败:", e)
+# 嵌套函数与闭包修改外层变量
+def outer() -> int:
+    acc = 0
+    def add(n: int):
+        acc += n
+    for i in range(5):
+        add(i)
+    return acc
+print(outer())
+# 递归
+def hanoi(n: int, a: str, b: str, c: str, moves: list[str]):
+    if n == 0:
+        return
+    hanoi(n - 1, a, c, b, moves)
+    moves.append(f"{a}->{c}")
+    hanoi(n - 1, b, a, c, moves)
+mv: list[str] = []
+hanoi(3, "A", "B", "C", mv)
+print(len(mv), mv[:3])
+# 结构体在列表中的可变方法
+struct Counter:
+    n: int = 0
+    def inc(self):
+        self.n += 1
+cs = [Counter(), Counter()]
+cs[0].inc()
+cs[0].inc()
+cs[1].inc()
+print(cs[0].n, cs[1].n)
+c1 = Counter()
+c2 = c1
+c2.inc()
+print("值语义:", c1.n, c2.n)
+# 类是引用语义
+class Box:
+    v: int = 0
+b1 = Box()
+b2 = b1
+b2.v = 9
+print("引用语义:", b1.v)
+# 字符串方法
+t = "Hello, World"
+print(t.startswith("Hell"), t.endswith("x"), t.find("World"), t.find("zz"), t.count("l"))
+print(t.split(", "), t.lower().title(), t.replace("l", "L", 2), t.zfill(15), "42".zfill(5))
+print("abc" < "abd", "b" > "abc", "中" in "中文", 'x' in "xyz")
+print("  x ".strip(), "--x--".strip("-"), "a b  c".split(), "a\nb\n".splitlines())
+print("%d" if false else "ok", "a" * 3, 3 * "ab")
+# 整数运算边界
+print(2 ** 62, -(2 ** 63) == -9223372036854775807 - 1, 7 // 2, -7 // 2, 7 % 3, -7 % 3)
+print(10 / 4, 10 // 4, 10.0 // 4, 10 % 4.5, 2 ** 0.5)
+print(0x10 | 0b11, 6 & 3, 6 ^ 3, ~5, 1 << 10, 1024 >> 3)
+# 集合与字典操作
+words = ["a", "b", "a", "c", "b", "a"]
+freq: dict[str, int] = {}
+for w in words:
+    freq[w] = freq.get(w, 0) + 1
+print(freq, sorted(freq.items(), key=kv => -kv[1]))
+print({k: v for k, v in freq.items() if v > 1})
+print(set(words), len(set(words)), sorted(set(words)))
+# 三元表达式与 ??
+age = 20
+status = "成年" if age >= 18 else "未成年"
+print(status)
+maybe: int? = null
+print(maybe ?? -1, (maybe ?? 0) + 1)
+maybe = 5
+print(maybe ?? -1)
+# del
+nums = [1, 2, 3, 4]
+del nums[0]
+dd = {"x": 1, "y": 2}
+del dd["x"]
+print(nums, dd)
+# 元组解构 in for
+pairs = [(1, "一"), (2, "二")]
+for num, word in pairs:
+    print(num, word)
+for i, (num, word) in enumerate(pairs):
+    print(i, num, word)

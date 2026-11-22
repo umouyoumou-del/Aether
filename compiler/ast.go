@@ -675,6 +675,13 @@ type YieldStmt struct {
 	Value Expr
 }
 
+// GlobalStmt：global x, y（在函数中修改模块级变量）
+type GlobalStmt struct {
+	Pos      Pos
+	Names    []string
+	Nonlocal bool
+}
+
 // ===== 声明 =====
 
 type Decorator struct {
@@ -848,6 +855,7 @@ func (s *DelStmt) P() Pos      { return s.Pos }
 func (s *MatchStmt) P() Pos    { return s.Pos }
 func (s *SelectStmt) P() Pos   { return s.Pos }
 func (s *YieldStmt) P() Pos    { return s.Pos }
+func (s *GlobalStmt) P() Pos   { return s.Pos }
 func (s *FuncDecl) P() Pos     { return s.Pos }
 func (s *ClassDecl) P() Pos    { return s.Pos }
 func (s *EnumDecl) P() Pos     { return s.Pos }
@@ -877,6 +885,7 @@ func (*DelStmt) stmtNode()      {}
 func (*MatchStmt) stmtNode()    {}
 func (*SelectStmt) stmtNode()   {}
 func (*YieldStmt) stmtNode()    {}
+func (*GlobalStmt) stmtNode()   {}
 func (*FuncDecl) stmtNode()     {}
 func (*ClassDecl) stmtNode()    {}
 func (*EnumDecl) stmtNode()     {}

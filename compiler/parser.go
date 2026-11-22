@@ -311,6 +311,19 @@ func (p *parser) stmt(top bool) []Stmt {
 			if p.peek(1).Kind == TString && top {
 				return []Stmt{p.testDecl()}
 			}
+		case "global", "nonlocal":
+			if p.peek(1).Kind == TIdent {
+				pos := p.advance().Pos
+				gs := &GlobalStmt{Pos: pos, Nonlocal: t.Text == "nonlocal"}
+				for {
+					gs.Names = append(gs.Names, p.expectIdent("global 声明").Text)
+					if !p.got(TComma) {
+						break
+					}
+				}
+				p.endLine()
+				return []Stmt{gs}
+			}
 		case "abstract":
 			if p.peek(1).Kind == KClass {
 				if !top {

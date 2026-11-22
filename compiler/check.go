@@ -140,6 +140,8 @@ type FuncCtx struct {
 	narrowedCaptures []*Symbol
 	LocalFuncs []*FuncDecl
 	Test      *TestDecl
+	globals     map[string]bool // global 声明
+	globalReads map[string]Pos  // 作为全局变量读取过的名字
 }
 
 // ===== 流分析状态 =====
@@ -784,10 +786,24 @@ func (c *Checker) withFunc(fn *FuncCtx, parent *Scope, body func()) {
 	}
 	c.loops = nil
 	c.tryDepth = 0
+	fn.globals = map[string]bool{}
+	fn.globalReads = map[string]Pos{}
+	scanGlobals(fn.Body, fn.globals)
 	body()
 	c.finishFunc(fn)
 	c.AllFuncs = append(c.AllFuncs, fn)
 	c.fn, c.scope, c.flow, c.loops, c.tryDepth = saveFn, saveScope, saveFlow, saveLoops, saveTry
+}
+
+// scanGlobals 收集函数体中的 global 声明（不进入嵌套函数）。
+func scanGlobals(list []Stmt, out map[string]bool) {
+	walkStmts(list, func(s Stmt) {
+		if gs, ok := s.(*GlobalStmt); ok && !gs.Nonlocal {
+			for _, n := range gs.Names {
+				out[n] = true
+			}
+		}
+	})
 }
 
 func (c *Checker) finishFunc(fn *FuncCtx) {
