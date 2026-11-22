@@ -50,6 +50,7 @@ go build -o bin\aether.exe .\cmd\aether     # 构建编译器
 | `aether check 文件.ae` | 只做语法与类型检查 |
 | `aether test 文件.ae` | 运行文件中的 `test "名字":` 测试块 |
 | `aether emit 文件.ae` | 查看生成的 Go 代码 |
+| `aether repl` | 交互模式：输入表达式立即看到结果 |
 
 ## 特性一览
 

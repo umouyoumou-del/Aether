@@ -23,6 +23,7 @@ const usage = `五行 (Aether) %s —— 融合 Python、C++、Go、Java、C# �
   aether check <文件.ae>             只做语法和类型检查
   aether test  <文件.ae>             运行文件中的 test "..." 测试块
   aether emit  <文件.ae>             显示生成的 Go 代码
+  aether repl                        交互模式
   aether version                     显示版本
   aether help                        显示本帮助
 
@@ -49,6 +50,8 @@ func main() {
 		os.Exit(cmdTest(args))
 	case "emit":
 		os.Exit(cmdEmit(args))
+	case "repl":
+		os.Exit(cmdRepl(args))
 	case "version", "--version", "-v":
 		fmt.Printf("五行 (Aether) %s\n", compiler.Version)
 	case "help", "--help", "-h":
