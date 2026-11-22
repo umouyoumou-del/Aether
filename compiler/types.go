@@ -224,6 +224,27 @@ type ParamInfo struct {
 	KwOnly   bool
 	Mod      *Module
 	Pos      Pos
+	// DefaultSubst 把默认值表达式中的类型参数映射到本签名所在的上下文
+	// （例如继承来的字段默认值使用基类的类型参数）。
+	DefaultSubst Subst
+}
+
+// composeSubst 先应用 a，再应用 b。
+func composeSubst(a, b Subst) Subst {
+	if len(a) == 0 {
+		return b
+	}
+	if len(b) == 0 {
+		return a
+	}
+	r := Subst{}
+	for k, v := range b {
+		r[k] = v
+	}
+	for k, v := range a {
+		r[k] = subst(v, b)
+	}
+	return r
 }
 
 type FuncSig struct {

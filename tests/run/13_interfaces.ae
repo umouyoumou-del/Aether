@@ -1,0 +1,131 @@
+# 泛型接口与接口约束
+interface Container[T]:
+    def get(self, i: int) -> T
+    def size(self) -> int
+
+class Arr[T]:
+    data: list[T]
+    def get(self, i: int) -> T:
+        return self.data[i]
+    def size(self) -> int:
+        return len(self.data)
+
+def last_of[T](c: Container[T]) -> T:
+    return c.get(c.size() - 1)
+
+print(last_of(Arr([1, 2, 3])), last_of(Arr(["x", "y"])))
+
+interface Shape:
+    def area(self) -> float
+
+class Sq:
+    s: float
+    def area(self) -> float:
+        return self.s * self.s
+
+class Ci:
+    r: float
+    def area(self) -> float:
+        return 3.0 * self.r * self.r
+
+def biggest[T: Shape](xs: list[T]) -> T:
+    best = xs[0]
+    for x in xs:
+        if x.area() > best.area():
+            best = x
+    return best
+
+print(biggest([Sq(1.0), Sq(3.0), Sq(2.0)]).s)
+mixed: list[Shape] = [Sq(2.0), Ci(1.0)]
+print(sum(m.area() for m in mixed))
+
+# 扩展用户类
+extend Sq:
+    def perimeter(self) -> float:
+        return 4.0 * self.s
+print(Sq(2.5).perimeter())
+
+# __eq__ 与 in / index
+class Money:
+    cents: int
+    def __eq__(self, o: Money) -> bool:
+        return self.cents == o.cents
+    def __str__(self) -> str:
+        return f"¥{self.cents / 100:.2f}"
+wallet = [Money(100), Money(250)]
+print(Money(250) in wallet, wallet.index(Money(250)), Money(1) == Money(1), Money(1) != Money(2))
+
+# 函数作为字典的值（分派表）
+ops: dict[str, fn(float, float) -> float] = {
+    "+": (a: float, b: float) => a + b,
+    "-": (a: float, b: float) => a - b,
+    "*": (a: float, b: float) => a * b,
+}
+for sym in ["+", "-", "*"]:
+    print(sym, ops[sym](6.0, 3.0))
+
+# 柯里化
+def adder(n: int) -> fn(int) -> int:
+    return x => x + n
+add5 = adder(5)
+print(add5(10), adder(1)(1))
+compose = (f: fn(int) -> int, g: fn(int) -> int) => (x: int) => g(f(x))
+inc_then_double = compose(x => x + 1, x => x * 2)
+print(inc_then_double(4))
+
+# 异常层次与自定义 __str__
+class AppError(Exception):
+    code: int
+    def __init__(self, code: int, msg: str):
+        super().__init__(msg)
+        self.code = code
+    def __str__(self) -> str:
+        return f"[E{self.code}] {self.message}"
+class NotFound(AppError):
+    def __init__(self, what: str):
+        super().__init__(404, f"找不到 {what}")
+def lookup(k: str) -> int:
+    raise NotFound(k)
+for handler in ["specific", "base"]:
+    try:
+        lookup("用户")
+    except NotFound as e:
+        print("NotFound:", e, e.code)
+    except AppError as e:
+        print("AppError:", e)
+try:
+    lookup("x")
+except Exception as e:
+    print("作为 Exception 捕获：", e, type_name(e))
+
+# ?. 调用返回 void 的方法
+class Logger:
+    lines: list[str] = []
+    def log(self, s: str):
+        self.lines.append(s)
+lg: Logger? = Logger()
+lg?.log("一条")
+none_lg: Logger? = null
+none_lg?.log("不会记录")
+print(lg?.lines ?? [])
+
+# 递归泛型类型
+class LinkedList[T]:
+    head: T
+    tail: LinkedList[T]? = null
+    def to_list(self) -> list[T]:
+        out = [self.head]
+        cur = self.tail
+        while cur != null:
+            out.append(cur.head)
+            cur = cur.tail
+        return out
+ll = LinkedList(1, LinkedList(2, LinkedList(3)))
+print(ll.to_list())
+
+class Config:
+    const VERSION = "2.0"
+    static instances: int = 0
+print(Config.VERSION)
+assert 1 + 1 == 2, "数学坏了"
+print("断言通过")

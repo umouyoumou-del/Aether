@@ -64,7 +64,7 @@ func (g *Gen) expr(e Expr) string {
 			return g.methodOn(x.X, x.Op2, g.expr(x.X), []string{g.expr(x.Y)}, nil)
 		}
 		xc := g.expr(x.X)
-		if !g.inConst && isConstExpr(x.X) && isConstExpr(x.Y) && isNumeric(x.X.Typ()) {
+		if !g.inConst && isGoConst(x.X) && isGoConst(x.Y) && isNumeric(x.X.Typ()) {
 			xc = g.rt() + ".Val[" + g.typ(x.X.Typ()) + "](" + xc + ")"
 		}
 		return g.binCode(x.Op, xc, x.X.Typ(), g.expr(x.Y), x.Y.Typ(), x.T)
@@ -132,6 +132,34 @@ func (g *Gen) expr(e Expr) string {
 		return g.expr(x.X)
 	}
 	return "nil /* ? */"
+}
+
+// isGoConst 判断生成的 Go 表达式是否会被 Go 当作常量（从而以任意精度折叠）。
+func isGoConst(e Expr) bool {
+	if isConstExpr(e) {
+		return true
+	}
+	switch x := e.(type) {
+	case *Call:
+		if x.Kind == CallConv && len(x.Final) == 1 && isNumeric(x.ConvTo) && isNumeric(x.Final[0].Typ()) {
+			return isGoConst(x.Final[0])
+		}
+	case *Cast:
+		if x.Mode == castNumeric {
+			return isGoConst(x.X)
+		}
+	case *ConvExpr:
+		if x.Kind == ConvNumeric {
+			return isGoConst(x.X)
+		}
+	case *Unary:
+		if x.Op == TMinus || x.Op == TPlus || x.Op == TTilde {
+			return x.Op2 == nil && isGoConst(x.X)
+		}
+	case *Binary:
+		return x.Op2 == nil && isGoConst(x.X) && isGoConst(x.Y)
+	}
+	return false
 }
 
 func (g *Gen) intLit(x *IntLit, neg bool) string {
@@ -1075,7 +1103,7 @@ func (g *Gen) defaultArg(e *Call, i int) string {
 	for k, v := range g.subst {
 		ns[k] = v
 	}
-	for k, v := range e.Subst {
+	for k, v := range composeSubst(p.DefaultSubst, e.Subst) {
 		ns[k] = subst(v, save)
 	}
 	g.subst = ns

@@ -498,18 +498,34 @@ func (c *Checker) inferElems(elems []Expr, what string, anyCtx ...bool) Type {
 	}
 	var et Type
 	types := make([]Type, len(elems))
-	// 先检查非字面量，避免 [1, 2.5] 之类按 int 推断
+	// 先检查非字面量，避免 [1, 2.5] 之类按 int 推断；空容器也放到后面，用其它元素的类型推断
+	deferred := func(x Expr) bool { return isUntypedLit(x) || isEmptyContainer(x) }
 	for i, x := range elems {
-		if isUntypedLit(x) {
+		if deferred(x) {
 			continue
 		}
 		types[i] = c.validElem(c.expr(x, hint), x.P(), what)
+	}
+	var known Type
+	for _, t := range types {
+		if t == nil || isInvalid(t) {
+			continue
+		}
+		if known == nil {
+			known = t
+		} else if j := c.join(known, t); j != nil {
+			known = j
+		}
 	}
 	for i, x := range elems {
 		if types[i] != nil {
 			continue
 		}
-		types[i] = c.expr(x, numericWant(et))
+		if isEmptyContainer(x) {
+			types[i] = c.expr(x, known)
+			continue
+		}
+		types[i] = c.expr(x, numericWant(known))
 	}
 	for i, t := range types {
 		if et == nil {
@@ -576,6 +592,17 @@ func (c *Checker) listLit(e *ListLit, want Type) Type {
 		return tInvalid
 	}
 	return &ListT{et}
+}
+
+// isEmptyContainer 判断是否为空的列表/字典/集合字面量。
+func isEmptyContainer(e Expr) bool {
+	switch x := e.(type) {
+	case *ListLit:
+		return len(x.Elems) == 0
+	case *DictLit:
+		return len(x.Keys) == 0
+	}
+	return false
 }
 
 // containsTParamFree 判断类型中是否含有 nil（未知部分）。
@@ -2491,11 +2518,11 @@ func (c *Checker) unify(p, a Type, m Subst, free map[*TypeParam]bool) bool {
 				}
 			}
 			if x.D.Kind == DInterface {
-				return !containsTParam(x, free)
+				return c.unifyIface(x, a, m, free)
 			}
 		}
-		if x.D.Kind == DInterface && !containsTParam(x, free) {
-			return true
+		if x.D.Kind == DInterface {
+			return c.unifyIface(x, a, m, free)
 		}
 	default:
 		if identical(p, a) {
@@ -2511,4 +2538,41 @@ func (c *Checker) unify(p, a Type, m Subst, free map[*TypeParam]bool) bool {
 		return ok
 	}
 	return false
+}
+
+// unifyIface 通过结构化实现推断接口的类型实参：把接口方法的签名与实际类型的同名方法合一。
+func (c *Checker) unifyIface(x *NamedT, a Type, m Subst, free map[*TypeParam]bool) bool {
+	if !containsTParam(x, free) {
+		return true // 是否真的实现由之后的可赋值检查决定
+	}
+	if an, ok := a.(*NamedT); ok && an.D.Kind == DInterface && an.D == x.D {
+		for i := range x.Args {
+			if i < len(an.Args) && !c.unify(x.Args[i], an.Args[i], m, free) {
+				return false
+			}
+		}
+		return true
+	}
+	methods, _, propT := c.ifaceMembers(x)
+	ok := true
+	for name, want := range methods {
+		got := c.methodSigOf(a, name)
+		if got == nil || len(got.Params) != len(want.Params) {
+			return false
+		}
+		for i := range want.Params {
+			if !c.unify(want.Params[i].T, got.Params[i].T, m, free) {
+				ok = false
+			}
+		}
+		if !c.unify(want.Ret, got.Ret, m, free) {
+			ok = false
+		}
+	}
+	for name, pt := range propT {
+		if got, _ := c.propTypeOf(a, name); got != nil {
+			c.unify(pt, got, m, free)
+		}
+	}
+	return ok
 }

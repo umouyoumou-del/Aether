@@ -1,0 +1,123 @@
+# 泛型基类 + 虚方法
+abstract class Repo[T]:
+    items: list[T] = []
+
+    abstract def key(self, x: T) -> str
+
+    def add(self, x: T) -> Repo[T]:
+        self.items.append(x)
+        return self
+
+    def find(self, k: str) -> T?:
+        for it in self.items:
+            if self.key(it) == k:
+                return it
+        return null
+
+    def keys(self) -> list[str]:
+        return [self.key(x) for x in self.items]
+
+class User:
+    name: str
+    age: int
+
+class UserRepo(Repo[User]):
+    override def key(self, x: User) -> str:
+        return x.name.lower()
+
+class IntRepo(Repo[int]):
+    override def key(self, x: int) -> str:
+        return f"#{x}"
+
+r = UserRepo()
+r.add(User("Alice", 30)).add(User("Bob", 25))
+print(r.keys(), r.find("bob")?.age, r.find("zed")?.age ?? -1)
+ir = IntRepo()
+ir.add(3).add(5)
+print(ir.keys(), ir.find("#5"))
+repos: list[Repo[int]] = [ir]
+print(repos[0].keys())
+
+# 三层继承 + 多级 super
+class A:
+    def hello(self) -> str:
+        return "A"
+    def who(self) -> str:
+        return "A.who->" + self.hello()
+class B(A):
+    override def hello(self) -> str:
+        return "B+" + super().hello()
+class C(B):
+    override def hello(self) -> str:
+        return "C+" + super().hello()
+objs: list[A] = [A(), B(), C()]
+print([o.who() for o in objs])
+
+# 属性覆盖
+class Base:
+    prop label -> str:
+        return "base"
+    def show(self) -> str:
+        return "[" + self.label + "]"
+class Derived(Base):
+    prop label -> str:
+        return "derived"
+print(Base().show(), Derived().show())
+
+# 生成器中的异常
+def gen_fail() -> iter[int]:
+    yield 1
+    raise ValueError("生成器出错")
+out: list[int] = []
+try:
+    for v in gen_fail():
+        out.append(v)
+except ValueError as e:
+    print("捕获：", e, out)
+
+# 生成器中的 try/finally
+def gen_try() -> iter[int]:
+    try:
+        yield 1
+        yield 2
+    finally:
+        print("生成器 finally")
+for v in gen_try():
+    if v == 1:
+        break
+print("提前结束后继续")
+
+# 结构体包含列表
+struct Bag:
+    name: str
+    items: list[int]
+b1 = Bag("x", [1, 2])
+b2 = Bag("x", [1, 2])
+print(b1 == b2, b1 == Bag("x", [1]))
+
+# 元组键
+grid: dict[(int, int), str] = {}
+grid[(0, 1)] = "a"
+grid[(2, 3)] = "b"
+print(grid[(2, 3)], (0, 1) in grid, len(grid))
+for (x, y), v in grid.items():
+    print(x, y, v)
+
+# 排序稳定性
+people = [("a", 2), ("b", 1), ("c", 2), ("d", 1)]
+print(sorted(people, key=p => p[1]))
+print(sorted(["bb", "a", "ccc"], key=s => len(s), reverse=true))
+
+# 静态方法互相调用
+class MathX:
+    static def sq(x: int) -> int:
+        return x * x
+    static def sum_sq(n: int) -> int:
+        return sum(MathX.sq(i) for i in range(n))
+print(MathX.sum_sq(4))
+
+# 嵌套可空与集合
+maybe_list: list[int?] = [1, null, 3]
+print(maybe_list, [x ?? 0 for x in maybe_list], sum(x ?? 0 for x in maybe_list))
+nested = {"a": [1, 2], "b": []}
+print(nested, nested["a"][1])

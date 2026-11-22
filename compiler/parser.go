@@ -1215,7 +1215,8 @@ func (p *parser) selectStmt() *SelectStmt {
 			}
 			if attr == nil || (attr.Name != "recv" && attr.Name != "send") {
 				p.errorf(x.P(), "select 的 case 必须是 ch.recv() 或 ch.send(值)")
-				panic(parseBail{})
+				p.block("case 子句") // 跳过这个 case 的代码块
+				return
 			}
 			sc.Chan = attr.X
 			if attr.Name == "recv" {

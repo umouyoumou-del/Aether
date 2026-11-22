@@ -1241,10 +1241,13 @@ func substSig(s *FuncSig, m Subst) *FuncSig {
 	if len(m) == 0 {
 		return s
 	}
-	n := &FuncSig{TParams: s.TParams, Ret: subst(s.Ret, m), Async: s.Async, Gen: s.Gen, Decl: s.Decl}
+	n := &FuncSig{TParams: s.TParams, Ret: subst(s.Ret, m), Async: s.Async, Gen: s.Gen, Decl: s.Decl, Scope: s.Scope}
 	for _, p := range s.Params {
 		np := *p
 		np.T = subst(p.T, m)
+		if np.Default != nil {
+			np.DefaultSubst = composeSubst(p.DefaultSubst, m)
+		}
 		n.Params = append(n.Params, &np)
 	}
 	return n
@@ -1336,7 +1339,7 @@ func (c *Checker) finishCtor(td *TypeDecl) {
 		anc := chain[i]
 		m := makeSubst(anc.D.TParams, anc.Args)
 		for _, f := range anc.D.Fields {
-			pi := &ParamInfo{Name: f.Name, T: subst(f.T, m), Default: f.Default, Mod: anc.D.Mod, Pos: f.Pos}
+			pi := &ParamInfo{Name: f.Name, T: subst(f.T, m), Default: f.Default, Mod: anc.D.Mod, Pos: f.Pos, DefaultSubst: m}
 			if f.Default == nil && sawDefault {
 				// 没有默认值的字段排在有默认值的字段之后：只能用关键字参数
 			}

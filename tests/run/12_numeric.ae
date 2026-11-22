@@ -1,0 +1,68 @@
+import time
+# 整数类型
+a: i32 = 2147483647
+a += 1
+print(a)
+b: u8 = 250
+b += 10
+print(b)
+c: u64 = 18446744073709551615
+print(c, c // 2)
+d: i8 = -128
+big = 300
+print(d, i8(big), int(d) * 2, i32(70000) * i32(70000))
+e = 7 as i16
+print(e * 3, type_name(e), type_name(3.0 as f32))
+f: f32 = 1.1
+print(f * 2.0, float(f))
+mask: u32 = 0xF0F0
+print(mask & 0xFF, mask | 1, mask >> 4, ~mask)
+# 字符运算
+ch = 'a'
+print(chr(ord(ch) + 1), ch + 2, 'z' - ch, ch.upper(), str(ch) * 3)
+word = "Hello 世界"
+print(word[::-1], word[-2:], word[1:8:2], len(word), word.length)
+# select 中 break 外层循环
+ticks = chan[int](10)
+for i in range(5):
+    ticks.send(i)
+ticks.close()
+got: list[int] = []
+while len(got) < 5:
+    select:
+        case v = ticks.recv():
+            got.append(v)
+print(got)
+count = 0
+for i in range(100):
+    select:
+        case done = time.after(0.0).recv():
+            if i >= 3:
+                break
+            count += 1
+print("循环在 select 中跳出", count)
+# select 的 default
+empty = chan[int]()
+select:
+    case x = empty.recv():
+        print("不会发生", x)
+    default:
+        print("没有数据时走 default")
+# 闭包
+fs: list[fn() -> int] = []
+for i in range(3):
+    fs.append(() => i * 10)
+print([f() for f in fs])
+k = 0
+gs: list[fn() -> int] = []
+while k < 3:
+    j = k
+    gs.append(() => j)
+    k += 1
+print([g() for g in gs])
+# 嵌套推导式
+pairs = [(x, y) for x in range(4) if x % 2 == 0 for y in range(x) if y > 0]
+print(pairs)
+print({c: [i for i in range(3) if i != c] for c in range(3)})
+flat = [n for row in [[1, 2], [3], [4, 5, 6]] for n in row if n % 2 == 1]
+print(flat)
