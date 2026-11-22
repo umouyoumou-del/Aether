@@ -825,6 +825,31 @@ func (c *Checker) operatorMethod(t Type, name string) (*Method, *FuncSig) {
 	return mt, substSig(mt.Sig, m)
 }
 
+// orderMethod 查找比较方法 __lt__ 等：除具体类型外，还在接口类型、
+// 以及带接口约束的类型参数（例如 T: Comparable[T]）的接口中查找。
+func (c *Checker) orderMethod(t Type, name string) (*Method, *FuncSig) {
+	var nt *NamedT
+	switch x := t.(type) {
+	case *NamedT:
+		if x.D.Kind != DInterface {
+			return c.operatorMethod(t, name)
+		}
+		nt = x
+	case *TParamT:
+		if x.P.Bound != BoundIface {
+			return nil, nil
+		}
+		nt = x.P.Iface
+	default:
+		return nil, nil
+	}
+	mem, _, m := c.findIfaceMember(nt, name, map[*TypeDecl]bool{})
+	if mt, ok := mem.(*Method); ok && !mt.Static {
+		return mt, substSig(mt.Sig, m)
+	}
+	return nil, nil
+}
+
 func (c *Checker) unary(e *Unary, want Type) Type {
 	switch e.Op {
 	case KNot:
@@ -1182,39 +1207,41 @@ func (c *Checker) checkOrdering(e *Compare, i int, a, b Type) {
 		TLe: {"__le__", "__ge__"}, TGe: {"__ge__", "__le__"},
 	}
 	nm := names[op]
-	if m, sig := c.operatorMethod(a, nm[0]); m != nil {
-		if _, ok := c.assignable(b, sig.Params[0].T); ok {
-			e.Ovl[i] = m
-			c.convert(&e.Xs[i+1], b, sig.Params[0].T, "比较")
+	// use 尝试以 recv.method(arg) 实现这次比较；swap 表示接收者是右操作数，neg 表示结果取反
+	use := func(name string, swap, neg bool) bool {
+		recvT, argT, slot := a, b, &e.Xs[i+1]
+		if swap {
+			recvT, argT, slot = b, a, &e.Xs[i]
+		}
+		m, sig := c.orderMethod(recvT, name)
+		if m == nil || len(sig.Params) != 1 {
+			return false
+		}
+		if _, ok := c.assignable(argT, sig.Params[0].T); !ok {
+			return false
+		}
+		e.Ovl[i] = m
+		e.Swap[i] = swap
+		e.Neg[i] = neg
+		c.convert(slot, argT, sig.Params[0].T, "比较")
+		return true
+	}
+	if use(nm[0], false, false) || use(nm[1], true, false) {
+		return
+	}
+	// 只定义了 __lt__ 时：a > b 即 b < a，a >= b 即 !(a < b)，a <= b 即 !(b < a)
+	switch op {
+	case TGt:
+		if use("__lt__", true, false) {
 			return
 		}
-	}
-	if m, sig := c.operatorMethod(b, nm[1]); m != nil {
-		if _, ok := c.assignable(a, sig.Params[0].T); ok {
-			e.Ovl[i] = m
-			e.Swap[i] = true
-			c.convert(&e.Xs[i], a, sig.Params[0].T, "比较")
+	case TGe:
+		if use("__lt__", false, true) {
 			return
 		}
-	}
-	// a > b 可以借助 b.__lt__(a)
-	if op == TGt || op == TLe || op == TGe {
-		alt := map[TokKind]string{TGt: "__lt__", TGe: "__le__", TLe: "__ge__"}[op]
-		if m, sig := c.operatorMethod(b, alt); m != nil && op == TGt {
-			if _, ok := c.assignable(a, sig.Params[0].T); ok {
-				e.Ovl[i] = m
-				e.Swap[i] = true
-				c.convert(&e.Xs[i], a, sig.Params[0].T, "比较")
-				return
-			}
-		}
-		if m, sig := c.operatorMethod(a, "__lt__"); m != nil && op == TGe {
-			if _, ok := c.assignable(b, sig.Params[0].T); ok {
-				e.Ovl[i] = m
-				e.Neg[i] = true
-				c.convert(&e.Xs[i+1], b, sig.Params[0].T, "比较")
-				return
-			}
+	case TLe:
+		if use("__lt__", true, true) {
+			return
 		}
 	}
 	if isOpt(a) || isOpt(b) {
@@ -2246,7 +2273,15 @@ func (c *Checker) member(e *Attr, t Type) Type {
 	}
 	// 扩展方法与扩展属性
 	if cands := c.extCandidates(t, e.Name); len(cands) > 0 {
-		cd := cands[0]
+		all := make([]*extCand, len(cands))
+		for i := range cands {
+			all[i] = &cands[i]
+		}
+		cd, rival := c.pickExt(all)
+		if rival != nil {
+			c.extAmbiguous(e.NamePos, t, e.Name, cd, rival)
+			return tInvalid
+		}
 		if cd.prop != nil {
 			e.Kind = AttrProp
 			e.Prop = cd.prop
@@ -2265,104 +2300,186 @@ func (c *Checker) member(e *Attr, t Type) Type {
 		return tInvalid
 	}
 	d := c.errorf(e.NamePos, "类型 %s 没有成员 %s", t, e.Name)
-	if s := c.suggestMember(t, e.Name); s != "" {
+	if note := c.extIfaceNote(t, e.Name); note != "" {
+		d.Notes = append(d.Notes, note)
+	} else if s := c.suggestMember(t, e.Name); s != "" {
 		d.Notes = append(d.Notes, "是不是想写 ."+s+"？")
 	}
 	return tInvalid
 }
 
 type extCand struct {
-	method *Method
-	prop   *Prop
-	block  *ExtBlock
-	subst  Subst
+	method   *Method
+	prop     *Prop
+	block    *ExtBlock
+	subst    Subst
+	viaIface bool // 来自 t 所实现接口的扩展块（而不是 t 自身类型的扩展块）
 }
 
-// extCandidates 查找适用于类型 t 的扩展成员。
-func (c *Checker) extCandidates(t Type, name string) []extCand {
-	var out []extCand
+// extBlocks 返回可能为类型 t 提供成员 name 的扩展块：先是 t 自身类型的扩展块，
+// 再是各接口的扩展块（是否真的适用由 extApplies 判断）。
+func (c *Checker) extBlocks(t Type, name string) []*ExtBlock {
+	var out []*ExtBlock
 	key := typeHead(t)
-	blocks := c.exts[key]
+	for _, blk := range c.exts[key] {
+		if len(blk.Methods[name]) > 0 || blk.Props[name] != nil {
+			out = append(out, blk)
+		}
+	}
 	for _, blk := range c.ifaceExts {
 		if blk.Key == key {
-			continue
+			continue // t 就是该接口，上面已经包含
 		}
-		if len(blk.Methods[name]) == 0 && blk.Props[name] == nil {
-			continue
-		}
-		blocks = append(blocks, blk)
-	}
-	for _, blk := range blocks {
-		ms := blk.Methods[name]
-		p := blk.Props[name]
-		if len(ms) == 0 && p == nil {
-			continue
-		}
-		m := Subst{}
-		free := map[*TypeParam]bool{}
-		for _, tp := range blk.TParams {
-			free[tp] = true
-		}
-		if !c.unify(blk.Target, t, m, free) {
-			continue
-		}
-		ok := true
-		for _, tp := range blk.TParams {
-			if m[tp] == nil {
-				ok = false
-				break
-			}
-			if good, _ := c.satisfies(m[tp], tp); !good {
-				ok = false
-				break
-			}
-		}
-		if !ok {
-			continue
-		}
-		if td := namedDecl(blk.Target); td != nil && td.Kind == DInterface && blk.Key != key {
-			if good, _ := c.implements(t, subst(blk.Target, m).(*NamedT)); !good {
-				continue
-			}
-		}
-		if !c.privateOK(name, blk.Mod) {
-			continue
-		}
-		if p != nil {
-			out = append(out, extCand{prop: p, block: blk, subst: m})
-		}
-		for _, mt := range ms {
-			out = append(out, extCand{method: mt, block: blk, subst: m})
+		if len(blk.Methods[name]) > 0 || blk.Props[name] != nil {
+			out = append(out, blk)
 		}
 	}
 	return out
 }
 
-// extUnsatisfied 若存在同名扩展但约束不满足，返回说明。
-func (c *Checker) extUnsatisfied(t Type, name string) string {
-	key := typeHead(t)
-	for _, blk := range c.exts[key] {
-		if len(blk.Methods[name]) == 0 && blk.Props[name] == nil {
+// extApplies 把扩展块的目标类型与 t 合一，返回类型代换（不检查类型参数约束）。
+// 目标是接口时，t 必须实现该接口（类、结构体、枚举、其它接口或带接口约束的类型参数）。
+func (c *Checker) extApplies(blk *ExtBlock, t Type) (Subst, bool) {
+	m := Subst{}
+	free := map[*TypeParam]bool{}
+	for _, tp := range blk.TParams {
+		free[tp] = true
+	}
+	if !c.unify(blk.Target, t, m, free) {
+		return nil, false
+	}
+	if isIfaceType(blk.Target) && blk.Key != typeHead(t) {
+		for _, tp := range blk.TParams {
+			if m[tp] == nil {
+				return nil, false
+			}
+		}
+		if ok, _ := c.implements(t, subst(blk.Target, m).(*NamedT)); !ok {
+			return nil, false
+		}
+	}
+	return m, true
+}
+
+// extCandidates 查找适用于类型 t 的扩展成员。类型自身的扩展排在接口的扩展之前。
+func (c *Checker) extCandidates(t Type, name string) []extCand {
+	var out []extCand
+	for _, blk := range c.extBlocks(t, name) {
+		m, ok := c.extApplies(blk, t)
+		if !ok {
 			continue
 		}
-		m := Subst{}
-		free := map[*TypeParam]bool{}
 		for _, tp := range blk.TParams {
-			free[tp] = true
+			if m[tp] == nil {
+				ok = false
+				break
+			}
+			if good, _ := c.satisfiesIn(m[tp], tp, m); !good {
+				ok = false
+				break
+			}
 		}
-		if !c.unify(blk.Target, t, m, free) {
+		if !ok || !c.privateOK(name, blk.Mod) {
+			continue
+		}
+		via := isIfaceType(blk.Target) && blk.Key != typeHead(t)
+		if p := blk.Props[name]; p != nil {
+			out = append(out, extCand{prop: p, block: blk, subst: m, viaIface: via})
+		}
+		for _, mt := range blk.Methods[name] {
+			out = append(out, extCand{method: mt, block: blk, subst: m, viaIface: via})
+		}
+	}
+	return out
+}
+
+// pickExt 从（参数个数匹配的）扩展方法候选中选出要调用的一个：类型自身的扩展优先；
+// 只有接口的扩展适用时，取最具体的接口（例如嵌入了另一个接口的接口）。
+// 两个互不包含的接口都提供了该方法时返回 rival，表示有歧义。
+func (c *Checker) pickExt(ms []*extCand) (best, rival *extCand) {
+	if len(ms) == 0 {
+		return nil, nil
+	}
+	best = ms[0]
+	if !best.viaIface {
+		return best, nil
+	}
+	for _, o := range ms[1:] {
+		if o.block.Key != best.block.Key && c.extMoreSpecific(o, best) && !c.extMoreSpecific(best, o) {
+			best = o
+		}
+	}
+	for _, o := range ms {
+		if o.block.Key != best.block.Key && !c.extMoreSpecific(best, o) {
+			return best, o
+		}
+	}
+	return best, nil
+}
+
+// extMoreSpecific 判断候选 a 的接口是否包含候选 b 的接口（实现 a 的接口就一定实现 b 的）。
+func (c *Checker) extMoreSpecific(a, b *extCand) bool {
+	ta, ok1 := subst(a.block.Target, a.subst).(*NamedT)
+	tb, ok2 := subst(b.block.Target, b.subst).(*NamedT)
+	if !ok1 || !ok2 {
+		return false
+	}
+	ok, _ := c.implements(ta, tb)
+	return ok
+}
+
+// extAmbiguous 报告两个接口的扩展方法同时适用于 t。
+func (c *Checker) extAmbiguous(pos Pos, t Type, name string, a, b *extCand) {
+	ia, ib := subst(a.block.Target, a.subst), subst(b.block.Target, b.subst)
+	d := c.errorf(pos, "扩展方法 %s 有歧义：%s 同时实现了接口 %s 和 %s，它们都有扩展方法 %s", name, t, ia, ib, name)
+	d.Notes = append(d.Notes, fmt.Sprintf("先转换为其中一个接口，例如 (x as %s).%s", ia, name))
+}
+
+// extIfaceNote 当某个接口的扩展提供了成员 name、但 t 没有实现该接口时，返回说明。
+func (c *Checker) extIfaceNote(t Type, name string) string {
+	key := typeHead(t)
+	for _, blk := range c.ifaceExts {
+		if len(blk.Methods[name]) == 0 && blk.Props[name] == nil || blk.Key == key || !c.privateOK(name, blk.Mod) {
+			continue
+		}
+		note := fmt.Sprintf("%s 是接口 %s 的扩展成员，只适用于实现了该接口的类型", name, blk.Target)
+		if len(blk.TParams) == 0 {
+			if ok, miss := c.implements(t, blk.Target.(*NamedT)); !ok {
+				note += fmt.Sprintf("（%s %s）", t, miss)
+			}
+		}
+		return note
+	}
+	return ""
+}
+
+// extUnsatisfied 若存在同名扩展但约束不满足，返回说明（多个扩展块时列出全部约束）。
+func (c *Checker) extUnsatisfied(t Type, name string) string {
+	var bounds, whys []string
+	seen := map[string]bool{}
+	for _, blk := range c.extBlocks(t, name) {
+		m, ok := c.extApplies(blk, t)
+		if !ok {
 			continue
 		}
 		for _, tp := range blk.TParams {
 			if m[tp] == nil {
 				continue
 			}
-			if good, why := c.satisfies(m[tp], tp); !good {
-				return fmt.Sprintf("%s 的方法 %s 要求元素满足 %s：%s", t, name, tp.BoundName(), why)
+			if good, why := c.satisfiesIn(m[tp], tp, m); !good {
+				if b := tp.BoundName(); !seen[b] {
+					seen[b] = true
+					bounds = append(bounds, b)
+					whys = append(whys, why)
+				}
+				break
 			}
 		}
 	}
-	return ""
+	if len(bounds) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%s 的方法 %s 要求元素满足 %s：%s", t, name, strings.Join(bounds, " 或 "), strings.Join(whys, "；"))
 }
 
 func (c *Checker) suggestMember(t Type, name string) string {
@@ -2380,12 +2497,22 @@ func (c *Checker) suggestMember(t Type, name string) string {
 			}
 		}
 	}
-	for _, blk := range c.exts[typeHead(t)] {
+	blocks := append([]*ExtBlock(nil), c.exts[typeHead(t)]...)
+	for _, blk := range c.ifaceExts {
+		if _, ok := c.extApplies(blk, t); ok {
+			blocks = append(blocks, blk)
+		}
+	}
+	for _, blk := range blocks {
 		for n := range blk.Methods {
-			names = append(names, n)
+			if c.privateOK(n, blk.Mod) {
+				names = append(names, n)
+			}
 		}
 		for n := range blk.Props {
-			names = append(names, n)
+			if c.privateOK(n, blk.Mod) {
+				names = append(names, n)
+			}
 		}
 	}
 	aliases := map[string]string{

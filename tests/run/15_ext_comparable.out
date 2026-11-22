@@ -1,0 +1,27 @@
+面积 4.0 面积 4.0㎡ 2.0 8.0
+矩形 2.0x3.0 面积 6.0㎡ 面积 6.0
+面积 2.0 面积 3.0 2.0
+面积 6.0 面积 6.0 3.0 true
+["面积 1.0", "面积 4.0", "面积 1.0", "面积 9.0"] [0.5, 2.0, 0.5, 4.5]
+10.0 ["面积 1.0!", "面积 2.0!"]
+面积 9.0 面积 1.0 null 0.5 null
+A1 AB12 A1
+你好，小明！ 小 你好，小明！
+9 [3, 9, 2] c ["x", "y"] 6
+[v0.9, v1.0, v1.2] [v1.2, v1.0, v0.9]
+v0.9 v1.2 v1.5 v1.0
+v0.0 v1.2
+v0.9 v1.2 [v0.9, v1.0, v1.2] [v1.2, v1.0, v0.9]
+[v0.9, v1.0, v1.2]
+[v1.2, v1.0, v0.9]
+true true false false true false
+[丁0, 甲1, 乙2, 丙2] [乙2, 丙2, 甲1, 丁0] 丁0 乙2
+[丁0, 丙2, 乙2, 甲1]
+丁0 v0.9 [false, true, false, true] [true, true, false, false]
+(v0.9, v1.2, [v1.2, v1.0, v0.9]) [乙2, 丙2] y3
+[v1.1, v1.2, v1.3] v1.3
+[乙队, 丙, 甲] 乙队 甲 false true
+[Level.Low, Level.Mid, Level.High] Level.High Level.Low true
+[Card.Num(n=2), Card.Num(n=7), Card.Face(name="King")] Card.Num(n=2) Card.Face(name="King")
+[Cat2, Dog5, Dog9] Cat2 Dog9 [Dog9, Dog5, Cat2]
+(1, "z") (2, "b") (1, 2) [(1, "z"), (2, "a"), (2, "b")]

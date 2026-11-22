@@ -684,11 +684,11 @@ func (c *Checker) methodCall0(e *Call, fn *Attr, rt Type, want Type) Type {
 	}
 	// 扩展方法
 	cands := c.extCandidates(rt, fn.Name)
-	var chosen *extCand
+	var matching []*extCand
 	for i := range cands {
 		cd := &cands[i]
 		if cd.method == nil {
-			if cd.prop != nil {
+			if cd.prop != nil && len(matching) == 0 {
 				pt := subst(cd.prop.T, cd.subst)
 				if f, ok := pt.(*FuncT); ok {
 					fn.Kind = AttrProp
@@ -703,9 +703,14 @@ func (c *Checker) methodCall0(e *Call, fn *Attr, rt Type, want Type) Type {
 			continue
 		}
 		if _, ok := c.matchArgs(e, cd.method.Sig, "", true); ok {
-			chosen = cd
-			break
+			matching = append(matching, cd)
 		}
+	}
+	chosen, rival := c.pickExt(matching)
+	if rival != nil {
+		c.extAmbiguous(fn.NamePos, rt, fn.Name, chosen, rival)
+		c.checkArgsQuiet(e)
+		return tInvalid
 	}
 	if chosen == nil && len(cands) > 0 {
 		for i := range cands {
@@ -731,7 +736,9 @@ func (c *Checker) methodCall0(e *Call, fn *Attr, rt Type, want Type) Type {
 		return tInvalid
 	}
 	d := c.errorf(fn.NamePos, "类型 %s 没有方法 %s", rt, fn.Name)
-	if s := c.suggestMember(rt, fn.Name); s != "" {
+	if note := c.extIfaceNote(rt, fn.Name); note != "" {
+		d.Notes = append(d.Notes, note)
+	} else if s := c.suggestMember(rt, fn.Name); s != "" {
 		d.Notes = append(d.Notes, "是不是想用 "+s+"？")
 	}
 	c.checkArgsQuiet(e)
@@ -1519,10 +1526,11 @@ func (c *Checker) builtinCall(e *Call, name string, want Type) Type {
 	return tInvalid
 }
 
-// hasLess 判断类型是否定义了 __lt__(self, other: 同类型)。
+// hasLess 判断类型是否定义了 __lt__(self, other: 同类型) -> bool，即实现了 Comparable[T]。
+// 类型参数要有这样的接口约束（例如 T: Comparable[T]）。这样的类型可以直接排序、求最值。
 func (c *Checker) hasLess(t Type) bool {
-	m, sig := c.operatorMethod(t, "__lt__")
-	return m != nil && len(sig.Params) == 1 && identical(sig.Params[0].T, t)
+	m, sig := c.orderMethod(t, "__lt__")
+	return m != nil && len(sig.Params) == 1 && identical(sig.Params[0].T, t) && isBool(sig.Ret)
 }
 
 // keyFunc 检查 key= 参数，返回键类型。
@@ -1613,7 +1621,7 @@ func (c *Checker) minMax(e *Call, name string, pos []*Arg, kw map[string]*Arg, w
 		e.Extra = a.X
 	} else if !isOrdered(et) && !c.hasLess(et) {
 		if _, ok := et.(*TupleT); !ok {
-			c.errorf(e.Pos, "%s 的参数类型 %s 不可比较", name, et)
+			c.errorf(e.Pos, "%s 的参数类型 %s 不可比较；请提供 key= 或定义 __lt__", name, et)
 		}
 	}
 	return et

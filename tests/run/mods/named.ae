@@ -1,0 +1,11 @@
+# 在另一个模块中为接口定义扩展方法
+interface Named:
+    def name(self) -> str
+
+extend Named:
+    def greet(self) -> str:
+        return f"你好，{self.name()}{self._mark()}"
+    def _mark(self) -> str:
+        return "！"
+    prop initial -> str:
+        return self.name()[:1]

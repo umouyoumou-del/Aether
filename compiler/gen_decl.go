@@ -149,6 +149,16 @@ func (g *Gen) methodSigLine(name string, fn *FuncCtx, sig *FuncSig) string {
 	return name + "(" + g.paramList(nil, sig) + ")" + g.retSig(sig)
 }
 
+// lessParam 判断 m 是否为 __lt__(self, other)，是则返回 other 的类型。定义了 __lt__ 的类型
+// 额外生成导出的 Lessꞏ 方法（包含 __lt__ 的接口也要求它），供运行时库的排序、求最值函数使用
+// （rt.Lesser 约束；未导出的 __lt__ 在 rt 包中不可见）。
+func lessParam(m *Method) (Type, bool) {
+	if m == nil || m.Name != "__lt__" || m.Static || len(m.Sig.Params) != 1 || len(m.Sig.TParams) > 0 {
+		return nil, false
+	}
+	return m.Sig.Params[0].T, true
+}
+
 func (g *Gen) genIface(td *TypeDecl) {
 	g.line("type %s%s interface {", td.GoName, g.tparamDecl(td.TParams))
 	g.ind++
@@ -157,6 +167,9 @@ func (g *Gen) genIface(td *TypeDecl) {
 	}
 	for _, m := range td.MethodList {
 		g.line("%s", g.methodSigLine(m.GoName, nil, m.Sig))
+		if pt, ok := lessParam(m); ok {
+			g.line("Lessꞏ(%s) bool", g.typ(pt))
+		}
 	}
 	for _, p := range td.PropList {
 		g.line("ꞏget_%s() %s", p.Name, g.typ(p.T))
@@ -211,10 +224,8 @@ func (g *Gen) genClass(td *TypeDecl) {
 				continue
 			}
 			g.line("%s", g.methodSigLine(m.GoName, nil, m.Sig))
-			if m.Name == "__lt__" && len(m.Sig.Params) == 1 && !m.Abstract {
-				g.line("Lessꞏ(%s) bool", g.typ(m.Sig.Params[0].T))
-			} else if m.Name == "__lt__" && len(m.Sig.Params) == 1 {
-				g.line("Lessꞏ(%s) bool", g.typ(m.Sig.Params[0].T))
+			if pt, ok := lessParam(m); ok {
+				g.line("Lessꞏ(%s) bool", g.typ(pt))
 			}
 		}
 		for _, p := range td.PropList {
@@ -320,11 +331,12 @@ func (g *Gen) genClassMethods(td *TypeDecl) {
 		g.line("func (self *%s) Eqꞏ(o any) bool { x, ok := o.(%s); return ok && self.__eq__(x) }", st, pt)
 	}
 	if mem, _, _ := g.c.findMember(nt, "__lt__"); mem != nil {
-		if lt, ok := mem.(*Method); ok && len(lt.Sig.Params) == 1 {
+		lt, _ := mem.(*Method)
+		if ltT, ok := lessParam(lt); ok {
 			anc := ancestorOf(td, lt.Owner)
 			save := g.subst
 			g.subst = makeSubst(anc.D.TParams, anc.Args)
-			pt := g.typ(lt.Sig.Params[0].T)
+			pt := g.typ(ltT)
 			g.subst = save
 			g.line("func (self *%s) Lessꞏ(o %s) bool { return self.__lt__(o) }", st, pt)
 		}
@@ -633,12 +645,10 @@ func (g *Gen) genStruct(td *TypeDecl) {
 	}
 	g.line("func (self %s) TypeNameꞏ() string { return %q }", st, td.Name)
 	g.genFields(st, td.Fields, "", "")
-	if lt := td.Methods["__lt__"]; lt != nil && len(lt.Sig.Params) == 1 {
-		recv := st
-		if lt.Mutating {
-			recv = "*" + st
-		}
-		g.line("func (self %s) Lessꞏ(o %s) bool { return self.__lt__(o) }", recv, g.typ(lt.Sig.Params[0].T))
+	if pt, ok := lessParam(td.Methods["__lt__"]); ok {
+		// 总是值接收者：即使 __lt__ 修改 self（指针接收者），Lessꞏ 也在副本上调用，
+		// 这样结构体的值类型本身满足 rt.Lesser
+		g.line("func (self %s) Lessꞏ(o %s) bool { return self.__lt__(o) }", st, g.typ(pt))
 	}
 	if eqM != nil {
 		g.line("func (self %s) Eqꞏ(o any) bool { x, ok := o.(%s); return ok && self.__eq__(x) }", st, g.typ(eqM.Sig.Params[0].T))
@@ -721,6 +731,10 @@ func (g *Gen) genEnum(td *TypeDecl) {
 		g.resetLine()
 		g.line("")
 	}
+	if pt, ok := lessParam(td.Methods["__lt__"]); ok {
+		g.line("func (self %s) Lessꞏ(o %s) bool { return self.__lt__(o) }", td.GoName, g.typ(pt))
+		g.line("")
+	}
 	for _, p := range td.PropList {
 		if p.Decl == nil || p.Decl.GetFn == nil {
 			continue
@@ -745,11 +759,15 @@ func (g *Gen) genADT(td *TypeDecl) {
 	g.ind++
 	g.line("isꞏ%s()", td.GoName)
 	g.line("String() string")
+	ltT, hasLt := lessParam(td.Methods["__lt__"])
 	for _, m := range td.MethodList {
 		if m.Static || len(m.Sig.TParams) > 0 || m.Name == "__str__" {
 			continue
 		}
 		g.line("%s(%s)%s", memberName(m.Name), g.paramList(nil, m.Sig), g.retSig(m.Sig))
+	}
+	if hasLt {
+		g.line("Lessꞏ(%s) bool", g.typ(ltT))
 	}
 	for _, p := range td.PropList {
 		g.line("ꞏget_%s() %s", p.Name, g.typ(p.T))
@@ -804,6 +822,9 @@ func (g *Gen) genADT(td *TypeDecl) {
 				body = "return " + call
 			}
 			g.line("func (self %s) %s(%s)%s { %s }", vt, memberName(m.Name), g.paramList(nil, m.Sig), ret, body)
+		}
+		if hasLt {
+			g.line("func (self %s) Lessꞏ(o %s) bool { return self.%s(o) }", vt, g.typ(ltT), memberName("__lt__"))
 		}
 		for _, p := range td.PropList {
 			g.line("func (self %s) ꞏget_%s() %s { return %sꞏget_%s%s(self) }", vt, p.Name, g.typ(p.T), td.GoName, p.Name, tpu)

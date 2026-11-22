@@ -288,6 +288,12 @@ func (c *Checker) fieldsHashable(x *NamedT, vs []*Variant) bool {
 
 // satisfies 判断类型 t 是否满足类型参数 tp 的约束。
 func (c *Checker) satisfies(t Type, tp *TypeParam) (bool, string) {
+	return c.satisfiesIn(t, tp, nil)
+}
+
+// satisfiesIn 同 satisfies；env 给出同一组类型参数的实参，用于代入接口约束
+// （例如 T: Comparable[T]、[K, V: Container[K]]）。
+func (c *Checker) satisfiesIn(t Type, tp *TypeParam, env Subst) (bool, string) {
 	switch tp.Bound {
 	case BoundAny:
 		if isVoid(t) {
@@ -315,7 +321,12 @@ func (c *Checker) satisfies(t Type, tp *TypeParam) (bool, string) {
 		}
 		return false, fmt.Sprintf("%s 不是整数类型", t)
 	case BoundIface:
-		iface := subst(tp.Iface, Subst{tp: t}).(*NamedT)
+		s := Subst{}
+		for k, v := range env {
+			s[k] = v
+		}
+		s[tp] = t
+		iface := subst(tp.Iface, s).(*NamedT)
 		if ok, miss := c.implements(t, iface); !ok {
 			return false, fmt.Sprintf("%s 没有实现接口 %s（%s）", t, iface, miss)
 		}
@@ -326,11 +337,12 @@ func (c *Checker) satisfies(t Type, tp *TypeParam) (bool, string) {
 
 func (c *Checker) checkTArgs(tps []*TypeParam, args []Type, pos Pos) bool {
 	ok := true
+	env := makeSubst(tps, args)
 	for i, tp := range tps {
 		if i >= len(args) {
 			break
 		}
-		if good, why := c.satisfies(args[i], tp); !good {
+		if good, why := c.satisfiesIn(args[i], tp, env); !good {
 			c.errorf(pos, "类型实参 %s 不满足约束 %s: %s", args[i], tp.Name+": "+tp.BoundName(), why)
 			ok = false
 		}
@@ -1013,10 +1025,11 @@ func (c *Checker) resolveExt(x *ExtBlock) {
 	}
 	x.Key = typeHead(x.Target)
 	c.exts[x.Key] = append(c.exts[x.Key], x)
-	if d := namedDecl(x.Target); d != nil && d.Kind == DInterface {
+	td := namedDecl(x.Target)
+	if td != nil && td.Kind == DInterface {
+		// 接口的扩展成员也适用于实现了该接口的类型（见 extBlocks）
 		c.ifaceExts = append(c.ifaceExts, x)
 	}
-	td := namedDecl(x.Target)
 	for _, fd := range xd.Methods {
 		m := &Method{Name: fd.Name, Decl: fd, Ext: x, Static: fd.Static, Extern: fd.GoExtern, Pos: fd.NamePos}
 		fd.Method = m

@@ -1,0 +1,290 @@
+# 接口扩展方法与 Comparable[T]（__lt__ 排序）
+import mods.named as nm
+
+# ===== 接口扩展方法：适用于所有实现了该接口的类型 =====
+interface Shape:
+    def area(self) -> float
+
+extend Shape:
+    def describe(self) -> str:
+        return f"面积 {self.area():.1f}"
+    def describe(self, unit: str) -> str:
+        return f"面积 {self.area():.1f}{unit}"
+    def bigger_than(self, o: Shape) -> bool:
+        return self.area() > o.area()
+    def twice(self) -> float:
+        return self._scale(2.0)
+    def _scale(self, k: float) -> float:
+        return self.area() * k
+    prop half -> float:
+        return self.area() / 2.0
+
+interface Solid(Shape):
+    def volume(self) -> float
+
+class Sq:
+    s: float
+    def area(self) -> float:
+        return self.s * self.s
+
+class Cube:
+    s: float
+    def area(self) -> float:
+        return 6.0 * self.s * self.s
+    def volume(self) -> float:
+        return self.s * self.s * self.s
+
+struct Rect:
+    w: float
+    h: float
+    def area(self) -> float:
+        return self.w * self.h
+
+enum Unit:
+    One
+    Two
+    def area(self) -> float:
+        return float(self.value + 1)
+
+enum Fig:
+    Circle(r: float)
+    Box(a: float)
+    def area(self) -> float:
+        match self:
+            case Circle(r):
+                return 3.0 * r * r
+            case Box(a):
+                return a * a
+
+# 类型自身的扩展方法优先（按参数个数区分）
+extend Rect:
+    def describe(self) -> str:
+        return f"矩形 {self.w}x{self.h}"
+
+print(Sq(2.0).describe(), Sq(2.0).describe("㎡"), Sq(2.0).half, Sq(2.0).twice())
+r = Rect(2.0, 3.0)
+print(r.describe(), r.describe("㎡"), (r as Shape).describe())
+print(Unit.Two.describe(), Fig.Circle(1.0).describe(), Fig.Box(2.0).half)
+cu = Cube(1.0)
+so: Solid = cu
+print(cu.describe(), so.describe(), so.half, so.bigger_than(Sq(1.0)))
+shapes: list[Shape] = [Sq(1.0), Rect(1.0, 4.0), Unit.One, Fig.Box(3.0)]
+print([s.describe() for s in shapes], shapes.map(s => s.half))
+
+def total_half[T: Shape](xs: list[T]) -> float:
+    t = 0.0
+    for x in xs:
+        t += x.half
+    return t
+
+def descs[T: Shape](xs: list[T]) -> list[str]:
+    return [x.describe("!") for x in xs]
+
+print(total_half([Sq(2.0), Sq(4.0)]), descs([Rect(1.0, 1.0), Rect(2.0, 1.0)]))
+f = Sq(3.0).describe
+maybe: Sq? = Sq(1.0)
+none: Sq? = null
+print(f(), maybe?.describe(), none?.describe(), maybe?.half, none?.half)
+
+# 嵌入了另一个接口的接口更具体
+interface HasA:
+    def a(self) -> int
+interface HasAB(HasA):
+    def b(self) -> int
+extend HasA:
+    def hi(self) -> str:
+        return f"A{self.a()}"
+extend HasAB:
+    def hi(self) -> str:
+        return f"AB{self.a()}{self.b()}"
+class OnlyA:
+    def a(self) -> int:
+        return 1
+class Both:
+    def a(self) -> int:
+        return 1
+    def b(self) -> int:
+        return 2
+print(OnlyA().hi(), Both().hi(), (Both() as HasA).hi())
+
+# 其他模块中定义的接口扩展
+class Person:
+    nick: str
+    def name(self) -> str:
+        return self.nick
+p = Person("小明")
+who: nm.Named = p
+print(p.greet(), p.initial, who.greet())
+
+# 泛型接口的扩展（可以带约束）
+interface Seq[T]:
+    def at(self, i: int) -> T
+    def size(self) -> int
+
+extend[T] Seq[T]:
+    def to_list(self) -> list[T]:
+        return [self.at(i) for i in range(self.size())]
+
+extend[T: Ordered] Seq[T]:
+    def biggest(self) -> T:
+        best = self.at(0)
+        for i in range(self.size()):
+            if self.at(i) > best:
+                best = self.at(i)
+        return best
+
+class Nums:
+    xs: list[int]
+    def at(self, i: int) -> int:
+        return self.xs[i]
+    def size(self) -> int:
+        return len(self.xs)
+
+struct Letters:
+    s: str
+    def at(self, i: int) -> str:
+        return self.s[i:i + 1]
+    def size(self) -> int:
+        return len(self.s)
+
+sq: Seq[int] = Nums([5, 6])
+print(Nums([3, 9, 2]).biggest(), Nums([3, 9, 2]).to_list(), Letters("bca").biggest(), Letters("xy").to_list(), sq.biggest())
+
+# ===== Comparable[T]：定义了 __lt__ 的类型可以排序、求最值 =====
+struct Version:
+    major: int
+    minor: int
+    def __lt__(self, other: Version) -> bool:
+        return self.major < other.major or (self.major == other.major and self.minor < other.minor)
+    def __str__(self) -> str:
+        return f"v{self.major}.{self.minor}"
+
+vs = [Version(1, 2), Version(0, 9), Version(1, 0)]
+print(sorted(vs), sorted(vs, reverse=true))
+print(min(vs), max(vs), min(Version(2, 0), Version(1, 5), Version(1, 7)), max(Version(1, 0), Version(0, 1)))
+empty: list[Version] = []
+print(min(empty, default=Version(0, 0)), max(v for v in vs if v.major > 0))
+print(vs.min(), vs.max(), vs.sorted(), vs.sorted(reverse=true))
+vs.sort()
+print(vs)
+vs.sort(reverse=true)
+print(vs)
+a, b = Version(1, 0), Version(1, 1)
+print(a < b, a <= b, a > b, a >= b, a <= Version(1, 0), b < a)
+
+class Task:
+    pri: int
+    name: str
+    def __lt__(self, other: Task) -> bool:
+        return self.pri < other.pri
+    def __str__(self) -> str:
+        return f"{self.name}{self.pri}"
+
+ts = [Task(2, "乙"), Task(1, "甲"), Task(2, "丙"), Task(0, "丁")]
+print(sorted(ts), sorted(ts, reverse=true), min(ts), max(ts))
+print(sorted(ts, key=t => t.name))
+
+# 泛型约束 T: Comparable[T]
+def smallest[T: Comparable[T]](xs: list[T]) -> T:
+    best = xs[0]
+    for x in xs:
+        if x < best:
+            best = x
+    return best
+
+def cmp_all[T: Comparable[T]](a: T, b: T) -> list[bool]:
+    return [a < b, a <= b, a > b, a >= b]
+
+def summary[T: Comparable[T]](xs: list[T]) -> (T, T, list[T]):
+    return (min(xs), max(xs), sorted(xs, reverse=true))
+
+def top2[T: Comparable[T]](xs: list[T]) -> list[T]:
+    ys = xs.copy()
+    ys.sort(reverse=true)
+    return ys[:2]
+
+print(smallest(ts), smallest[Version](vs), cmp_all(Version(1, 0), Version(1, 0)), cmp_all(Task(1, "x"), Task(2, "y")))
+print(summary(vs), top2(ts), max(Task(1, "x"), Task(3, "y")))
+
+class SortedBag[T: Comparable[T]]:
+    items: list[T] = []
+    def add(self, x: T):
+        self.items.append(x)
+        self.items.sort()
+    def top(self) -> T:
+        return self.items.max()
+
+bag = SortedBag[Version]()
+for m in [3, 1, 2]:
+    bag.add(Version(1, m))
+print(bag.items, bag.top())
+
+# 接口类型的元素
+interface Ranked(Comparable[Ranked]):
+    def rank(self) -> int
+
+class Player:
+    nick: str
+    score: int
+    def rank(self) -> int:
+        return self.score
+    def __lt__(self, other: Ranked) -> bool:
+        return self.rank() < other.rank()
+    def __str__(self) -> str:
+        return self.nick
+
+class Team:
+    title: str
+    total: int
+    def rank(self) -> int:
+        return self.total
+    def __lt__(self, other: Ranked) -> bool:
+        return self.rank() < other.rank()
+    def __str__(self) -> str:
+        return self.title
+
+rs: list[Ranked] = [Player("甲", 30), Team("乙队", 10), Player("丙", 20)]
+print(sorted(rs), min(rs), max(rs), rs[0] < rs[1], rs[1] < rs[0])
+
+# 枚举、代数数据类型与类层次
+enum Level:
+    Low
+    Mid
+    High
+    def __lt__(self, o: Level) -> bool:
+        return self.value < o.value
+
+lv = [Level.High, Level.Low, Level.Mid]
+print(sorted(lv), max(lv), lv.min(), Level.Low < Level.High)
+
+enum Card:
+    Num(n: int)
+    Face(name: str)
+    def weight(self) -> int:
+        match self:
+            case Num(n):
+                return n
+            case Face(name):
+                return 10 + len(name)
+    def __lt__(self, o: Card) -> bool:
+        return self.weight() < o.weight()
+
+cards = [Card.Face("King"), Card.Num(7), Card.Num(2)]
+print(sorted(cards), min(cards), cards.max())
+
+class Animal:
+    age: int
+    def __lt__(self, o: Animal) -> bool:
+        return self.age < o.age
+    def __str__(self) -> str:
+        return f"{type_name(self)}{self.age}"
+class Dog(Animal):
+    pass
+class Cat(Animal):
+    pass
+zoo: list[Animal] = [Dog(5), Cat(2), Dog(9)]
+print(sorted(zoo), min(zoo), max(zoo), zoo.sorted(reverse=true))
+
+# 元组按元素依次比较
+pairs = [(2, "b"), (1, "z"), (2, "a")]
+print(min(pairs), max(pairs), min((3, 1), (1, 2)), sorted(pairs))
