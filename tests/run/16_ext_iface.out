@@ -1,0 +1,10 @@
+Base:面积 4.0 Base:面积 2.0 面积 1.0方 其他 10.0
+["面积 1.0", "面积 1.0"] 方 ["方", "其他"]
+面积 25.0 null 方 无
+图形面积 4.0 其他
+你好 咪 你好 标 1 ["你好 咪", "你好 标"]
+V1 [V1, V2, V3]
+Level.Low 乙 乙 (V1, V2) (Level.Low, Level.High)
+V5 V4 true true false
+[Level.Low, Level.High, Level.High] [Level.High, Level.High, Level.Low] Level.Low Level.High
+[V1, V2] [V1, V2] [V7, V9] V9

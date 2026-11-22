@@ -1,0 +1,94 @@
+# 接口扩展方法与 Comparable[T] 相关的编译错误
+interface HasA:
+    def a(self) -> int
+interface HasB:
+    def b(self) -> int
+
+extend HasA:
+    def hi(self) -> str:
+        return "A"
+    def a(self) -> int:                  # 错误: 类型 HasA 已有成员 a
+        return 0
+
+extend HasB:
+    def hi(self) -> str:
+        return "B"
+
+class Both:
+    def a(self) -> int:
+        return 1
+    def b(self) -> int:
+        return 2
+
+class Neither:
+    def c(self) -> int:
+        return 3
+
+print(Both().hi())                     # 错误: 扩展方法 hi 有歧义
+print((Both() as HasA).hi(), (Both() as HasB).hi())
+print(Neither().hi())                  # 错误: 只适用于实现了该接口的类型
+f = Both().hi                          # 错误: 有歧义
+
+interface Seq[T]:
+    def at(self, i: int) -> T
+
+extend[T: Ordered] Seq[T]:
+    def biggest(self) -> T:
+        return self.at(0)
+
+class Boxes:
+    def at(self, i: int) -> Both:
+        return Both()
+
+print(Boxes().biggest())               # 错误: 要求元素满足 Ordered
+
+# 结构体修改 self 的方法不能通过接口调用
+interface Counter:
+    def inc(self)
+
+extend Counter:
+    def inc_twice(self):
+        self.inc()
+        self.inc()
+
+struct Clicks:
+    n: int
+    def inc(self):
+        self.n += 1
+
+def bump[T: Counter](x: T):
+    x.inc()
+
+k = Clicks(0)
+k.inc()
+cnt: Counter = k                       # 错误: 结构体 Clicks 不能当作接口 Counter 使用
+k.inc_twice()                          # 错误: 接口要求的方法 inc 会修改 self
+bump(k)                                # 错误: 改为 class
+
+# 没有 __lt__ 的类型不能直接排序、求最值
+struct P:
+    x: int
+
+print(sorted([P(1), P(2)]))            # 错误: 元素类型 P 不能直接排序
+print(max(P(1), P(2)))                 # 错误: 不可比较
+print([P(1)].min())                    # 错误: 要求元素满足 Ordered 或 Comparable[T]
+
+def smallest[T: Comparable[T]](xs: list[T]) -> T:
+    return xs[0]
+
+print(smallest([3, 1, 2]))             # 错误: 请用约束 Ordered
+print(smallest([P(1)]))                # 错误: P 没有实现接口 Comparable[P]
+
+class Animal:
+    age: int
+    def __lt__(self, o: Animal) -> bool:
+        return self.age < o.age
+
+class Dog(Animal):
+    pass
+
+dogs = [Dog(1), Dog(2)]
+print(sorted(dogs))                    # 错误: 参数类型是 Animal
+print(min(dogs))                       # 错误: 可以把元素类型写成 Animal
+zoo: list[Animal] = [Dog(3), Dog(1)]
+print(sorted(zoo), min(zoo))

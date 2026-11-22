@@ -29,7 +29,7 @@ fib(30) = 832040，80 分以上：["小明", "小红"]
 | 金 · 坚硬 | **C++** | 编译为原生代码、值类型 `struct`、运算符重载（`__add__` 等）、泛型、编译期常量 `const` |
 | 水 · 流动 | **Go** | `go` 协程、`chan` 通道、`select`、`defer`、结构化接口、一体化工具链、单个可执行文件 |
 | 土 · 稳固 | **Java** | 静态类型检查、类与单继承、抽象类、接口、异常体系、`enum`、确定赋值分析 |
-| 火 · 灵动 | **C#** | 属性 `prop`、LINQ 式链式方法、`?.` `??` 空安全、`async`/`await`、模式匹配、扩展方法 |
+| 火 · 灵动 | **C#** | 属性 `prop`、LINQ 式链式方法、`?.` `??` 空安全、`async`/`await`、模式匹配、扩展方法（包括接口的扩展方法） |
 
 ## 快速开始
 
@@ -133,6 +133,31 @@ struct Vec:
 v = Vec(1.0, 2.0) + Vec(3.0, 4.0)      # struct 按值复制、按字段比较，可以作为字典的键
 ```
 
+### 扩展方法与 Comparable
+
+```python
+extend str:                                     # 为已有类型（包括内置类型）添加方法
+    def shout(self) -> str:
+        return self.upper() + "!"
+
+interface Shape:
+    def area(self) -> float
+
+extend Shape:                                   # 接口的扩展：所有实现了 Shape 的类型都能用
+    def describe(self) -> str:
+        return f"面积 {self.area():.1f}"
+
+struct Version:
+    major: int
+    minor: int
+    def __lt__(self, other: Version) -> bool:   # 定义 __lt__ 就实现了 Comparable[Version]
+        return (self.major, self.minor) < (other.major, other.minor)
+
+vs = [Version(1, 2), Version(0, 9)]
+print(sorted(vs), max(vs), vs.min())            # 可以直接排序、求最值
+def smallest[T: Comparable[T]](xs: list[T]) -> T: ...
+```
+
 ### 枚举、代数数据类型与模式匹配
 
 ```python
@@ -209,7 +234,7 @@ async def fetch(url: str) -> int:
 sizes = await [fetch(u) for u in urls]          # 并发执行，等待全部完成
 ```
 
-### 生成器、泛型、扩展方法、模块
+### 生成器、泛型、模块
 
 ```python
 def naturals() -> iter[int]:
@@ -220,10 +245,6 @@ def naturals() -> iter[int]:
 
 def max_of[T: Ordered](xs: list[T]) -> T: ...
 class Stack[T]: ...
-
-extend str:
-    def shout(self) -> str:
-        return self.upper() + "!"
 
 import geo.shapes as gs          # 导入 geo/shapes.ae
 from math import sqrt, pi

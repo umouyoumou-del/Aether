@@ -1,0 +1,146 @@
+# 接口扩展方法与 Comparable[T]：与类层次、枚举、属性、泛型的组合
+interface Shape:
+    def area(self) -> float
+
+extend Shape:
+    def describe(self) -> str:
+        return f"面积 {self.area():.1f}"
+    def kind(self) -> str:
+        if self is Sq:
+            return "方"
+        return "其他"
+    def adder(self) -> fn(float) -> float:
+        return k => self.area() + k
+
+# 抽象类层次：在类自己的方法中通过 self 调用接口扩展方法
+abstract class Base:
+    abstract def area(self) -> float
+    def show(self) -> str:
+        return "Base:" + self.describe()
+
+class Sq(Base):
+    s: float
+    override def area(self) -> float:
+        return self.s * self.s
+    def me(self) -> str:
+        return self.describe() + self.kind()
+
+class Tri(Base):
+    b: float
+    override def area(self) -> float:
+        return self.b / 2.0
+
+print(Sq(2.0).show(), Tri(4.0).show(), Sq(1.0).me(), Tri(1.0).kind(), Sq(3.0).adder()(1.0))
+bs: list[Base] = [Sq(1.0), Tri(2.0)]
+print([b.describe() for b in bs], bs[0].kind(), bs.map(b => b.kind()))
+ms: Shape? = Sq(5.0)
+nn: Shape? = null
+print(ms?.describe(), nn?.describe(), ms?.kind() ?? "无", nn?.kind() ?? "无")
+
+# 代数数据类型的方法中调用接口扩展方法
+enum Fig:
+    Circle(r: float)
+    Box(a: float)
+    def area(self) -> float:
+        match self:
+            case Circle(r):
+                return 3.0 * r * r
+            case Box(a):
+                return a * a
+    def label(self) -> str:
+        return "图形" + self.describe()
+
+print(Fig.Box(2.0).label(), Fig.Circle(1.0).kind())
+
+# 接口要求的属性可以由字段满足；结构体修改 self 的方法只要不是接口要求的就没有影响
+interface Named:
+    prop name -> str
+
+extend Named:
+    def hello(self) -> str:
+        return "你好 " + self.name
+
+class Pet:
+    name: str
+
+struct Tag:
+    name: str
+    hits: int = 0
+    def hit(self):
+        self.hits += 1
+
+t = Tag("标")
+t.hit()
+named: list[Named] = [Pet("咪"), t]
+print(Pet("咪").hello(), t.hello(), t.hits, [x.hello() for x in named])
+
+# 带 Comparable 约束的泛型接口扩展
+interface Seq[T]:
+    def at(self, i: int) -> T
+    def size(self) -> int
+
+extend[T: Comparable[T]] Seq[T]:
+    def least(self) -> T:
+        best = self.at(0)
+        for i in range(self.size()):
+            if self.at(i) < best:
+                best = self.at(i)
+        return best
+    def ordered(self) -> list[T]:
+        return sorted([self.at(i) for i in range(self.size())])
+
+struct V:
+    n: int
+    def __lt__(self, o: V) -> bool:
+        return self.n < o.n
+    def __str__(self) -> str:
+        return f"V{self.n}"
+
+class VS:
+    xs: list[V]
+    def at(self, i: int) -> V:
+        return self.xs[i]
+    def size(self) -> int:
+        return len(self.xs)
+
+vs = VS([V(3), V(1), V(2)])
+print(vs.least(), vs.ordered())
+
+# Comparable 与泛型函数、枚举、接口类型实参
+def smallest[T: Comparable[T]](xs: list[T]) -> T:
+    best = xs[0]
+    for x in xs:
+        if x < best:
+            best = x
+    return best
+
+def pick[T: Comparable[T]](a: T, b: T) -> (T, T):
+    return (min(a, b), max(a, b))
+
+enum Level:
+    Low
+    High
+    def __lt__(self, o: Level) -> bool:
+        return self.value < o.value
+
+interface Ranked(Comparable[Ranked]):
+    def rank(self) -> int
+
+class Player:
+    nick: str
+    score: int
+    def rank(self) -> int:
+        return self.score
+    def __lt__(self, other: Ranked) -> bool:
+        return self.rank() < other.rank()
+    def __str__(self) -> str:
+        return self.nick
+
+rs: list[Ranked] = [Player("甲", 3), Player("乙", 1)]
+print(smallest([Level.High, Level.Low]), smallest[Ranked](rs), smallest(rs), pick(V(2), V(1)), pick(Level.High, Level.Low))
+print(max([V(1), V(5)], default=V(0)), min([V(4)]), V(1) < V(2) < V(3), V(3) > V(2) >= V(2), V(2) <= V(1))
+lv = [Level.High, Level.Low, Level.High]
+lv.sort()
+print(lv, lv.sorted(reverse=true), lv.min(), lv.max())
+vv = [V(2), V(1)]
+print(sorted(vv), sorted(v for v in vv if v.n > 0), sorted({V(9), V(7)}), max(V(1), V(9), V(3)))
