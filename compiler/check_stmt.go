@@ -125,6 +125,18 @@ func (c *Checker) stmt(s Stmt) {
 
 func (c *Checker) exprStmt(s *ExprStmt) {
 	t := c.expr(s.X, nil)
+	switch x := t.(type) {
+	case *ModT:
+		c.errorf(s.Pos, "单独的模块名 %s 不是语句", x.M.Name)
+		return
+	case *MetaT, *GenericT:
+		c.errorf(s.Pos, "单独的类型名不是语句；创建对象请写 %s(...)", typeStr(t))
+		return
+	case *FuncRefT:
+		d := c.errorf(s.Pos, "函数 %s 没有被调用", x.Name)
+		d.Notes = append(d.Notes, "调用函数需要加括号，例如 "+x.Name+"()")
+		return
+	}
 	switch x := s.X.(type) {
 	case *Call, *Await:
 		return

@@ -18,10 +18,17 @@ type parser struct {
 type parseBail struct{}
 
 // Parse 解析一个源文件。
-func Parse(f *SourceFile, diag *Diagnostics) *File {
+func Parse(f *SourceFile, diag *Diagnostics) (file *File) {
+	file = &File{Src: f}
+	defer func() {
+		if r := recover(); r != nil {
+			if _, ok := r.(tooManyErrors); !ok {
+				panic(r)
+			}
+		}
+	}()
 	toks := Lex(f, diag)
 	p := &parser{f: f, toks: toks, diag: diag}
-	file := &File{Src: f}
 	for !p.at(TEOF) {
 		if p.at(TNewline) || p.at(TSemi) {
 			p.advance()
@@ -745,8 +752,12 @@ func (p *parser) classMember(cd *ClassDecl) {
 		fdl.Default = p.expr()
 		p.endLine()
 		cd.Fields = append(cd.Fields, fdl)
-	case p.at(TIdent) && p.peek(1).Kind == TColon:
+	case (p.at(TIdent) || (p.tok().Kind.IsKeyword() && p.tok().Kind != KPass)) && p.peek(1).Kind == TColon:
+		// 字段名可以是关键字（例如 go: bool），访问时写 obj.go
 		nt := p.advance()
+		if nt.Kind != TIdent {
+			nt.Text = nt.Kind.String()
+		}
 		p.advance()
 		fdl := &FieldDecl{Pos: nt.Pos, Name: nt.Text, Static: m.static}
 		fdl.Type = p.typeExpr()

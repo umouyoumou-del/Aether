@@ -409,7 +409,9 @@ func (c *Checker) ident(e *Ident, want Type) Type {
 	case SModule:
 		return &ModT{sym.ModRef}
 	case SBuiltin:
-		return &FuncRefT{Name: sym.Name}
+		d := c.errorf(e.Pos, "内置函数 %s 不能作为值使用", sym.Name)
+		d.Notes = append(d.Notes, "可以用 lambda 包装，例如 x => "+sym.Name+"(x)")
+		return tInvalid
 	case STParam:
 		return &MetaT{&TParamT{sym.TP}}
 	}
