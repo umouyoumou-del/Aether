@@ -1,0 +1,43 @@
+import heapq
+from collections import Deque, PriorityQueue, DefaultDict
+import random
+
+h: list[int] = []
+for x in [5, 1, 8, 3, 9, 2]:
+    heapq.heappush(h, x)
+print([heapq.heappop(h) for _ in range(6)])
+data = [7, 2, 9, 4]
+heapq.heapify(data)
+print(data[0], heapq.nlargest(2, [3, 1, 4, 1, 5]), heapq.nsmallest(2, [3, 1, 4, 1, 5]))
+random.seed(1)
+nums = [random.randint(0, 1000) for _ in range(500)]
+hh: list[int] = []
+for n in nums:
+    heapq.heappush(hh, n)
+out = [heapq.heappop(hh) for _ in range(500)]
+print("堆排序正确：", out == sorted(nums))
+
+dq = Deque[int]()
+for i in range(10):
+    dq.append(i)
+dq.appendleft(-1)
+print(dq.popleft(), dq.pop(), len(dq), dq.peek(), dq.peek_last(), dq)
+for i in range(20):
+    dq.appendleft(100 + i)
+print(len(dq), dq.to_list()[:3], list(dq)[-2:])
+
+pq = PriorityQueue[str]()
+pq.push("低", 3.0)
+pq.push("高", 1.0)
+pq.push("中", 2.0)
+pq.push("也是高", 1.0)
+print([pq.pop() for _ in range(4)], pq.peek())
+
+groups = DefaultDict[str, list[str]](() => list[str]())
+for w in ["apple", "avocado", "banana", "blueberry", "cherry"]:
+    groups[w[0:1]].append(w)
+print(groups, len(groups), "a" in groups)
+counts = DefaultDict[str, int](() => 0)
+for ch in "mississippi":
+    counts[str(ch)] += 1
+print(counts)

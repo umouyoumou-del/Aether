@@ -1,0 +1,157 @@
+# collections 模块：双端队列、优先队列、带默认值的字典（用纯五行代码编写）
+
+# 双端队列：两端的添加和删除都是 O(1)（环形缓冲区）
+class Deque[T]:
+    _buf: list[T?] = []
+    _head: int = 0
+    _size: int = 0
+
+    def __len__(self) -> int:
+        return self._size
+
+    def _grow(self):
+        cap = len(self._buf)
+        if self._size < cap:
+            return
+        new_cap = 8 if cap == 0 else cap * 2
+        nb: list[T?] = []
+        for i in range(new_cap):
+            if i < self._size:
+                nb.append(self._buf[(self._head + i) % cap])
+            else:
+                nb.append(null)
+        self._buf = nb
+        self._head = 0
+
+    def append(self, x: T):
+        self._grow()
+        self._buf[(self._head + self._size) % len(self._buf)] = x
+        self._size += 1
+
+    def appendleft(self, x: T):
+        self._grow()
+        self._head = (self._head - 1) % len(self._buf)
+        self._buf[self._head] = x
+        self._size += 1
+
+    def pop(self) -> T:
+        if self._size == 0:
+            raise IndexError("不能从空队列中弹出元素")
+        i = (self._head + self._size - 1) % len(self._buf)
+        x = self._buf[i]!
+        self._buf[i] = null
+        self._size -= 1
+        return x
+
+    def popleft(self) -> T:
+        if self._size == 0:
+            raise IndexError("不能从空队列中弹出元素")
+        x = self._buf[self._head]!
+        self._buf[self._head] = null
+        self._head = (self._head + 1) % len(self._buf)
+        self._size -= 1
+        return x
+
+    def peek(self) -> T?:
+        if self._size == 0:
+            return null
+        return self._buf[self._head]
+
+    def peek_last(self) -> T?:
+        if self._size == 0:
+            return null
+        return self._buf[(self._head + self._size - 1) % len(self._buf)]
+
+    def __iter__(self) -> iter[T]:
+        for i in range(self._size):
+            yield self._buf[(self._head + i) % len(self._buf)]!
+
+    def to_list(self) -> list[T]:
+        return list(self)
+
+    def __str__(self) -> str:
+        return "Deque(" + str(self.to_list()) + ")"
+
+# 优先队列：按优先级（数字越小越先出）取出元素；优先级相同时先进先出
+class PriorityQueue[T]:
+    _heap: list[(float, int, T)] = []
+    _seq: int = 0
+
+    def __len__(self) -> int:
+        return len(self._heap)
+
+    def _less(self, a: int, b: int) -> bool:
+        x = self._heap[a]
+        y = self._heap[b]
+        return x[0] < y[0] or (x[0] == y[0] and x[1] < y[1])
+
+    def push(self, item: T, priority: float = 0.0):
+        self._heap.append((priority, self._seq, item))
+        self._seq += 1
+        i = len(self._heap) - 1
+        while i > 0:
+            parent = (i - 1) // 2
+            if self._less(i, parent):
+                self._heap.swap(i, parent)
+                i = parent
+            else:
+                break
+
+    def pop(self) -> T:
+        if len(self._heap) == 0:
+            raise IndexError("优先队列为空")
+        top = self._heap[0]
+        last = self._heap.pop()
+        if len(self._heap) > 0:
+            self._heap[0] = last
+            i = 0
+            n = len(self._heap)
+            while true:
+                smallest = i
+                left = 2 * i + 1
+                right = left + 1
+                if left < n and self._less(left, smallest):
+                    smallest = left
+                if right < n and self._less(right, smallest):
+                    smallest = right
+                if smallest == i:
+                    break
+                self._heap.swap(i, smallest)
+                i = smallest
+        return top[2]
+
+    def peek(self) -> T?:
+        if len(self._heap) == 0:
+            return null
+        return self._heap[0][2]
+
+# 带默认值的字典：访问不存在的键时自动用 factory() 创建
+class DefaultDict[K: Hashable, V]:
+    factory: fn() -> V
+    data: dict[K, V] = {}
+
+    def __getitem__(self, key: K) -> V:
+        v = self.data.get(key)
+        if v != null:
+            return v
+        nv = self.factory()
+        self.data[key] = nv
+        return nv
+
+    def __setitem__(self, key: K, value: V):
+        self.data[key] = value
+
+    def __contains__(self, key: K) -> bool:
+        return key in self.data
+
+    def __len__(self) -> int:
+        return len(self.data)
+
+    def keys(self) -> list[K]:
+        return self.data.keys()
+
+    def items(self) -> list[(K, V)]:
+        return self.data.items()
+
+    def __str__(self) -> str:
+        return "DefaultDict(" + str(self.data) + ")"

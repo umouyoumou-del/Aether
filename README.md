@@ -248,7 +248,7 @@ $ aether test calc.ae
 ### 标准库
 
 内置：`print` `input` `len` `range` `enumerate` `zip` `sorted` `reversed` `sum` `min` `max` `any` `all` `abs` `round` `open` 等；
-模块：`math` `random` `time` `os` `json` `re` `http`。完整列表见 [docs/标准库.md](docs/标准库.md)。
+模块：`math` `random` `time` `os` `json` `re` `http` `heapq` `collections`。完整列表见 [docs/标准库.md](docs/标准库.md)。
 
 ```python
 import http

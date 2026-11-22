@@ -1,0 +1,66 @@
+# heapq 模块：用列表实现的最小堆（用纯五行代码编写）
+
+def _sift_up[T: Ordered](h: list[T], i: int):
+    while i > 0:
+        parent = (i - 1) // 2
+        if h[i] < h[parent]:
+            h.swap(i, parent)
+            i = parent
+        else:
+            return
+
+def _sift_down[T: Ordered](h: list[T], i: int):
+    n = len(h)
+    while true:
+        smallest = i
+        left = 2 * i + 1
+        right = left + 1
+        if left < n and h[left] < h[smallest]:
+            smallest = left
+        if right < n and h[right] < h[smallest]:
+            smallest = right
+        if smallest == i:
+            return
+        h.swap(i, smallest)
+        i = smallest
+
+# 把元素压入堆
+def heappush[T: Ordered](h: list[T], x: T):
+    h.append(x)
+    _sift_up(h, len(h) - 1)
+
+# 弹出并返回最小的元素；堆为空时抛出 IndexError
+def heappop[T: Ordered](h: list[T]) -> T:
+    if len(h) == 0:
+        raise IndexError("不能从空堆中弹出元素")
+    last = h.pop()
+    if len(h) == 0:
+        return last
+    top = h[0]
+    h[0] = last
+    _sift_down(h, 0)
+    return top
+
+# 先压入再弹出（比分开调用更快）
+def heappushpop[T: Ordered](h: list[T], x: T) -> T:
+    if len(h) > 0 and h[0] < x:
+        top = h[0]
+        h[0] = x
+        _sift_down(h, 0)
+        return top
+    return x
+
+# 原地把列表调整为堆
+def heapify[T: Ordered](h: list[T]):
+    i = len(h) // 2 - 1
+    while i >= 0:
+        _sift_down(h, i)
+        i -= 1
+
+# 最大的 n 个元素（从大到小）
+def nlargest[T: Ordered](n: int, items: list[T]) -> list[T]:
+    return items.sorted(reverse=true).take(n)
+
+# 最小的 n 个元素（从小到大）
+def nsmallest[T: Ordered](n: int, items: list[T]) -> list[T]:
+    return items.sorted().take(n)

@@ -132,7 +132,9 @@ func (ld *loader) resolve(from *Module, is *ImportStmt) *Module {
 	if !from.IsStd && !from.IsPrelude {
 		dirs = append(dirs, filepath.Dir(from.Path))
 	}
-	dirs = append(dirs, ld.mainDir)
+	if len(dirs) == 0 || !strings.EqualFold(dirs[0], ld.mainDir) {
+		dirs = append(dirs, ld.mainDir)
+	}
 	for _, d := range dirs {
 		p := filepath.Join(d, rel)
 		if st, err := os.Stat(p); err == nil && !st.IsDir() {

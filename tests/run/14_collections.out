@@ -1,0 +1,8 @@
+[1, 2, 3, 5, 8, 9]
+2 [5, 4] [1, 1]
+堆排序正确： true
+-1 9 9 0 8 Deque([0, 1, 2, 3, 4, 5, 6, 7, 8])
+29 [119, 118, 117] [7, 8]
+["高", "也是高", "中", "低"] null
+DefaultDict({"a": ["apple", "avocado"], "b": ["banana", "blueberry"], "c": ["cherry"]}) 3 true
+DefaultDict({"m": 1, "i": 4, "s": 4, "p": 2})
