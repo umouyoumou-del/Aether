@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"io"
 	"os"
+	"runtime/debug"
 	"sync"
 )
 
@@ -218,4 +219,9 @@ func B2I(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+func init() {
+	// 无限递归时尽早失败（默认 1GB 太大）
+	debug.SetMaxStack(256 << 20)
 }

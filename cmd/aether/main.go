@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -134,11 +135,58 @@ func build(file, src string, testMode bool) (string, bool) {
 	return exe, true
 }
 
+// fatalFilter 把 Go 运行时的致命错误翻译为简短的中文说明。
+type fatalFilter struct {
+	buf      []byte
+	suppress bool
+}
+
+var fatalHints = []struct{ prefix, msg string }{
+	{"runtime: goroutine stack exceeds", "RecursionError: 递归太深，栈空间耗尽（是否存在无限递归？）"},
+	{"fatal error: stack overflow", "RecursionError: 递归太深，栈空间耗尽（是否存在无限递归？）"},
+	{"fatal error: all goroutines are asleep - deadlock!", "死锁：所有协程都在等待（例如从一个没有人发送数据的通道接收，或忘记 close 通道）"},
+	{"fatal error: concurrent map writes", "并发错误：多个协程同时修改同一个字典，请用 Mutex 保护"},
+	{"fatal error: concurrent map read and map write", "并发错误：多个协程同时读写同一个字典，请用 Mutex 保护"},
+	{"fatal error: out of memory", "MemoryError: 内存不足"},
+}
+
+func (f *fatalFilter) Write(p []byte) (int, error) {
+	if f.suppress {
+		return len(p), nil
+	}
+	f.buf = append(f.buf, p...)
+	for {
+		i := bytes.IndexByte(f.buf, '\n')
+		if i < 0 {
+			break
+		}
+		line := string(f.buf[:i+1])
+		f.buf = f.buf[i+1:]
+		for _, h := range fatalHints {
+			if strings.HasPrefix(line, h.prefix) {
+				os.Stderr.WriteString(h.msg + "\n")
+				f.suppress = true
+				return len(p), nil
+			}
+		}
+		os.Stderr.WriteString(line)
+	}
+	return len(p), nil
+}
+
+func (f *fatalFilter) flush() {
+	if !f.suppress && len(f.buf) > 0 {
+		os.Stderr.Write(f.buf)
+	}
+}
+
 func runExe(exe string, args []string) int {
 	c := exec.Command(exe, args...)
 	c.Stdin = os.Stdin
 	c.Stdout = os.Stdout
-	c.Stderr = os.Stderr
+	ff := &fatalFilter{}
+	c.Stderr = ff
+	defer ff.flush()
 	if err := c.Run(); err != nil {
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {

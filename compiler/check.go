@@ -729,7 +729,17 @@ func (c *Checker) undefined(pos Pos, name string) {
 	case "this":
 		d.Notes = append(d.Notes, "五行用 self 表示当前对象")
 	case "lambda":
-		d.Notes = append(d.Notes, "五行的 lambda 写作 x => 表达式")
+		d.Notes = append(d.Notes, "五行的 lambda 写作 x => 表达式，例如 xs.map(x => x * 2)")
+	case "__name__":
+		d.Notes = append(d.Notes, "五行不需要 if __name__ == \"__main__\"：定义 def main() 即可作为程序入口")
+	case "self":
+		d.Notes = append(d.Notes, "self 只能在方法中使用")
+	case "printf", "println", "console", "System", "fmt":
+		d.Notes = append(d.Notes, "输出请使用 print(...)")
+	case "string":
+		d.Notes = append(d.Notes, "字符串类型写作 str")
+	case "boolean":
+		d.Notes = append(d.Notes, "布尔类型写作 bool")
 	}
 }
 

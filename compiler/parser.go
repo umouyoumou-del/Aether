@@ -480,6 +480,9 @@ func (p *parser) params(lambda bool) []*Param {
 	var ps []*Param
 	for !p.at(TRParen) {
 		pos := p.tok().Pos
+		if p.at(TDStar) {
+			p.fail("五行不支持 **kwargs；可以改用 dict[str, any] 参数或带默认值的参数")
+		}
 		variadic := p.got(TStar)
 		nt := p.expectIdent("参数")
 		prm := &Param{Pos: pos, Name: nt.Text, Variadic: variadic}
@@ -1278,6 +1281,9 @@ func (p *parser) simpleStmt() Stmt {
 		return &GoStmt{Pos: t.Pos, X: p.expr()}
 	case KYield:
 		p.advance()
+		if p.got(KFrom) {
+			return &YieldStmt{Pos: t.Pos, Value: p.expr(), From: true}
+		}
 		return &YieldStmt{Pos: t.Pos, Value: p.exprList()}
 	case KAssert:
 		p.advance()
@@ -1846,6 +1852,9 @@ func (p *parser) atom() Expr {
 	t := p.tok()
 	switch t.Kind {
 	case TIdent:
+		if t.Text == "lambda" && (p.peek(1).Kind == TIdent || p.peek(1).Kind == TColon) {
+			p.fail("五行的 lambda 写作 x => 表达式（多个参数：(a, b) => a + b）")
+		}
 		p.advance()
 		if t.Text == "super" && p.at(TLParen) && p.peek(1).Kind == TRParen {
 			p.advance()

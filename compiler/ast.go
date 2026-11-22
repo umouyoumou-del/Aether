@@ -674,6 +674,8 @@ type SelectStmt struct {
 type YieldStmt struct {
 	Pos   Pos
 	Value Expr
+	From  bool // yield from 可迭代对象
+	Loop  *LoopInfo
 }
 
 // GlobalStmt：global x, y（在函数中修改模块级变量）

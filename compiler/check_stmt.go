@@ -1512,6 +1512,22 @@ func (c *Checker) yieldStmt(s *YieldStmt) {
 		c.expr(s.Value, nil)
 		return
 	}
+	if s.From {
+		t := c.expr(s.Value, nil)
+		if isInvalid(t) {
+			return
+		}
+		info := &LoopInfo{}
+		et := c.elemOf(t, s.Value.P(), info)
+		if !isInvalid(et) && !isInvalid(fn.YieldT) {
+			if _, ok := c.assignable(et, fn.YieldT); !ok {
+				c.errorf(s.Value.P(), "yield from 的元素类型 %s 与生成器的元素类型 %s 不匹配", et, fn.YieldT)
+			}
+		}
+		info.ElemT = et
+		s.Loop = info
+		return
+	}
 	c.exprTo(&s.Value, fn.YieldT, "yield 的值")
 }
 

@@ -85,6 +85,26 @@ func (g *Gen) stmt(s Stmt) {
 	case *SelectStmt:
 		g.selectStmt(s)
 	case *YieldStmt:
+		if s.From {
+			v := g.tmp()
+			sym := &Symbol{Kind: SVar, Name: v, GoName: v, T: s.Loop.ElemT}
+			target := &Ident{exprBase: exprBase{Pos: s.Pos, T: s.Loop.ElemT}, Name: v, Sym: sym}
+			header, pre := g.loopHead(target, s.Value, s.Loop, nil)
+			flowRet := "return"
+			if g.fn.tryDepth > 0 {
+				flowRet = "ꞏflow = 1; return"
+				g.markTrys(1)
+			}
+			g.line("%s {", header)
+			g.ind++
+			if pre != nil {
+				pre()
+			}
+			g.line("if !yieldꞏ(%s) { %s }", g.coerce(v, s.Loop.ElemT, g.fn.ctx.YieldT), flowRet)
+			g.ind--
+			g.line("}")
+			return
+		}
 		if g.fn.tryDepth > 0 {
 			g.line("if !yieldꞏ(%s) {", g.expr(s.Value))
 			g.line("\tꞏflow = 1")

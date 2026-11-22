@@ -159,7 +159,15 @@ func (a *AtomicInt) CompareAndSwap(old, new int) bool {
 
 // Recv 实现 ch.recv()：通道关闭且为空时抛出 ChannelClosedError。
 func Recv[T any](ch chan T) T {
-	v, ok := <-ch
+	var v T
+	var ok bool
+	select {
+	case v, ok = <-ch:
+	default:
+		// 即将阻塞：先刷新输出，避免死锁时丢失已打印的内容
+		Flush()
+		v, ok = <-ch
+	}
 	if !ok {
 		Raise("ChannelClosedError", "通道已关闭")
 	}

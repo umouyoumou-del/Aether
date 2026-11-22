@@ -458,6 +458,7 @@ func (c *Checker) resolveAll() {
 	for _, m := range c.Mods {
 		c.mod = m
 		for _, fd := range m.Funcs {
+			c.checkDecorators(fd.Decorators)
 			fd.Sig = c.resolveSig(fd, m.Scope, nil)
 			fd.Sym.Sig = fd.Sig
 			if fd.Sym.Name == "main" && m.IsMain {
@@ -632,7 +633,30 @@ func (c *Checker) resolveProp(td *TypeDecl, x *ExtBlock, pd *PropDecl, sc *Scope
 	return p
 }
 
+// checkDecorators 对五行不支持的装饰器给出提示。
+func (c *Checker) checkDecorators(decs []*Decorator) {
+	for _, d := range decs {
+		switch d.Name {
+		case "go":
+			continue
+		case "staticmethod", "classmethod":
+			c.errorf(d.Pos, "五行用 static def 定义静态方法，不需要 @%s", d.Name)
+		case "property":
+			c.errorf(d.Pos, "五行用 prop 名字 -> 类型: 定义属性，不需要 @property")
+		case "dataclass", "dataclasses.dataclass":
+			c.errorf(d.Pos, "不需要 @dataclass：声明了字段但没有 __init__ 的类会自动生成构造函数")
+		case "abstractmethod", "abc.abstractmethod":
+			c.errorf(d.Pos, "五行用 abstract def 定义抽象方法")
+		case "override", "Override":
+			c.errorf(d.Pos, "五行用 override def 标记覆盖方法")
+		default:
+			c.errorf(d.Pos, "五行不支持装饰器 @%s", d.Name)
+		}
+	}
+}
+
 func (c *Checker) resolveMethod(td *TypeDecl, fd *FuncDecl, sc *Scope) *Method {
+	c.checkDecorators(fd.Decorators)
 	m := &Method{Name: fd.Name, Decl: fd, Owner: td, Static: fd.Static, Abstract: fd.Abstract, Override: fd.Override, Extern: fd.GoExtern, Pos: fd.NamePos}
 	fd.Method = m
 	fd.Sig = c.resolveSig(fd, sc, td)

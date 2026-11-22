@@ -1,0 +1,62 @@
+# 一个小型 Web 服务（Go 的 net/http）：路由、路径参数、JSON、异常处理
+# 直接运行会在后台启动服务器，用内置客户端请求几次后退出。
+# 想让它一直运行，把最后几行换成：server.listen(":8080")
+import http
+
+class Item:
+    id: int
+    name: str
+    price: float
+
+items: dict[int, Item] = {
+    1: Item(1, "键盘", 199.0),
+    2: Item(2, "鼠标", 89.5),
+}
+mu = Mutex()
+
+def list_items(req: http.Request) -> http.Response:
+    with mu:
+        return http.json(items.values())
+
+def get_item(req: http.Request) -> http.Response:
+    id = int(req.param("id") ?? "0")
+    with mu:
+        item = items.get(id)
+    if item == null:
+        return http.status(404, f"没有编号为 {id} 的商品")
+    return http.json(item)
+
+def add_item(req: http.Request) -> http.Response:
+    data = req.json() as dict[str, any]
+    with mu:
+        id = len(items) + 1
+        item = Item(id, data["name"] as str, data["price"] as float)
+        items[id] = item
+    return http.json(item, status=201)
+
+def hello(req: http.Request) -> http.Response:
+    name = req.query("name") ?? "世界"
+    return http.html(f"<h1>你好，{name}！</h1>")
+
+def boom(req: http.Request) -> http.Response:
+    raise RuntimeError("故意出错")
+
+server = http.Server()
+server.quiet()
+server.get("/", hello)
+server.get("/items", list_items)
+server.get("/items/{id}", get_item)
+server.post("/items", add_item)
+server.get("/boom", boom)
+
+base = server.start(":0")
+print("服务器地址已就绪")
+print(http.get(base + "/?name=五行").text)
+print(http.get(base + "/items").text)
+r = http.post(base + "/items", "{\"name\": \"显示器\", \"price\": 1299.0}")
+print(r.status, r.text)
+print(http.get(base + "/items/3").text)
+nf = http.get(base + "/items/42")
+print(nf.status, nf.text)
+print("出错的请求：", http.get(base + "/boom").status)
+server.stop()
