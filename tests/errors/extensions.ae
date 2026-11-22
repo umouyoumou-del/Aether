@@ -64,6 +64,7 @@ k.inc()
 cnt: Counter = k                       # 错误: 结构体 Clicks 不能当作接口 Counter 使用
 k.inc_twice()                          # 错误: 接口要求的方法 inc 会修改 self
 bump(k)                                # 错误: 改为 class
+kc = k as Counter                      # 错误: 不能当作接口 Counter 使用
 
 # 没有 __lt__ 的类型不能直接排序、求最值
 struct P:

@@ -1964,6 +1964,7 @@ func (c *Checker) cast(e *Cast) Type {
 			if e.Mode != castOptUnwrapAssert {
 				e.Mode = castNoop
 			}
+			c.noteStructIface(from, to, e.Pos)
 			return result
 		}
 		// 向下转换或接口之间
