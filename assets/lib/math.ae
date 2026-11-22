@@ -1,0 +1,43 @@
+# math 模块：数学常数与函数
+
+@go("math.Pi") const pi: float
+@go("math.E") const e: float
+@go("math.Inf(1)") const inf: float
+@go("math.NaN()") const nan: float
+const tau: float = 6.283185307179586
+
+@go("rt.Sqrt") def sqrt(x: float) -> float
+@go("math.Cbrt") def cbrt(x: float) -> float
+@go("math.Pow") def pow(x: float, y: float) -> float
+@go("math.Exp") def exp(x: float) -> float
+@go("rt.LogN") def log(x: float, base: float = 0.0) -> float
+@go("rt.Log2") def log2(x: float) -> float
+@go("rt.Log10") def log10(x: float) -> float
+@go("math.Sin") def sin(x: float) -> float
+@go("math.Cos") def cos(x: float) -> float
+@go("math.Tan") def tan(x: float) -> float
+@go("math.Asin") def asin(x: float) -> float
+@go("math.Acos") def acos(x: float) -> float
+@go("math.Atan") def atan(x: float) -> float
+@go("math.Atan2") def atan2(y: float, x: float) -> float
+@go("math.Sinh") def sinh(x: float) -> float
+@go("math.Cosh") def cosh(x: float) -> float
+@go("math.Tanh") def tanh(x: float) -> float
+@go("math.Hypot") def hypot(x: float, y: float) -> float
+@go("rt.Floor") def floor(x: float) -> int
+@go("rt.Ceil") def ceil(x: float) -> int
+@go("rt.Trunc") def trunc(x: float) -> int
+@go("math.Abs") def fabs(x: float) -> float
+@go("math.Mod") def fmod(x: float, y: float) -> float
+@go("math.IsNaN") def isnan(x: float) -> bool
+@go("math.IsInf($1, 0)") def isinf(x: float) -> bool
+@go("rt.Gcd") def gcd(a: int, b: int) -> int
+@go("rt.Lcm") def lcm(a: int, b: int) -> int
+@go("rt.Factorial") def factorial(n: int) -> int
+@go("rt.Comb") def comb(n: int, k: int) -> int
+@go("rt.Isqrt") def isqrt(n: int) -> int
+@go("rt.IsClose") def isclose(a: float, b: float, rel_tol: float = 1e-9, abs_tol: float = 0.0) -> bool
+@go("rt.Degrees") def degrees(x: float) -> float
+@go("rt.Radians") def radians(x: float) -> float
+@go("rt.IsPrime") def is_prime(n: int) -> bool
+@go("rt.FloatClamp") def clamp(x: float, lo: float, hi: float) -> float

@@ -1,0 +1,11 @@
+# random 模块：伪随机数
+
+@go("rt.Seed") def seed(n: int)
+@go("rt.Random") def random() -> float
+@go("rt.RandInt") def randint(a: int, b: int) -> int
+@go("rt.RandRange") def randrange(a: int, b: int) -> int
+@go("rt.Uniform") def uniform(a: float, b: float) -> float
+@go("rt.Gauss") def gauss(mu: float = 0.0, sigma: float = 1.0) -> float
+@go("rt.Choice") def choice[T](xs: list[T]) -> T
+@go("rt.Shuffle") def shuffle[T](xs: list[T])
+@go("rt.Sample") def sample[T](xs: list[T], k: int) -> list[T]

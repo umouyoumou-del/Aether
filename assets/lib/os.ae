@@ -1,0 +1,30 @@
+# os 模块：文件系统、环境变量、进程
+
+@go("rt.Args") def args() -> list[str]
+@go("rt.Getenv") def getenv(name: str) -> str?
+@go("rt.Setenv") def setenv(name: str, value: str)
+@go("rt.Exit") def exit(code: int = 0)
+@go("rt.ReadFile") def read_file(path: str) -> str
+@go("rt.WriteFile") def write_file(path: str, data: str)
+@go("rt.AppendFile") def append_file(path: str, data: str)
+@go("rt.ReadLines") def read_lines(path: str) -> list[str]
+@go("rt.Exists") def exists(path: str) -> bool
+@go("rt.IsDir") def is_dir(path: str) -> bool
+@go("rt.IsFile") def is_file(path: str) -> bool
+@go("rt.FileSize") def file_size(path: str) -> int
+@go("rt.ListDir") def listdir(path: str = ".") -> list[str]
+@go("rt.Walk") def walk(root: str) -> list[str]
+@go("rt.Glob") def glob(pattern: str) -> list[str]
+@go("rt.MkDir") def mkdir(path: str)
+@go("rt.Remove") def remove(path: str)
+@go("rt.Rename") def rename(src: str, dst: str)
+@go("rt.Cwd") def cwd() -> str
+@go("rt.Chdir") def chdir(path: str)
+@go("rt.RunCmd") def run(cmd: str, args: list[str] = []) -> str
+@go("rt.PathJoin") def join(*parts: str) -> str
+@go("rt.PathBase") def basename(path: str) -> str
+@go("rt.PathDir") def dirname(path: str) -> str
+@go("rt.PathExt") def extension(path: str) -> str
+@go("rt.PathAbs") def abspath(path: str) -> str
+@go("rt.ModTime") def mtime(path: str) -> float
+@go("rt.Platform") def platform() -> str

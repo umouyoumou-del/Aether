@@ -1,0 +1,328 @@
+# 五行 (Aether) 预导入模块
+# 这里声明的名字在每个模块中都可以直接使用。
+# 带 @go("...") 的声明由运行时库（Go）实现。
+
+# ===== 异常 =====
+
+class Exception:
+    message: str
+
+    def __init__(self, message: str = ""):
+        self.message = message
+
+    def __str__(self) -> str:
+        return self.message
+
+class ValueError(Exception): pass
+class TypeError(Exception): pass
+class IndexError(Exception): pass
+class KeyError(Exception): pass
+class ZeroDivisionError(Exception): pass
+class NullError(Exception): pass
+class RuntimeError(Exception): pass
+class AssertionError(Exception): pass
+class NotImplementedError(Exception): pass
+class OverflowError(Exception): pass
+class TimeoutError(Exception): pass
+class ChannelClosedError(Exception): pass
+class IOError(Exception): pass
+class OSError(IOError): pass
+class FileNotFoundError(IOError): pass
+class FileExistsError(IOError): pass
+class PermissionError(IOError): pass
+class EOFError(IOError): pass
+class JSONError(ValueError): pass
+
+# ===== 运行时类型 =====
+
+@go("*rt.File")
+class File:
+    @go("Read") def read(self) -> str
+    @go("ReadLine") def read_line(self) -> str?
+    @go("ReadLines") def read_lines(self) -> list[str]
+    @go("Lines") def lines(self) -> iter[str]
+    @go("Write") def write(self, s: str)
+    @go("WriteLine") def write_line(self, s: str)
+    @go("Flush") def flush(self)
+    @go("Close") def close(self)
+    @go("Enter") def __enter__(self) -> File
+    @go("Exit") def __exit__(self)
+    @go("Lines") def __iter__(self) -> iter[str]
+    @go("Name") prop name -> str
+
+@go("*rt.Task[$T1]")
+class Task[T]:
+    @go("Await") def wait(self) -> T
+    @go("Done") def done(self) -> bool
+    @go("Wait") def wait_for(self, seconds: float) -> bool
+
+@go("*rt.Mutex", ctor="rt.NewMutex")
+class Mutex:
+    def __init__(self)
+    @go("Lock") def lock(self)
+    @go("Unlock") def unlock(self)
+    @go("TryLock") def try_lock(self) -> bool
+    @go("Lock") def __enter__(self)
+    @go("Unlock") def __exit__(self)
+
+@go("*rt.RWMutex", ctor="rt.NewRWMutex")
+class RWMutex:
+    def __init__(self)
+    @go("Lock") def lock(self)
+    @go("Unlock") def unlock(self)
+    @go("RLock") def rlock(self)
+    @go("RUnlock") def runlock(self)
+    @go("Lock") def __enter__(self)
+    @go("Unlock") def __exit__(self)
+
+@go("*rt.WaitGroup", ctor="rt.NewWaitGroup")
+class WaitGroup:
+    def __init__(self)
+    @go("Add") def add(self, n: int = 1)
+    @go("Done") def done(self)
+    @go("Wait") def wait(self)
+    @go("Go") def spawn(self, f: fn())
+
+@go("*rt.AtomicInt", ctor="rt.NewAtomicInt")
+class AtomicInt:
+    def __init__(self, value: int = 0)
+    @go("Get") def get(self) -> int
+    @go("Set") def set(self, value: int)
+    @go("Add") def add(self, delta: int) -> int
+    @go("Incr") def incr(self) -> int
+    @go("CompareAndSwap") def compare_and_swap(self, old: int, new: int) -> bool
+
+# ===== 内置泛型函数 =====
+
+@go("rt.AwaitAll") def gather[T](tasks: list[Task[T]]) -> list[T]
+@go("rt.Counter") def counter[T: Hashable](items: iter[T]) -> dict[T, int]
+@go("rt.Count") def count_from(start: int = 0, step: int = 1) -> iter[int]
+@go("rt.ListFill") def repeat[T](n: int, value: T) -> list[T]
+
+# ===== str =====
+
+extend str:
+    @go("strings.ToUpper") def upper(self) -> str
+    @go("strings.ToLower") def lower(self) -> str
+    @go("rt.StrStrip") def strip(self, chars: str? = null) -> str
+    @go("rt.StrLStrip") def lstrip(self, chars: str? = null) -> str
+    @go("rt.StrRStrip") def rstrip(self, chars: str? = null) -> str
+    @go("rt.StrSplit") def split(self, sep: str? = null, maxsplit: int = -1) -> list[str]
+    @go("rt.StrRSplit") def rsplit(self, sep: str? = null, maxsplit: int = -1) -> list[str]
+    @go("rt.StrSplitLines") def splitlines(self) -> list[str]
+    @go("rt.StrSplitLines") def lines(self) -> list[str]
+    @go("rt.StrJoin") def join(self, parts: iter[str]) -> str
+    @go("rt.StrReplace") def replace(self, old: str, new: str, count: int = -1) -> str
+    @go("strings.HasPrefix") def startswith(self, prefix: str) -> bool
+    @go("strings.HasSuffix") def endswith(self, suffix: str) -> bool
+    @go("rt.StrFind") def find(self, sub: str, start: int = 0) -> int
+    @go("rt.StrRFind") def rfind(self, sub: str) -> int
+    @go("rt.StrIndex") def index(self, sub: str, start: int = 0) -> int
+    @go("rt.StrCount") def count(self, sub: str) -> int
+    @go("strings.Contains") def contains(self, sub: str) -> bool
+    @go("rt.StrIsDigit") def isdigit(self) -> bool
+    @go("rt.StrIsAlpha") def isalpha(self) -> bool
+    @go("rt.StrIsAlnum") def isalnum(self) -> bool
+    @go("rt.StrIsSpace") def isspace(self) -> bool
+    @go("rt.StrIsUpper") def isupper(self) -> bool
+    @go("rt.StrIsLower") def islower(self) -> bool
+    @go("rt.StrIsNumeric") def isnumeric(self) -> bool
+    @go("rt.StrTitle") def title(self) -> str
+    @go("rt.StrCapitalize") def capitalize(self) -> str
+    @go("rt.StrSwapCase") def swapcase(self) -> str
+    @go("rt.StrCenter") def center(self, width: int, fill: str? = null) -> str
+    @go("rt.StrLJust") def ljust(self, width: int, fill: str? = null) -> str
+    @go("rt.StrRJust") def rjust(self, width: int, fill: str? = null) -> str
+    @go("rt.StrZFill") def zfill(self, width: int) -> str
+    @go("rt.StrPartition") def partition(self, sep: str) -> (str, str, str)
+    @go("rt.StrRPartition") def rpartition(self, sep: str) -> (str, str, str)
+    @go("strings.TrimPrefix") def removeprefix(self, prefix: str) -> str
+    @go("strings.TrimSuffix") def removesuffix(self, suffix: str) -> str
+    @go("rt.StrChars") def chars(self) -> list[char]
+    @go("rt.StrBytes") def bytes(self) -> list[u8]
+    @go("rt.StrReversed") def reversed(self) -> str
+    @go("rt.StrRepeat") def repeat(self, n: int) -> str
+    @go("rt.StrIsEmpty") def is_empty(self) -> bool
+    @go("strings.EqualFold") def equals_ignore_case(self, other: str) -> bool
+    @go("rt.StrLen") prop length -> int
+
+# ===== char =====
+
+extend char:
+    @go("rt.CharIsDigit") def isdigit(self) -> bool
+    @go("rt.CharIsAlpha") def isalpha(self) -> bool
+    @go("rt.CharIsAlnum") def isalnum(self) -> bool
+    @go("rt.CharIsSpace") def isspace(self) -> bool
+    @go("rt.CharIsUpper") def isupper(self) -> bool
+    @go("rt.CharIsLower") def islower(self) -> bool
+    @go("rt.CharIsPunct") def ispunct(self) -> bool
+    @go("rt.CharUpper") def upper(self) -> char
+    @go("rt.CharLower") def lower(self) -> char
+    @go("rt.CharDigitValue") def digit_value(self) -> int
+    @go("int($r)") prop code -> int
+
+# ===== 数字 =====
+
+extend int:
+    @go("rt.IntBitLen") def bit_length(self) -> int
+    @go("rt.IntClamp") def clamp(self, lo: int, hi: int) -> int
+    @go("rt.Abs($r)") def abs(self) -> int
+    @go("rt.IsPrime") def is_prime(self) -> bool
+    @go("rt.Hex") def hex(self) -> str
+    @go("rt.Bin") def bin(self) -> str
+
+extend float:
+    @go("math.IsNaN") def is_nan(self) -> bool
+    @go("math.IsInf($r, 0)") def is_inf(self) -> bool
+    @go("rt.FloatIsInteger") def is_integer(self) -> bool
+    @go("rt.FloatClamp") def clamp(self, lo: float, hi: float) -> float
+    @go("math.Abs") def abs(self) -> float
+
+# ===== list =====
+
+extend[T] list[T]:
+    @go(".Append") def append(self, x: T)
+    @go(".Extend") def extend(self, xs: iter[T])
+    @go(".Insert") def insert(self, i: int, x: T)
+    @go(".Pop") def pop(self) -> T
+    @go(".PopAt") def pop(self, i: int) -> T
+    @go(".RemoveAt") def remove_at(self, i: int)
+    @go(".Clear") def clear(self)
+    @go(".Copy") def copy(self) -> list[T]
+    @go(".Reverse") def reverse(self)
+    @go("rt.ListContains") def contains(self, x: T) -> bool
+    @go("rt.ListIndex") def index(self, x: T, start: int = 0) -> int
+    @go("rt.ListCount") def count(self, x: T) -> int
+    @go("rt.ListRemove") def remove(self, x: T)
+    @go("rt.ListSortBy") def sort[K](self, key: fn(T) -> K, reverse: bool = false)
+    @go("rt.ListSortCmp") def sort_with(self, cmp: fn(T, T) -> int)
+    @go("rt.ListMap") def map[U](self, f: fn(T) -> U) -> list[U]
+    @go("rt.ListFilter") def filter(self, f: fn(T) -> bool) -> list[T]
+    @go("rt.ListReduce") def reduce[A](self, f: fn(A, T) -> A, init: A) -> A
+    @go("rt.ListReduce1") def reduce(self, f: fn(T, T) -> T) -> T
+    @go("rt.ListForEach") def for_each(self, f: fn(T))
+    @go("rt.ListAny") def any(self, f: fn(T) -> bool) -> bool
+    @go("rt.ListAll") def all(self, f: fn(T) -> bool) -> bool
+    @go("rt.ListCountIf") def count_if(self, f: fn(T) -> bool) -> int
+    @go("rt.ListFirst") def first(self, f: fn(T) -> bool) -> T?
+    @go("rt.ListFirstOr") def first(self) -> T?
+    @go("rt.ListLast") def last(self, f: fn(T) -> bool) -> T?
+    @go("rt.ListLastOr") def last(self) -> T?
+    @go("rt.ListFindIndex") def find_index(self, f: fn(T) -> bool) -> int
+    @go("rt.ListTake") def take(self, n: int) -> list[T]
+    @go("rt.ListSkip") def skip(self, n: int) -> list[T]
+    @go("rt.ListTakeWhile") def take_while(self, f: fn(T) -> bool) -> list[T]
+    @go("rt.ListSkipWhile") def skip_while(self, f: fn(T) -> bool) -> list[T]
+    @go("rt.ListFlatMap") def flat_map[U](self, f: fn(T) -> list[U]) -> list[U]
+    @go("rt.ListGroupBy") def group_by[K: Hashable](self, key: fn(T) -> K) -> dict[K, list[T]]
+    @go("rt.ListToDict") def to_dict[K: Hashable, V](self, key: fn(T) -> K, value: fn(T) -> V) -> dict[K, V]
+    @go("rt.ListMinBy") def min_by[K](self, key: fn(T) -> K) -> T
+    @go("rt.ListMaxBy") def max_by[K](self, key: fn(T) -> K) -> T
+    @go("rt.ListSortedBy") def sorted_by[K](self, key: fn(T) -> K, reverse: bool = false) -> list[T]
+    @go("rt.ListReversed") def reversed(self) -> list[T]
+    @go("rt.ListJoin") def join(self, sep: str = "") -> str
+    @go("rt.ListZip") def zip[U](self, other: list[U]) -> list[(T, U)]
+    @go("rt.ListEnumerate") def enumerate(self) -> list[(int, T)]
+    @go("rt.ListChunk") def chunk(self, size: int) -> list[list[T]]
+    @go("rt.ListIsEmpty") def is_empty(self) -> bool
+    @go("rt.ListPartition") def partition(self, f: fn(T) -> bool) -> (list[T], list[T])
+    @go("rt.ListGet") def get(self, i: int) -> T?
+    @go("rt.ListSwap") def swap(self, i: int, j: int)
+    @go("rt.ParallelMap") def parallel_map[U](self, f: fn(T) -> U) -> list[U]
+    @go(".All") def iter(self) -> iter[T]
+    @go(".Len") prop length -> int
+
+extend[T: Ordered] list[T]:
+    @go("rt.ListSort") def sort(self, reverse: bool = false)
+    @go("rt.ListSorted") def sorted(self, reverse: bool = false) -> list[T]
+    @go("rt.ListMin") def min(self) -> T
+    @go("rt.ListMax") def max(self) -> T
+
+extend[T: Number] list[T]:
+    @go("rt.ListSum") def sum(self) -> T
+    @go("rt.ListAverage") def average(self) -> float
+
+extend[T: Hashable] list[T]:
+    @go("rt.ListDistinct") def distinct(self) -> list[T]
+    @go("rt.ListToSet") def to_set(self) -> set[T]
+
+extend[T] list[list[T]]:
+    @go("rt.ListFlatten") def flatten(self) -> list[T]
+
+# ===== dict =====
+
+extend[K: Hashable, V] dict[K, V]:
+    @go(".GetOpt") def get(self, key: K) -> V?
+    @go(".GetOr") def get(self, key: K, default: V) -> V
+    @go(".Has") def contains(self, key: K) -> bool
+    @go(".Keys") def keys(self) -> list[K]
+    @go(".Values") def values(self) -> list[V]
+    @go(".Items") def items(self) -> list[(K, V)]
+    @go(".Pop") def pop(self, key: K) -> V
+    @go(".PopOr") def pop(self, key: K, default: V) -> V
+    @go(".SetDefault") def setdefault(self, key: K, default: V) -> V
+    @go(".Update") def update(self, other: dict[K, V])
+    @go(".Clear") def clear(self)
+    @go(".Copy") def copy(self) -> dict[K, V]
+    @go(".Discard") def discard(self, key: K) -> bool
+    @go("rt.DictFilter") def filter(self, f: fn(K, V) -> bool) -> dict[K, V]
+    @go("rt.DictMapValues") def map_values[U](self, f: fn(V) -> U) -> dict[K, U]
+    @go("rt.DictSortedByValue") def sorted_by_value(self, reverse: bool = false) -> list[(K, V)]
+    @go("rt.DictSortedByKey") def sorted_by_key(self, reverse: bool = false) -> list[(K, V)]
+    @go(".Len") prop length -> int
+
+# ===== set =====
+
+extend[T: Hashable] set[T]:
+    @go(".Add") def add(self, x: T)
+    @go(".Remove") def remove(self, x: T)
+    @go(".Discard") def discard(self, x: T)
+    @go(".Pop") def pop(self) -> T
+    @go(".Clear") def clear(self)
+    @go(".Copy") def copy(self) -> set[T]
+    @go(".Has") def contains(self, x: T) -> bool
+    @go(".Union") def union(self, other: set[T]) -> set[T]
+    @go(".Intersect") def intersection(self, other: set[T]) -> set[T]
+    @go(".Diff") def difference(self, other: set[T]) -> set[T]
+    @go(".SymDiff") def symmetric_difference(self, other: set[T]) -> set[T]
+    @go(".IsSubset") def issubset(self, other: set[T]) -> bool
+    @go(".IsSuperset") def issuperset(self, other: set[T]) -> bool
+    @go(".IsDisjoint") def isdisjoint(self, other: set[T]) -> bool
+    @go(".Update") def update(self, other: set[T])
+    @go(".ToList") def to_list(self) -> list[T]
+    @go("rt.SetMap") def map[U: Hashable](self, f: fn(T) -> U) -> set[U]
+    @go("rt.SetFilter") def filter(self, f: fn(T) -> bool) -> set[T]
+    @go(".Len") prop length -> int
+
+# ===== iter =====
+
+extend[T] iter[T]:
+    @go("rt.IterMap") def map[U](self, f: fn(T) -> U) -> iter[U]
+    @go("rt.IterFilter") def filter(self, f: fn(T) -> bool) -> iter[T]
+    @go("rt.IterTake") def take(self, n: int) -> iter[T]
+    @go("rt.IterSkip") def skip(self, n: int) -> iter[T]
+    @go("rt.IterTakeWhile") def take_while(self, f: fn(T) -> bool) -> iter[T]
+    @go("rt.IterToList") def to_list(self) -> list[T]
+    @go("rt.IterCount") def count(self) -> int
+    @go("rt.IterFirst") def first(self) -> T?
+    @go("rt.IterReduce") def reduce[A](self, f: fn(A, T) -> A, init: A) -> A
+    @go("rt.IterForEach") def for_each(self, f: fn(T))
+    @go("rt.IterAny") def any(self, f: fn(T) -> bool) -> bool
+    @go("rt.IterAll") def all(self, f: fn(T) -> bool) -> bool
+    @go("rt.IterEnumerate") def enumerate(self) -> iter[(int, T)]
+    @go("rt.IterChain") def chain(self, other: iter[T]) -> iter[T]
+    @go("rt.IterJoin") def join(self, sep: str = "") -> str
+
+extend[T: Number] iter[T]:
+    @go("rt.IterSum") def sum(self) -> T
+
+# ===== chan =====
+
+extend[T] chan[T]:
+    @go("rt.Recv") def recv(self) -> T
+    @go("$r <- $1") def send(self, x: T)
+    @go("rt.TryRecv") def try_recv(self) -> T?
+    @go("rt.RecvOpt") def recv_or_null(self) -> T?
+    @go("rt.TrySend") def try_send(self, x: T) -> bool
+    @go("close($r)") def close(self)
+    @go("cap($r)") prop capacity -> int

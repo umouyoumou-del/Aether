@@ -1,0 +1,19 @@
+# time 模块：时间与计时
+
+@go("rt.Now") def now() -> float
+@go("rt.Now") def time() -> float
+@go("rt.Monotonic") def monotonic() -> float
+@go("rt.Sleep") def sleep(seconds: float)
+@go("rt.SleepMs") def sleep_ms(ms: int)
+@go("rt.After") def after(seconds: float) -> chan[bool]
+@go("rt.Tick") def tick(seconds: float) -> chan[bool]
+@go("rt.FormatTime") def format(timestamp: float, layout: str = "%Y-%m-%d %H:%M:%S") -> str
+@go("rt.NowStr") def now_str(layout: str = "%Y-%m-%d %H:%M:%S") -> str
+@go("rt.ParseTime") def parse(text: str, layout: str = "%Y-%m-%d %H:%M:%S") -> float
+
+@go("*rt.Stopwatch", ctor="rt.NewStopwatch")
+class Stopwatch:
+    def __init__(self)
+    @go("Elapsed") def elapsed(self) -> float
+    @go("ElapsedMs") def elapsed_ms(self) -> float
+    @go("Reset") def reset(self)
