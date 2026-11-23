@@ -227,6 +227,72 @@ void matmul(__global const float* A, __global const float* B, __global float* C,
     }
 }
 
+// 大矩阵的乘法：每个工作组（16x16 个工作项）计算 128x128 的输出块，每个工作项计算 8x8 个元素。
+// 局部内存的每一行多留一个位置，避免转置写入时的存储体冲突。
+#define BT 128
+#define BK 16
+__kernel __attribute__((reqd_work_group_size(16, 16, 1)))
+void matmul_big(__global const float* A, __global const float* B, __global float* C,
+                int M, int N, int K, int ta, int tb, int sa, int sb) {
+    int bz = get_global_id(2);
+    A += bz * sa;
+    B += bz * sb;
+    C += bz * M * N;
+    int tx = get_local_id(0), ty = get_local_id(1);
+    int row0 = get_group_id(1) * BT, col0 = get_group_id(0) * BT;
+    __local float As[BK][BT + 1];
+    __local float Bs[BK][BT + 1];
+    float acc[8][8];
+    #pragma unroll
+    for (int i = 0; i < 8; i++) {
+        #pragma unroll
+        for (int j = 0; j < 8; j++) acc[i][j] = 0.0f;
+    }
+    int lid = ty * 16 + tx;
+    for (int k0 = 0; k0 < K; k0 += BK) {
+        #pragma unroll
+        for (int l = 0; l < 8; l++) {
+            int idx = lid + l * 256;
+            // 让相邻的工作项读取全局内存中相邻的元素
+            int m = ta ? idx % BT : idx / BK, ka = ta ? idx / BT : idx % BK;
+            int gm = row0 + m, gk = k0 + ka;
+            float v = 0.0f;
+            if (gm < M && gk < K) v = ta ? A[gk * M + gm] : A[gm * K + gk];
+            As[ka][m] = v;
+            int n = tb ? idx / BK : idx % BT, kb = tb ? idx % BK : idx / BT;
+            int gn = col0 + n, gk2 = k0 + kb;
+            float w = 0.0f;
+            if (gk2 < K && gn < N) w = tb ? B[gn * K + gk2] : B[gk2 * N + gn];
+            Bs[kb][n] = w;
+        }
+        barrier(CLK_LOCAL_MEM_FENCE);
+        #pragma unroll
+        for (int kk = 0; kk < BK; kk++) {
+            float a[8], b[8];
+            #pragma unroll
+            for (int i = 0; i < 8; i++) a[i] = As[kk][ty + 16 * i];
+            #pragma unroll
+            for (int j = 0; j < 8; j++) b[j] = Bs[kk][tx + 16 * j];
+            #pragma unroll
+            for (int i = 0; i < 8; i++) {
+                #pragma unroll
+                for (int j = 0; j < 8; j++) acc[i][j] = fma(a[i], b[j], acc[i][j]);
+            }
+        }
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+    #pragma unroll
+    for (int i = 0; i < 8; i++) {
+        int gm = row0 + ty + 16 * i;
+        if (gm >= M) break;
+        #pragma unroll
+        for (int j = 0; j < 8; j++) {
+            int gn = col0 + tx + 16 * j;
+            if (gn < N) C[gm * N + gn] = acc[i][j];
+        }
+    }
+}
+
 // softmax / log_softmax：每个工作组处理一行
 __kernel void softmax_rows(__global const float* x, __global float* y, int rows, int cols, int logmode,
                            __local float* tmp) {
@@ -261,6 +327,64 @@ __kernel void softmax_rows(__global const float* x, __global float* y, int rows,
         float inv = 1.0f / sum;
         for (int j = lid; j < cols; j += lsz) out[j] = exp(row[j] - m) * inv;
     }
+}
+
+// 层归一化：每个工作组处理一行（先求均值，再求方差，最后写出 y 与 xhat）
+__kernel void layer_norm(__global const float* x, __global const float* w, __global const float* b,
+                         __global float* y, __global float* xhat, __global float* rstd,
+                         int rows, int d, float eps, __local float* tmp) {
+    int r = get_group_id(0);
+    int lid = get_local_id(0), lsz = get_local_size(0);
+    if (r >= rows) return;
+    __global const float* row = x + r * d;
+    float s = 0.0f;
+    for (int j = lid; j < d; j += lsz) s += row[j];
+    tmp[lid] = s;
+    barrier(CLK_LOCAL_MEM_FENCE);
+    for (int k = lsz / 2; k > 0; k >>= 1) {
+        if (lid < k) tmp[lid] += tmp[lid + k];
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+    float mean = tmp[0] / d;
+    barrier(CLK_LOCAL_MEM_FENCE);
+    float v = 0.0f;
+    for (int j = lid; j < d; j += lsz) { float t = row[j] - mean; v += t * t; }
+    tmp[lid] = v;
+    barrier(CLK_LOCAL_MEM_FENCE);
+    for (int k = lsz / 2; k > 0; k >>= 1) {
+        if (lid < k) tmp[lid] += tmp[lid + k];
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+    float inv = 1.0f / sqrt(tmp[0] / d + eps);
+    if (lid == 0) rstd[r] = inv;
+    for (int j = lid; j < d; j += lsz) {
+        float h = (row[j] - mean) * inv;
+        xhat[r * d + j] = h;
+        y[r * d + j] = h * w[j] + b[j];
+    }
+}
+
+__kernel void layer_norm_back(__global const float* dy, __global const float* w, __global const float* xhat,
+                              __global const float* rstd, __global float* dx, int rows, int d,
+                              __local float* tmp) {
+    int r = get_group_id(0);
+    int lid = get_local_id(0), lsz = get_local_size(0);
+    if (r >= rows) return;
+    __global const float* g = dy + r * d;
+    __global const float* h = xhat + r * d;
+    __local float* t1 = tmp;
+    __local float* t2 = tmp + lsz;
+    float sg = 0.0f, sgh = 0.0f;
+    for (int j = lid; j < d; j += lsz) { float gw = g[j] * w[j]; sg += gw; sgh += gw * h[j]; }
+    t1[lid] = sg;
+    t2[lid] = sgh;
+    barrier(CLK_LOCAL_MEM_FENCE);
+    for (int k = lsz / 2; k > 0; k >>= 1) {
+        if (lid < k) { t1[lid] += t1[lid + k]; t2[lid] += t2[lid + k]; }
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+    float mg = t1[0] / d, mgh = t2[0] / d, inv = rstd[r];
+    for (int j = lid; j < d; j += lsz) dx[r * d + j] = inv * (g[j] * w[j] - mg - h[j] * mgh);
 }
 
 // 重排各维：shape 是输入的形状，strides 是输出第 d 维对应的输入步长，oshape 是输出的形状
@@ -430,6 +554,12 @@ __kernel void random_fill(__global float* d, int n, uint lo, uint hi, int normal
     float u1 = uniform01((uint)(2 * i), lo, hi);
     float u2 = uniform01((uint)(2 * i + 1), lo, hi);
     d[i] = sqrt(-2.0f * log(u1)) * cos(6.283185307179586f * u2);
+}
+
+__kernel void dropout(__global const float* x, __global float* y, int n, uint lo, uint hi, float p, float scale) {
+    int i = get_global_id(0);
+    if (i >= n) return;
+    y[i] = uniform01((uint)i, lo, hi) - 1.0f / 16777216.0f >= p ? x[i] * scale : 0.0f;
 }
 
 __kernel void adam_step(__global float* p, __global const float* g, __global float* m, __global float* v, int n,

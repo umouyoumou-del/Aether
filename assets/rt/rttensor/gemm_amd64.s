@@ -1,0 +1,110 @@
+//go:build amd64
+
+#include "textflag.h"
+
+// func sgemmKernel6x16(k int, a *float32, b *float32, c *float32, ldc int)
+//
+// C[0:6, 0:16] += A · B：A 是打包好的 6×k（每个 p 连续存放 6 个数），B 是打包好的 k×16
+// （每个 p 连续存放 16 个数），C 的行距是 ldc 个 float32。12 个 YMM 寄存器存放 6×16 的累加和，
+// 每一步用 2 次加载、6 次广播、12 次 FMA。
+TEXT ·sgemmKernel6x16(SB), NOSPLIT, $0-40
+	MOVQ k+0(FP), CX
+	MOVQ a+8(FP), SI
+	MOVQ b+16(FP), DI
+	MOVQ c+24(FP), DX
+	MOVQ ldc+32(FP), R8
+	SHLQ $2, R8
+
+	VXORPS Y4, Y4, Y4
+	VXORPS Y5, Y5, Y5
+	VXORPS Y6, Y6, Y6
+	VXORPS Y7, Y7, Y7
+	VXORPS Y8, Y8, Y8
+	VXORPS Y9, Y9, Y9
+	VXORPS Y10, Y10, Y10
+	VXORPS Y11, Y11, Y11
+	VXORPS Y12, Y12, Y12
+	VXORPS Y13, Y13, Y13
+	VXORPS Y14, Y14, Y14
+	VXORPS Y15, Y15, Y15
+
+	TESTQ CX, CX
+	JLE   store
+
+loop:
+	VMOVUPS      (DI), Y0
+	VMOVUPS      32(DI), Y1
+	VBROADCASTSS (SI), Y2
+	VBROADCASTSS 4(SI), Y3
+	VFMADD231PS  Y0, Y2, Y4
+	VFMADD231PS  Y1, Y2, Y5
+	VFMADD231PS  Y0, Y3, Y6
+	VFMADD231PS  Y1, Y3, Y7
+	VBROADCASTSS 8(SI), Y2
+	VBROADCASTSS 12(SI), Y3
+	VFMADD231PS  Y0, Y2, Y8
+	VFMADD231PS  Y1, Y2, Y9
+	VFMADD231PS  Y0, Y3, Y10
+	VFMADD231PS  Y1, Y3, Y11
+	VBROADCASTSS 16(SI), Y2
+	VBROADCASTSS 20(SI), Y3
+	VFMADD231PS  Y0, Y2, Y12
+	VFMADD231PS  Y1, Y2, Y13
+	VFMADD231PS  Y0, Y3, Y14
+	VFMADD231PS  Y1, Y3, Y15
+	ADDQ         $24, SI
+	ADDQ         $64, DI
+	DECQ         CX
+	JNZ          loop
+
+store:
+	VADDPS  (DX), Y4, Y4
+	VADDPS  32(DX), Y5, Y5
+	VMOVUPS Y4, (DX)
+	VMOVUPS Y5, 32(DX)
+	ADDQ    R8, DX
+	VADDPS  (DX), Y6, Y6
+	VADDPS  32(DX), Y7, Y7
+	VMOVUPS Y6, (DX)
+	VMOVUPS Y7, 32(DX)
+	ADDQ    R8, DX
+	VADDPS  (DX), Y8, Y8
+	VADDPS  32(DX), Y9, Y9
+	VMOVUPS Y8, (DX)
+	VMOVUPS Y9, 32(DX)
+	ADDQ    R8, DX
+	VADDPS  (DX), Y10, Y10
+	VADDPS  32(DX), Y11, Y11
+	VMOVUPS Y10, (DX)
+	VMOVUPS Y11, 32(DX)
+	ADDQ    R8, DX
+	VADDPS  (DX), Y12, Y12
+	VADDPS  32(DX), Y13, Y13
+	VMOVUPS Y12, (DX)
+	VMOVUPS Y13, 32(DX)
+	ADDQ    R8, DX
+	VADDPS  (DX), Y14, Y14
+	VADDPS  32(DX), Y15, Y15
+	VMOVUPS Y14, (DX)
+	VMOVUPS Y15, 32(DX)
+	VZEROUPPER
+	RET
+
+// func cpuid(eaxArg, ecxArg uint32) (eax, ebx, ecx, edx uint32)
+TEXT ·cpuid(SB), NOSPLIT, $0-24
+	MOVL eaxArg+0(FP), AX
+	MOVL ecxArg+4(FP), CX
+	CPUID
+	MOVL AX, eax+8(FP)
+	MOVL BX, ebx+12(FP)
+	MOVL CX, ecx+16(FP)
+	MOVL DX, edx+20(FP)
+	RET
+
+// func xgetbv0() (eax, edx uint32)
+TEXT ·xgetbv0(SB), NOSPLIT, $0-8
+	MOVL   $0, CX
+	XGETBV
+	MOVL   AX, eax+0(FP)
+	MOVL   DX, edx+4(FP)
+	RET

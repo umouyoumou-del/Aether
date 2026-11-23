@@ -157,6 +157,10 @@ func gradCases() []gradCase {
 		{name: "layer_norm", inputs: in(r(48, 3, 6), r(49, 6), r(50, 6)), f: func(x, _ []*Tensor) *Tensor {
 			return LayerNorm(x[0], x[1], x[2], 1e-5)
 		}},
+		{name: "dropout", inputs: in(r(53, 4, 5)), f: func(x, _ []*Tensor) *Tensor {
+			ManualSeed(3) // 数值求导时每次前向都要得到同样的掩码
+			return Dropout(x[0], 0.3, true)
+		}},
 		{name: "where clone", inputs: in(r(51, 6), r(52, 6)), consts: in(constT([]int{6}, 1, 0, 0, 1, 1, 0)), f: func(x, c []*Tensor) *Tensor {
 			return Where(c[0], x[0], x[1].Clone())
 		}},
@@ -344,6 +348,29 @@ func expectRaise(t *testing.T, kind, substr string, f func()) {
 	f()
 }
 
+// TestEmptyTensors 检查元素个数为 0 的张量（某一维长度为 0）。
+func TestEmptyTensors(t *testing.T) {
+	devs := []backend{cpuDev}
+	if g := gpu(); g != nil {
+		devs = append(devs, g)
+	}
+	for _, dev := range devs {
+		e := full(dev, []int{0, 3}, 0)
+		if got := e.Add(full(dev, []int{3}, 1)).shape; !sameShape(got, []int{0, 3}) {
+			t.Fatalf("%s：广播后的形状 %v", dev.name(), got)
+		}
+		if got := e.Permute(ints(1, 0)).shape; !sameShape(got, []int{3, 0}) {
+			t.Fatalf("%s：permute 后的形状 %v", dev.name(), got)
+		}
+		if v := e.Sum(none, false).Item(); v != 0 {
+			t.Fatalf("%s：空张量的和 %v", dev.name(), v)
+		}
+		if got := e.Matmul(full(dev, []int{3, 2}, 1)).shape; !sameShape(got, []int{0, 2}) {
+			t.Fatalf("%s：矩阵乘法的形状 %v", dev.name(), got)
+		}
+	}
+}
+
 func TestErrors(t *testing.T) {
 	a := Zeros(ints(2, 3))
 	expectRaise(t, "ValueError", "不能广播", func() { a.Add(Zeros(ints(4))) })
@@ -415,4 +442,91 @@ func TestGPUMemoryBounded(t *testing.T) {
 		t.Fatalf("显存占用 %d MB，超过了回收阈值 %d MB", total>>20, g.gcBudget>>20)
 	}
 	EmptyCache()
+}
+
+// naiveMatmul 是按定义计算的矩阵乘法（float64 累加），用来检查优化过的实现。
+func naiveMatmul(a, b []float32, batch, m, k, n int, ta, tb bool, sa, sb int) []float32 {
+	out := make([]float32, batch*m*n)
+	for bi := 0; bi < batch; bi++ {
+		for i := 0; i < m; i++ {
+			for j := 0; j < n; j++ {
+				var s float64
+				for p := 0; p < k; p++ {
+					var x, y float32
+					if ta {
+						x = a[bi*sa+p*m+i]
+					} else {
+						x = a[bi*sa+i*k+p]
+					}
+					if tb {
+						y = b[bi*sb+j*k+p]
+					} else {
+						y = b[bi*sb+p*n+j]
+					}
+					s += float64(x) * float64(y)
+				}
+				out[bi*m*n+i*n+j] = float32(s)
+			}
+		}
+	}
+	return out
+}
+
+// TestMatmulShapes 用各种尺寸（包括不是 6、16 的倍数的边缘情况）、转置与批次检查 CPU 和 GPU 的矩阵乘法。
+func TestMatmulShapes(t *testing.T) {
+	devs := []backend{cpuDev}
+	if g := gpu(); g != nil {
+		devs = append(devs, g)
+	}
+	sizes := [][3]int{{1, 1, 1}, {6, 16, 1}, {7, 17, 3}, {5, 300, 33}, {13, 1, 600}, {64, 64, 64}, {97, 131, 259}, {1, 513, 70}, {300, 7, 9},
+		{128, 16, 128}, {130, 40, 257}, {255, 129, 140}}
+	seed := uint64(100)
+	for _, sz := range sizes {
+		m, k, n := sz[0], sz[1], sz[2]
+		for _, batch := range []int{1, 3} {
+			for _, shared := range []bool{false, true} {
+				for ta := 0; ta < 2; ta++ {
+					for tb := 0; tb < 2; tb++ {
+						seed++
+						sa, sb := m*k, k*n
+						na := batch
+						if shared {
+							sa, na = 0, 1
+						}
+						a := randT(seed, -1, 1, na*m*k)
+						b := randT(seed+1000, -1, 1, batch*k*n)
+						want := naiveMatmul(a.st.cpu, b.st.cpu, batch, m, k, n, ta == 1, tb == 1, sa, sb)
+						for _, dev := range devs {
+							da, db := dev.upload(a.st.cpu), dev.upload(b.st.cpu)
+							c := dev.alloc(batch * m * n)
+							dev.matmul(da, db, c, batch, m, k, n, ta == 1, tb == 1, sa, sb)
+							got := dev.download(c, batch*m*n)
+							if i, ok := closeTo(got, want, 1e-4*math.Sqrt(float64(k))); !ok {
+								t.Fatalf("%s：m=%d k=%d n=%d 批次=%d 共用 A=%v ta=%d tb=%d：第 %d 个元素 %v，应为 %v",
+									dev.name(), m, k, n, batch, shared, ta, tb, i, got[i], want[i])
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+// TestFastMath 检查 float32 的 exp、tanh 的精度。
+func TestFastMath(t *testing.T) {
+	for i := -2000; i <= 2000; i++ {
+		x := float32(i) * 0.0443 // 覆盖 [-88.6, 88.6]
+		want := math.Exp(float64(x))
+		if got := float64(expf(x)); math.Abs(got-want) > 3e-7*want+1e-37 {
+			t.Fatalf("expf(%v) = %v，应为 %v", x, got, want)
+		}
+		y := x / 10
+		if got, want := float64(tanhf(y)), math.Tanh(float64(y)); math.Abs(got-want) > 3e-7*math.Abs(want)+1e-9 {
+			t.Fatalf("tanhf(%v) = %v，应为 %v", y, got, want)
+		}
+	}
+	if !math.IsInf(float64(expf(100)), 1) || expf(-100) != 0 || expf(0) != 1 {
+		t.Fatalf("expf 的边界值不正确")
+	}
 }

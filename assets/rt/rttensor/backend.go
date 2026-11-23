@@ -19,6 +19,10 @@ type backend interface {
 	// sa、sb 是批次之间的步长（0 表示所有批次共用同一个矩阵）
 	matmul(a, b, c *storage, batch, m, k, n int, ta, tb bool, sa, sb int)
 	softmax(x, y *storage, rows, cols int, log bool)
+	// 层归一化（每行 d 个数）：y = xhat * w + b，并保存 xhat 与每行的 1/σ（rstd）供反向使用
+	layerNorm(x, w, b, y, xhat, rstd *storage, rows, d int, eps float32)
+	// 层归一化的反向（对 x）：dx = rstd * (g - mean(g) - xhat * mean(g * xhat))，其中 g = dy * w
+	layerNormBack(dy, w, xhat, rstd, dx *storage, rows, d int)
 	permute(x, y *storage, shape, perm []int)
 	narrow(x, y *storage, outer, dim, inner, start, length int)
 	place(x, y *storage, outer, dim, inner, start, length int)
@@ -31,6 +35,8 @@ type backend interface {
 	maxpool(x, y, idx *storage, p *convParams)
 	maxpoolBack(g, idx, dx *storage, p *convParams)
 	random(s *storage, n int, seed uint64, normal bool)
+	// y[i] = 第 i 个随机数 ≥ p 时 x[i] * scale，否则 0（随机数由 seed 决定，反向时用同一个 seed 重新生成）
+	dropout(x, y *storage, n int, seed uint64, p, scale float32)
 	adam(p, g, m, v *storage, n int, lr, b1, b2, eps, wd, bc1, bc2 float32, decoupled bool)
 	sgd(p, g, buf *storage, n int, lr, momentum, wd float32, useBuf bool)
 }

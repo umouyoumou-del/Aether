@@ -5,6 +5,7 @@ import (
 	"math"
 	"reflect"
 	"strings"
+	"sync"
 
 	"aether/assets/rt"
 )
@@ -413,4 +414,116 @@ func Batches(n, batchSize int, shuffle bool) *rt.List[*Tensor] {
 		out.S = append(out.S, fromHost(defaultDev, []int{hi - lo}, order[lo:hi]))
 	}
 	return out
+}
+
+// CausalMask 返回 [n, n] 的注意力掩码：第 i 行中 j ≤ i 的位置为 0，j > i 的位置为 -1e9
+// （加到注意力分数上之后，softmax 使每个位置只关注它自己和之前的位置）。
+func CausalMask(n int) *Tensor {
+	key := maskKey{defaultDev, n}
+	maskMu.Lock()
+	defer maskMu.Unlock()
+	if m, ok := maskCache[key]; ok {
+		return m
+	}
+	d := make([]float32, n*n)
+	for i := 0; i < n; i++ {
+		for j := i + 1; j < n; j++ {
+			d[i*n+j] = -1e9
+		}
+	}
+	m := fromHost(defaultDev, []int{n, n}, d)
+	if len(maskCache) > 64 {
+		clear(maskCache)
+	}
+	maskCache[key] = m
+	return m
+}
+
+type maskKey struct {
+	dev backend
+	n   int
+}
+
+// 因果掩码只读，按设备与长度缓存（每次前向计算都会用到）
+var (
+	maskMu    sync.Mutex
+	maskCache = map[maskKey]*Tensor{}
+)
+
+// triMask 返回形状为 [rows, cols] 的 0/1 矩阵：lower 为真时保留 j - i ≤ diag 的位置，否则保留 j - i ≥ diag。
+func triMask(dev backend, rows, cols, diag int, lower bool) *Tensor {
+	d := make([]float32, rows*cols)
+	for i := 0; i < rows; i++ {
+		for j := 0; j < cols; j++ {
+			if (lower && j-i <= diag) || (!lower && j-i >= diag) {
+				d[i*cols+j] = 1
+			}
+		}
+	}
+	return fromHost(dev, []int{rows, cols}, d)
+}
+
+// Tril 保留最后两维的下三角部分（j - i ≤ diagonal），其余置 0。
+func (x *Tensor) Tril(diagonal int) *Tensor {
+	if len(x.shape) < 2 {
+		raiseShape("tril 需要至少二维的张量，得到 %s", shapeStr(x.shape))
+	}
+	r, c := x.shape[len(x.shape)-2], x.shape[len(x.shape)-1]
+	return x.Mul(triMask(x.dev(), r, c, diagonal, true))
+}
+
+// Triu 保留最后两维的上三角部分（j - i ≥ diagonal），其余置 0。
+func (x *Tensor) Triu(diagonal int) *Tensor {
+	if len(x.shape) < 2 {
+		raiseShape("triu 需要至少二维的张量，得到 %s", shapeStr(x.shape))
+	}
+	r, c := x.shape[len(x.shape)-2], x.shape[len(x.shape)-1]
+	return x.Mul(triMask(x.dev(), r, c, diagonal, false))
+}
+
+// Multinomial 按概率抽样：probs 为 [C] 或 [N, C]（每行是非负的权重，不必归一化），
+// 每行有放回地抽取 numSamples 个类别下标。使用 manual_seed 控制的随机数。
+func Multinomial(probs *Tensor, numSamples int) *Tensor {
+	if len(probs.shape) != 1 && len(probs.shape) != 2 {
+		raiseShape("multinomial 需要一维或二维的张量，得到 %s", shapeStr(probs.shape))
+	}
+	if numSamples < 1 {
+		rt.Raise("ValueError", "multinomial 的 num_samples 必须是正数")
+	}
+	cols := probs.shape[len(probs.shape)-1]
+	rows := probs.n / max(cols, 1)
+	p := probs.host()
+	u := newTensor(cpuDev, []int{rows * numSamples})
+	cpuDev.random(u.st, u.n, nextSeed(), false)
+	out := make([]float32, rows*numSamples)
+	for r := 0; r < rows; r++ {
+		row := p[r*cols : (r+1)*cols]
+		var total float64
+		for _, v := range row {
+			if v < 0 || math.IsNaN(float64(v)) {
+				rt.Raise("ValueError", "multinomial 的概率不能是负数或 nan")
+			}
+			total += float64(v)
+		}
+		if total <= 0 {
+			rt.Raise("ValueError", "multinomial：第 %d 行的概率之和为 0", r)
+		}
+		for s := 0; s < numSamples; s++ {
+			target := float64(u.st.cpu[r*numSamples+s]) * total
+			k, acc := cols-1, 0.0
+			for j, v := range row {
+				acc += float64(v)
+				if target < acc {
+					k = j
+					break
+				}
+			}
+			out[r*numSamples+s] = float32(k)
+		}
+	}
+	shape := []int{rows, numSamples}
+	if len(probs.shape) == 1 {
+		shape = []int{numSamples}
+	}
+	return fromHost(probs.dev(), shape, out)
 }

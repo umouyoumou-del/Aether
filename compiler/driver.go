@@ -299,7 +299,8 @@ func BuildGo(goSrc string, key string, cfg BuildConfig) (string, error) {
 			if err != nil {
 				return err
 			}
-			if d.IsDir() || !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") {
+			// Go 源码与汇编（rttensor 的 SIMD 内核）
+			if d.IsDir() || !(strings.HasSuffix(p, ".go") || strings.HasSuffix(p, ".s")) || strings.HasSuffix(p, "_test.go") {
 				return nil
 			}
 			data, err := fs.ReadFile(cfg.RT, p)

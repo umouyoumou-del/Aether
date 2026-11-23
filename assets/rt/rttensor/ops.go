@@ -1019,19 +1019,47 @@ func Dropout(x *Tensor, p float64, training bool) *Tensor {
 	if p < 0 || p >= 1 {
 		rt.Raise("ValueError", "dropout 的概率必须在 [0, 1) 中，得到 %v", p)
 	}
-	u := newTensor(x.dev(), x.shape)
-	x.dev().random(u.st, u.n, nextSeed(), false)
-	mask := unaryRaw(uGtS, u, float32(p), 0)
-	return x.Mul(mask).MulScalar(1 / (1 - p))
+	// 一次融合的运算；反向时用同一个种子重新生成同样的随机数，不需要保存掩码
+	seed, scale := nextSeed(), float32(1/(1-p))
+	dev := x.dev()
+	out := newTensor(dev, x.shape)
+	dev.dropout(x.st, out.st, x.n, seed, float32(p), scale)
+	return record(out, "dropout", []*Tensor{x}, func(g *Tensor) []*Tensor {
+		gx := newTensor(dev, x.shape)
+		dev.dropout(g.st, gx.st, g.n, seed, float32(p), scale)
+		return []*Tensor{gx}
+	})
 }
 
 // LayerNorm 对最后一维做层归一化。
+// 前向与反向各是一个融合的运算（每行一次），而不是十几个基本运算。
 func LayerNorm(x, weight, bias *Tensor, eps float64) *Tensor {
-	last := rt.Opt[int]{V: -1, Ok: true}
-	mu := x.Mean(last, true)
-	xc := x.Sub(mu)
-	v := xc.Square().Mean(last, true)
-	return xc.Div(v.AddScalar(eps).Sqrt()).Mul(weight).Add(bias)
+	if len(x.shape) == 0 {
+		raiseShape("layer_norm 不能用于零维张量")
+	}
+	d := x.shape[len(x.shape)-1]
+	if weight.n != d || bias.n != d {
+		raiseShape("layer_norm：输入的最后一维是 %d，但 weight、bias 的形状是 %s、%s", d, shapeStr(weight.shape), shapeStr(bias.shape))
+	}
+	dev := sameDevice("layer_norm", x, weight, bias)
+	rows := x.n / max(d, 1)
+	out, xhat, rstd := newTensor(dev, x.shape), newTensor(dev, x.shape), newTensor(dev, []int{rows})
+	dev.layerNorm(x.st, weight.st, bias.st, out.st, xhat.st, rstd.st, rows, d, float32(eps))
+	return record(out, "layer_norm", []*Tensor{x, weight, bias}, func(g *Tensor) []*Tensor {
+		var gx, gw, gb *Tensor
+		if x.requiresGrad {
+			gx = newTensor(dev, x.shape)
+			dev.layerNormBack(g.st, weight.st, xhat.st, rstd.st, gx.st, rows, d)
+		}
+		g2 := g.view([]int{rows, d})
+		if weight.requiresGrad {
+			gw = g2.Mul(xhat.view([]int{rows, d})).sumDim(0, false).view(weight.shape)
+		}
+		if bias.requiresGrad {
+			gb = g2.sumDim(0, false).view(bias.shape)
+		}
+		return []*Tensor{gx, gw, gb}
+	})
 }
 
 // ===== 随机数 =====

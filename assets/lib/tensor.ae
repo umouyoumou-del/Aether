@@ -114,6 +114,8 @@ class Tensor:
     @go("Narrow") def narrow(self, dim: int, start: int, length: int) -> Tensor
     @go("Slice") def slice(self, dim: int, start: int, end: int? = null) -> Tensor
     @go("IndexSelectDim") def index_select(self, dim: int, index: Tensor) -> Tensor
+    @go("Tril") def tril(self, diagonal: int = 0) -> Tensor
+    @go("Triu") def triu(self, diagonal: int = 0) -> Tensor
 
 # ===== 创建张量（放在默认设备上，见 set_default_device） =====
 
@@ -144,6 +146,8 @@ def arange(start: float, stop: float? = null, step: float = 1.0) -> Tensor:
 @go("rttensor.Uniform") def uniform(shape: list[int], low: float, high: float) -> Tensor
 @go("rttensor.Randint") def randint(low: int, high: int, shape: list[int]) -> Tensor
 @go("rttensor.Randperm") def randperm(n: int) -> Tensor
+# 按概率抽样：probs 为 [C] 或 [N, C]，每行有放回地抽取 num_samples 个类别下标
+@go("rttensor.Multinomial") def multinomial(probs: Tensor, num_samples: int = 1) -> Tensor
 
 # ===== 组合与选择 =====
 
@@ -151,6 +155,12 @@ def arange(start: float, stop: float? = null, step: float = 1.0) -> Tensor:
 @go("rttensor.Stack") def stack(tensors: list[Tensor], dim: int = 0) -> Tensor
 @go("rttensor.Where") def where(cond: Tensor, a: Tensor, b: Tensor) -> Tensor
 @go("rttensor.OneHot") def one_hot(index: Tensor, num_classes: int) -> Tensor
+# 注意力的因果掩码 [n, n]：允许的位置为 0，其余为 -1e9（加到注意力分数上）
+@go("rttensor.CausalMask") def causal_mask(n: int) -> Tensor
+
+# mask 为 1 的位置换成 value（value 必须是有限的数；屏蔽注意力时用 -1e9 之类的值）
+def masked_fill(x: Tensor, mask: Tensor, value: float) -> Tensor:
+    return x * (1.0 - mask) + mask * value
 
 # 把 0 到 n-1 分成若干批，返回每一批的下标（配合 x.index_select(0, idx) 取出一批样本）
 @go("rttensor.Batches") def batches(n: int, batch_size: int, shuffle: bool = true) -> list[Tensor]

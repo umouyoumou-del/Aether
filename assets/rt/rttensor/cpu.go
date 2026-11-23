@@ -4,6 +4,7 @@ import (
 	"math"
 	"runtime"
 	"sync"
+	"unsafe"
 )
 
 // cpuBackend 用 Go 代码计算；数据量大时把工作分给多个协程。
@@ -13,10 +14,55 @@ var cpuDev backend = &cpuBackend{}
 
 func (*cpuBackend) name() string { return "cpu" }
 
-func (c *cpuBackend) alloc(n int) *storage { return &storage{dev: c, cpu: make([]float32, n)} }
+// alloc 返回未初始化的存储（与 GPU 后端相同：调用者负责写入每个元素）。
+func (c *cpuBackend) alloc(n int) *storage { return &storage{dev: c, cpu: cpuBuffer(n)} }
 
 func (c *cpuBackend) upload(d []float32) *storage {
-	return &storage{dev: c, cpu: append([]float32(nil), d...)}
+	s := c.alloc(len(d))
+	copy(s.cpu, d)
+	return s
+}
+
+// 大块内存的缓存池：不再使用的数组被垃圾回收时（数组本身的终结器）放回池中，之后直接复用，
+// 省去清零与操作系统分配新页面的开销。终结器挂在数组上而不是 storage 上，所以只要还有
+// 切片引用这个数组（例如正在运行的运算），它就不会被放回池中。
+var cpuPool = struct {
+	sync.Mutex
+	free  map[int][][]float32
+	bytes int
+}{free: map[int][][]float32{}}
+
+const (
+	cpuPoolMin   = 1 << 12   // 至少这么多个元素才使用缓存池
+	cpuPoolLimit = 512 << 20 // 池中最多保留的字节数
+)
+
+func cpuBuffer(n int) []float32 {
+	if n < cpuPoolMin {
+		return make([]float32, n)
+	}
+	size := sizeClass(n*4) / 4
+	cpuPool.Lock()
+	var buf []float32
+	if l := cpuPool.free[size]; len(l) > 0 {
+		buf = l[len(l)-1]
+		l[len(l)-1] = nil
+		cpuPool.free[size] = l[:len(l)-1]
+		cpuPool.bytes -= size * 4
+	}
+	cpuPool.Unlock()
+	if buf == nil {
+		buf = make([]float32, size)
+	}
+	runtime.SetFinalizer(&buf[0], func(p *float32) {
+		cpuPool.Lock()
+		defer cpuPool.Unlock()
+		if cpuPool.bytes+size*4 <= cpuPoolLimit {
+			cpuPool.free[size] = append(cpuPool.free[size], unsafe.Slice(p, size))
+			cpuPool.bytes += size * 4
+		}
+	})
+	return buf[:n]
 }
 
 func (*cpuBackend) download(s *storage, n int) []float32 { return append([]float32(nil), s.cpu[:n]...) }
@@ -54,16 +100,13 @@ func parallelFor(n, grain int, f func(lo, hi int)) {
 const grainElem = 1 << 15
 
 func geluF(x float32) float32 {
-	v := float64(x)
-	return float32(0.5 * v * (1 + math.Tanh(0.7978845608028654*(v+0.044715*v*v*v))))
+	return 0.5 * x * (1 + tanhf(0.7978845608028654*(x+0.044715*x*x*x)))
 }
 
 func geluGradF(x float32) float32 {
-	v := float64(x)
-	u := 0.7978845608028654 * (v + 0.044715*v*v*v)
-	t := math.Tanh(u)
-	du := 0.7978845608028654 * (1 + 3*0.044715*v*v)
-	return float32(0.5*(1+t) + 0.5*v*(1-t*t)*du)
+	t := tanhf(0.7978845608028654 * (x + 0.044715*x*x*x))
+	du := 0.7978845608028654 * (1 + 3*0.044715*x*x)
+	return 0.5*(1+t) + 0.5*x*(1-t*t)*du
 }
 
 func unaryFunc(op int, a, b float32) func(float32) float32 {
@@ -71,7 +114,7 @@ func unaryFunc(op int, a, b float32) func(float32) float32 {
 	case uNeg:
 		return func(x float32) float32 { return -x }
 	case uExp:
-		return func(x float32) float32 { return float32(math.Exp(float64(x))) }
+		return expf
 	case uLog:
 		return func(x float32) float32 { return float32(math.Log(float64(x))) }
 	case uSqrt:
@@ -81,9 +124,9 @@ func unaryFunc(op int, a, b float32) func(float32) float32 {
 	case uRelu:
 		return func(x float32) float32 { return max(x, 0) }
 	case uSigmoid:
-		return func(x float32) float32 { return float32(1 / (1 + math.Exp(-float64(x)))) }
+		return sigmoidf
 	case uTanh:
-		return func(x float32) float32 { return float32(math.Tanh(float64(x))) }
+		return tanhf
 	case uGelu:
 		return geluF
 	case uSin:
@@ -184,11 +227,40 @@ func binaryFunc(op int) func(x, y float32) float32 {
 }
 
 func (*cpuBackend) unary(op int, x, y *storage, n int, a, b float32) {
-	f := unaryFunc(op, a, b)
 	xs, ys := x.cpu[:n], y.cpu[:n]
 	parallelFor(n, grainElem, func(lo, hi int) {
-		for i := lo; i < hi; i++ {
-			ys[i] = f(xs[i])
+		xs, ys := xs[lo:hi], ys[lo:hi]
+		// 最常用的几种运算直接写成循环（避免每个元素一次函数调用）
+		switch op {
+		case uRelu:
+			for i, v := range xs {
+				ys[i] = max(v, 0)
+			}
+		case uAddS:
+			for i, v := range xs {
+				ys[i] = v + a
+			}
+		case uMulS:
+			for i, v := range xs {
+				ys[i] = v * a
+			}
+		case uNeg:
+			for i, v := range xs {
+				ys[i] = -v
+			}
+		case uGtS:
+			for i, v := range xs {
+				ys[i] = b2f(v > a)
+			}
+		case uRSubS:
+			for i, v := range xs {
+				ys[i] = a - v
+			}
+		default:
+			f := unaryFunc(op, a, b)
+			for i, v := range xs {
+				ys[i] = f(v)
+			}
 		}
 	})
 }
@@ -221,23 +293,30 @@ func (*cpuBackend) binary(op int, x, y, out *storage, n int, bc *bcast) {
 		})
 		return
 	}
-	f := binaryFunc(op)
+	if n == 0 {
+		return
+	}
+	// 广播：最内层一维单独处理（两个输入在这一维上的步长只能是 0 或 1），外层各维用里程表递增
 	nd := bc.ndim
-	parallelFor(n, grainElem, func(lo, hi int) {
-		// 由线性下标 lo 计算多维下标，然后像里程表一样递增
+	inner := int(bc.shape[nd-1])
+	ix, iy := int(bc.sx[nd-1]), int(bc.sy[nd-1])
+	rows := n / max(inner, 1)
+	f := binaryFunc(op)
+	parallelFor(rows, max(1, grainElem/max(inner, 1)), func(lo, hi int) {
 		var idx [maxDims]int
 		rem := lo
 		ox, oy := 0, 0
-		for d := nd - 1; d >= 0; d-- {
+		for d := nd - 2; d >= 0; d-- {
 			s := int(bc.shape[d])
 			idx[d] = rem % s
 			rem /= s
 			ox += idx[d] * int(bc.sx[d])
 			oy += idx[d] * int(bc.sy[d])
 		}
-		for i := lo; i < hi; i++ {
-			os[i] = f(xs[ox], ys[oy])
-			for d := nd - 1; d >= 0; d-- {
+		for r := lo; r < hi; r++ {
+			out := os[r*inner : (r+1)*inner]
+			binaryRun(op, f, out, xs, ys, ox, oy, ix, iy)
+			for d := nd - 2; d >= 0; d-- {
 				idx[d]++
 				ox += int(bc.sx[d])
 				oy += int(bc.sy[d])
@@ -252,8 +331,115 @@ func (*cpuBackend) binary(op int, x, y, out *storage, n int, bc *bcast) {
 	})
 }
 
+// binaryRun 计算一段：out[j] = op(x[ox + j*ix], y[oy + j*iy])，ix、iy 为 0 或 1。
+func binaryRun(op int, f func(x, y float32) float32, out, xs, ys []float32, ox, oy, ix, iy int) {
+	n := len(out)
+	switch {
+	case ix == 1 && iy == 1:
+		a, b := xs[ox:ox+n], ys[oy:oy+n]
+		switch op {
+		case bAdd:
+			for j := range out {
+				out[j] = a[j] + b[j]
+			}
+		case bSub:
+			for j := range out {
+				out[j] = a[j] - b[j]
+			}
+		case bMul:
+			for j := range out {
+				out[j] = a[j] * b[j]
+			}
+		default:
+			for j := range out {
+				out[j] = f(a[j], b[j])
+			}
+		}
+	case ix == 1:
+		a, v := xs[ox:ox+n], ys[oy]
+		switch op {
+		case bAdd:
+			for j := range out {
+				out[j] = a[j] + v
+			}
+		case bSub:
+			for j := range out {
+				out[j] = a[j] - v
+			}
+		case bMul:
+			for j := range out {
+				out[j] = a[j] * v
+			}
+		case bDiv:
+			for j := range out {
+				out[j] = a[j] / v
+			}
+		default:
+			for j := range out {
+				out[j] = f(a[j], v)
+			}
+		}
+	case iy == 1:
+		u, b := xs[ox], ys[oy:oy+n]
+		switch op {
+		case bAdd:
+			for j := range out {
+				out[j] = u + b[j]
+			}
+		case bMul:
+			for j := range out {
+				out[j] = u * b[j]
+			}
+		default:
+			for j := range out {
+				out[j] = f(u, b[j])
+			}
+		}
+	default:
+		v := f(xs[ox], ys[oy])
+		for j := range out {
+			out[j] = v
+		}
+	}
+}
+
+func sumRange(xs []float32) float64 {
+	var s0, s1, s2, s3 float64
+	i := 0
+	for ; i+4 <= len(xs); i += 4 {
+		s0 += float64(xs[i])
+		s1 += float64(xs[i+1])
+		s2 += float64(xs[i+2])
+		s3 += float64(xs[i+3])
+	}
+	for ; i < len(xs); i++ {
+		s0 += float64(xs[i])
+	}
+	return (s0 + s1) + (s2 + s3)
+}
+
 func (*cpuBackend) reduce(op int, x, out, idx *storage, outer, dim, inner int) {
 	xs, os := x.cpu, out.cpu
+	if op == rSum && inner == 1 && dim >= 1<<14 && outer < runtime.GOMAXPROCS(0) {
+		// 少数几段很长的连续数据：每段分成固定大小的块并行求和（块的划分与线程数无关，结果确定）
+		const chunk = 1 << 13
+		nc := ceilDiv(dim, chunk)
+		parts := make([]float64, outer*nc)
+		parallelFor(outer*nc, 1, func(lo, hi int) {
+			for t := lo; t < hi; t++ {
+				o, c := t/nc, t%nc
+				parts[t] = sumRange(xs[o*dim+c*chunk : o*dim+min((c+1)*chunk, dim)])
+			}
+		})
+		for o := 0; o < outer; o++ {
+			var s float64
+			for _, v := range parts[o*nc : (o+1)*nc] {
+				s += v
+			}
+			os[o] = float32(s)
+		}
+		return
+	}
 	parallelFor(outer*inner, 256, func(lo, hi int) {
 		for t := lo; t < hi; t++ {
 			o, i := t/inner, t%inner
@@ -284,6 +470,10 @@ func (*cpuBackend) reduce(op int, x, out, idx *storage, outer, dim, inner int) {
 
 func (*cpuBackend) matmul(a, b, c *storage, batch, m, k, n int, ta, tb bool, sa, sb int) {
 	as, bs, cs := a.cpu, b.cpu, c.cpu
+	if haveSIMD && m*n*k >= 4096 {
+		matmulSIMD(as, bs, cs, batch, m, k, n, ta, tb, sa, sb)
+		return
+	}
 	// 先把转置的输入整理成行优先的 [m, k] 与 [k, n]，内层循环才能顺序访问内存
 	tmpA, tmpB := as, bs
 	if ta {
@@ -351,10 +541,10 @@ func (*cpuBackend) softmax(x, y *storage, rows, cols int, log bool) {
 			}
 			var sum float64
 			for j, v := range row {
-				e := math.Exp(float64(v - mx))
-				sum += e
+				e := expf(v - mx)
+				sum += float64(e)
 				if !log {
-					out[j] = float32(e)
+					out[j] = e
 				}
 			}
 			if log {
@@ -372,6 +562,50 @@ func (*cpuBackend) softmax(x, y *storage, rows, cols int, log bool) {
 	})
 }
 
+func (*cpuBackend) layerNorm(x, w, b, y, xhat, rstd *storage, rows, d int, eps float32) {
+	xs, ws, bs, ys, hs, rs := x.cpu, w.cpu, b.cpu, y.cpu, xhat.cpu, rstd.cpu
+	parallelFor(rows, max(1, 4096/max(d, 1)), func(lo, hi int) {
+		for r := lo; r < hi; r++ {
+			row := xs[r*d : (r+1)*d]
+			mean := sumRange(row) / float64(d)
+			var v float64
+			for _, x := range row {
+				dv := float64(x) - mean
+				v += dv * dv
+			}
+			inv := float32(1 / math.Sqrt(v/float64(d)+float64(eps)))
+			rs[r] = inv
+			h, out := hs[r*d:(r+1)*d], ys[r*d:(r+1)*d]
+			m := float32(mean)
+			for j, x := range row {
+				xh := (x - m) * inv
+				h[j] = xh
+				out[j] = xh*ws[j] + bs[j]
+			}
+		}
+	})
+}
+
+func (*cpuBackend) layerNormBack(dy, w, xhat, rstd, dx *storage, rows, d int) {
+	gs, ws, hs, rs, ds := dy.cpu, w.cpu, xhat.cpu, rstd.cpu, dx.cpu
+	parallelFor(rows, max(1, 4096/max(d, 1)), func(lo, hi int) {
+		for r := lo; r < hi; r++ {
+			g, h, out := gs[r*d:(r+1)*d], hs[r*d:(r+1)*d], ds[r*d:(r+1)*d]
+			var sg, sgh float64
+			for j := range g {
+				gw := g[j] * ws[j]
+				sg += float64(gw)
+				sgh += float64(gw * h[j])
+			}
+			mg, mgh := float32(sg/float64(d)), float32(sgh/float64(d))
+			inv := rs[r]
+			for j := range g {
+				out[j] = inv * (g[j]*ws[j] - mg - h[j]*mgh)
+			}
+		}
+	})
+}
+
 func (*cpuBackend) permute(x, y *storage, shape, perm []int) {
 	nd := len(shape)
 	inStride := make([]int, nd)
@@ -380,22 +614,50 @@ func (*cpuBackend) permute(x, y *storage, shape, perm []int) {
 		inStride[d] = s
 		s *= shape[d]
 	}
-	outShape := make([]int, nd)
-	strides := make([]int, nd) // 输出第 d 维对应的输入步长
-	for d, p := range perm {
-		outShape[d] = shape[p]
-		strides[d] = inStride[p]
+	// 末尾没有变动的维在输入、输出中都是连续的：按“连续段”整段复制
+	keep := nd
+	for keep > 0 && perm[keep-1] == keep-1 {
+		keep--
 	}
-	n := numel(shape)
+	run := 1
+	for d := keep; d < nd; d++ {
+		run *= shape[d]
+	}
+	outShape := make([]int, keep)
+	strides := make([]int, keep) // 输出第 d 维对应的输入步长
+	for d := 0; d < keep; d++ {
+		outShape[d] = shape[perm[d]]
+		strides[d] = inStride[perm[d]]
+	}
+	segs := numel(shape) / max(run, 1)
+	if numel(shape) == 0 {
+		return
+	}
 	xs, ys := x.cpu, y.cpu
-	parallelFor(n, grainElem, func(lo, hi int) {
-		for i := lo; i < hi; i++ {
-			rem, off := i, 0
-			for d := nd - 1; d >= 0; d-- {
-				off += (rem % outShape[d]) * strides[d]
-				rem /= outShape[d]
+	parallelFor(segs, max(1, grainElem/max(run, 1)), func(lo, hi int) {
+		// 由段号 lo 计算各维下标，然后像里程表一样递增
+		var idx [maxDims]int
+		rem, off := lo, 0
+		for d := keep - 1; d >= 0; d-- {
+			idx[d] = rem % outShape[d]
+			rem /= outShape[d]
+			off += idx[d] * strides[d]
+		}
+		for sg := lo; sg < hi; sg++ {
+			if run == 1 {
+				ys[sg] = xs[off]
+			} else {
+				copy(ys[sg*run:(sg+1)*run], xs[off:off+run])
 			}
-			ys[i] = xs[off]
+			for d := keep - 1; d >= 0; d-- {
+				idx[d]++
+				off += strides[d]
+				if idx[d] < outShape[d] {
+					break
+				}
+				off -= idx[d] * strides[d]
+				idx[d] = 0
+			}
 		}
 	})
 }
@@ -450,23 +712,43 @@ func (*cpuBackend) pickBack(g, idx, out *storage, rows, cols int) {
 
 func (*cpuBackend) im2col(x, cols *storage, p *convParams) {
 	xs, cs := x.cpu, cols.cpu
+	c, h, w, kh, kw := p.c, p.h, p.w, p.kh, p.kw
+	sh, sw, ph, pw, oh, ow := p.sh, p.sw, p.ph, p.pw, p.oh, p.ow
 	rowsPer, colsPer := p.colRows(), p.colCols()
 	parallelFor(p.n*rowsPer, 16, func(lo, hi int) {
 		for t := lo; t < hi; t++ {
 			b, r := t/rowsPer, t%rowsPer
-			ci, kr := r/(p.kh*p.kw), r%(p.kh*p.kw)
-			ki, kj := kr/p.kw, kr%p.kw
-			dst := cs[(b*rowsPer+r)*colsPer:]
-			src := xs[(b*p.c+ci)*p.h*p.w:]
-			for oy := 0; oy < p.oh; oy++ {
-				iy := oy*p.sh - p.ph + ki
-				for ox := 0; ox < p.ow; ox++ {
-					ix := ox*p.sw - p.pw + kj
-					var v float32
-					if iy >= 0 && iy < p.h && ix >= 0 && ix < p.w {
-						v = src[iy*p.w+ix]
+			ci, kr := r/(kh*kw), r%(kh*kw)
+			ki, kj := kr/kw, kr%kw
+			dst := cs[(b*rowsPer+r)*colsPer : (b*rowsPer+r+1)*colsPer]
+			src := xs[(b*c+ci)*h*w : (b*c+ci+1)*h*w]
+			// 步长为 1 时每一行中有效的部分是连续的：ox ∈ [x0, x1)
+			x0, x1 := max(0, pw-kj), min(ow, w+pw-kj)
+			for oy := 0; oy < oh; oy++ {
+				iy := oy*sh - ph + ki
+				row := dst[oy*ow : oy*ow+ow]
+				if iy < 0 || iy >= h {
+					clear(row)
+					continue
+				}
+				srow := src[iy*w : iy*w+w]
+				if sw == 1 {
+					if x0 >= x1 {
+						clear(row)
+						continue
 					}
-					dst[oy*p.ow+ox] = v
+					clear(row[:x0])
+					copy(row[x0:x1], srow[x0-pw+kj:x1-pw+kj])
+					clear(row[x1:])
+					continue
+				}
+				for ox := range row {
+					ix := ox*sw - pw + kj
+					if ix >= 0 && ix < w {
+						row[ox] = srow[ix]
+					} else {
+						row[ox] = 0
+					}
 				}
 			}
 		}
@@ -503,31 +785,31 @@ func (*cpuBackend) col2im(cols, x *storage, p *convParams) {
 
 func (*cpuBackend) maxpool(x, y, idx *storage, p *convParams) {
 	xs, ys, is := x.cpu, y.cpu, idx.cpu
-	parallelFor(p.n*p.c, 1, func(lo, hi int) {
+	h, w, kh, kw := p.h, p.w, p.kh, p.kw
+	sh, sw, ph, pw, oh, ow := p.sh, p.sw, p.ph, p.pw, p.oh, p.ow
+	parallelFor(p.n*p.c, max(1, 4096/max(1, oh*ow*kh*kw)), func(lo, hi int) {
 		for t := lo; t < hi; t++ {
-			src := xs[t*p.h*p.w:]
-			for oy := 0; oy < p.oh; oy++ {
-				for ox := 0; ox < p.ow; ox++ {
+			src := xs[t*h*w : (t+1)*h*w]
+			out := ys[t*oh*ow : (t+1)*oh*ow]
+			outIdx := is[t*oh*ow : (t+1)*oh*ow]
+			for oy := 0; oy < oh; oy++ {
+				y0 := oy*sh - ph
+				ky0, ky1 := max(0, -y0), min(kh, h-y0)
+				for ox := 0; ox < ow; ox++ {
+					x0 := ox*sw - pw
+					kx0, kx1 := max(0, -x0), min(kw, w-x0)
 					best := float32(math.Inf(-1))
 					bi := -1
-					for ki := 0; ki < p.kh; ki++ {
-						iy := oy*p.sh - p.ph + ki
-						if iy < 0 || iy >= p.h {
-							continue
-						}
-						for kj := 0; kj < p.kw; kj++ {
-							ix := ox*p.sw - p.pw + kj
-							if ix < 0 || ix >= p.w {
-								continue
-							}
-							if v := src[iy*p.w+ix]; bi < 0 || v > best {
-								best, bi = v, iy*p.w+ix
+					for ki := ky0; ki < ky1; ki++ {
+						off := (y0+ki)*w + x0
+						for kj := kx0; kj < kx1; kj++ {
+							if v := src[off+kj]; bi < 0 || v > best {
+								best, bi = v, off+kj
 							}
 						}
 					}
-					o := (t*p.oh+oy)*p.ow + ox
-					ys[o] = best
-					is[o] = float32(bi)
+					out[oy*ow+ox] = best
+					outIdx[oy*ow+ox] = float32(bi)
 				}
 			}
 		}
@@ -577,6 +859,19 @@ func (*cpuBackend) random(s *storage, n int, seed uint64, normal bool) {
 			u1 := uniform01(uint32(2*i), seed)
 			u2 := uniform01(uint32(2*i+1), seed)
 			d[i] = float32(math.Sqrt(-2*math.Log(float64(u1))) * math.Cos(2*math.Pi*float64(u2)))
+		}
+	})
+}
+
+func (*cpuBackend) dropout(x, y *storage, n int, seed uint64, p, scale float32) {
+	xs, ys := x.cpu[:n], y.cpu[:n]
+	parallelFor(n, grainElem, func(lo, hi int) {
+		for i := lo; i < hi; i++ {
+			if uniform01(uint32(i), seed)-1.0/16777216.0 >= p {
+				ys[i] = xs[i] * scale
+			} else {
+				ys[i] = 0
+			}
 		}
 	})
 }

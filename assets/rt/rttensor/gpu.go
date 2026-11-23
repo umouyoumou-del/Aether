@@ -534,16 +534,38 @@ func (g *gpuBackend) reduce(op int, x, out, idx *storage, outer, dim, inner int)
 }
 
 func (g *gpuBackend) matmul(a, b, c *storage, batch, m, k, n int, ta, tb bool, sa, sb int) {
+	if m >= 128 && n >= 128 && k >= 16 {
+		// 大矩阵：128x128 的输出块
+		global := []int{roundUp(n, 128) / 8, roundUp(m, 128) / 8, batch}
+		g.launch("matmul_big", global, []int{16, 16, 1}, a, b, c, m, n, k, ta, tb, sa, sb)
+		return
+	}
 	global := []int{roundUp(n, 64) / 4, roundUp(m, 64) / 4, batch}
 	g.launch("matmul", global, []int{16, 16, 1}, a, b, c, m, n, k, ta, tb, sa, sb)
 }
 
 func (g *gpuBackend) softmax(x, y *storage, rows, cols int, log bool) {
+	l := rowGroup(cols)
+	g.launch("softmax_rows", []int{rows * l}, []int{l}, x, y, rows, cols, log, local(l*4))
+}
+
+// rowGroup 返回按行处理的内核使用的工作组大小（2 的幂，32 到 256）。
+func rowGroup(cols int) int {
 	l := 32
 	for l < cols && l < 256 {
 		l <<= 1
 	}
-	g.launch("softmax_rows", []int{rows * l}, []int{l}, x, y, rows, cols, log, local(l*4))
+	return l
+}
+
+func (g *gpuBackend) layerNorm(x, w, b, y, xhat, rstd *storage, rows, d int, eps float32) {
+	l := rowGroup(d)
+	g.launch("layer_norm", []int{rows * l}, []int{l}, x, w, b, y, xhat, rstd, rows, d, eps, local(l*4))
+}
+
+func (g *gpuBackend) layerNormBack(dy, w, xhat, rstd, dx *storage, rows, d int) {
+	l := rowGroup(d)
+	g.launch("layer_norm_back", []int{rows * l}, []int{l}, dy, w, xhat, rstd, dx, rows, d, local(2*l*4))
 }
 
 func (g *gpuBackend) permute(x, y *storage, shape, perm []int) {
@@ -611,6 +633,10 @@ func (g *gpuBackend) maxpoolBack(gr, idx, dx *storage, p *convParams) {
 
 func (g *gpuBackend) random(s *storage, n int, seed uint64, normal bool) {
 	g.launch("random_fill", []int{n}, nil, s, n, uint32(seed), uint32(seed>>32), normal)
+}
+
+func (g *gpuBackend) dropout(x, y *storage, n int, seed uint64, p, scale float32) {
+	g.launch("dropout", []int{n}, nil, x, y, n, uint32(seed), uint32(seed>>32), p, scale)
 }
 
 func (g *gpuBackend) adam(p, gr, m, v *storage, n int, lr, b1, b2, eps, wd, bc1, bc2 float32, decoupled bool) {
