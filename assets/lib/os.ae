@@ -1,5 +1,7 @@
 # os 模块：文件系统、环境变量、进程
 
+import os.path    # 使 import os 之后可以使用 os.path.join(...)
+
 @go("rt.Args") def args() -> list[str]
 @go("rt.Getenv") def getenv(name: str) -> str?
 @go("rt.Setenv") def setenv(name: str, value: str)

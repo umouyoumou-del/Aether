@@ -1,0 +1,31 @@
+# sys 模块、print(file=, flush=)、os.path、zip(*m)
+import sys
+import os
+
+print(sys.argv[1:], sys.platform in ["win32", "linux", "darwin"], sys.maxsize, sys.argv[0].endswith("21_sys.ae"))
+first = sys.stdin.readline()
+print("第一行：", first)
+nums: list[int] = []
+for line in sys.stdin:
+    nums.extend(map(int, line.split()))
+print(sum(nums), len(nums))
+print("这一行写到标准错误", file=sys.stderr)
+sys.stdout.write("直接写入标准输出\n")
+print("刷新", flush=true)
+print(*nums, sep="-", file=sys.stdout)
+sys.setrecursionlimit(10 ** 6)
+
+def norm(p: str) -> str:
+    return p.replace(os.path.sep, "/")
+
+p = os.path.join("a", "b", "c.txt")
+stem, ext = os.path.splitext(p)
+print(norm(p), norm(stem), ext, os.path.splitext(".bashrc"), os.path.splitext("x/y.tar.gz"), os.path.basename(p))
+print(os.path.exists(p), os.path.isabs(p), norm(os.path.normpath("a/./b/../c")), os.path.expanduser("~") != "~")
+m = [[1, 2, 3], [4, 5, 6]]
+print(list(zip(*m)), [col for col in zip(*["abc", "de"])], [sum(c) for c in zip(*m)])
+f = open("out.txt", "w")
+print("写到文件", 1, 2, sep=",", file=f)
+f.close()
+print(repr(os.read_file("out.txt")))
+os.remove("out.txt")

@@ -40,6 +40,8 @@ class File:
     @go("Read") def read(self) -> str
     @go("ReadLine") def read_line(self) -> str?
     @go("ReadLines") def read_lines(self) -> list[str]
+    @go("ReadLine") def readline(self) -> str?
+    @go("ReadLines") def readlines(self) -> list[str]
     @go("Lines") def lines(self) -> iter[str]
     @go("Write") def write(self, s: str)
     @go("WriteLine") def write_line(self, s: str)

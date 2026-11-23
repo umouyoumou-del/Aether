@@ -1,0 +1,31 @@
+# sys 模块：命令行参数、标准输入输出、退出
+#     import sys
+#     data = sys.stdin.read().split()
+#     print("出错了", file=sys.stderr)
+#     sys.exit(1)
+
+@go("rt.SysArgv") def _argv() -> list[str]
+@go("rt.Stdin") def _stdin() -> File
+@go("rt.Stdout") def _stdout() -> File
+@go("rt.Stderr") def _stderr() -> File
+@go("rt.SysPlatform") def _platform() -> str
+
+# 命令行参数：argv[0] 是程序的源文件名，其后是传给程序的参数
+argv = _argv()
+# 标准输入（与 input() 共用缓冲）、标准输出（与 print 共用缓冲）、标准错误
+stdin = _stdin()
+stdout = _stdout()
+stderr = _stderr()
+# 平台：win32、linux、darwin……
+platform = _platform()
+const maxsize: int = 9223372036854775807
+
+# 刷新输出后以给定的状态码退出
+@go("rt.Exit") def exit(code: int = 0)
+
+# 五行的调用栈会自动增长，不需要设置递归深度；这两个函数只是为了兼容 Python 代码
+def setrecursionlimit(n: int):
+    pass
+
+def getrecursionlimit() -> int:
+    return 1000000

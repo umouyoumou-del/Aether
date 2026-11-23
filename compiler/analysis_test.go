@@ -1,6 +1,12 @@
 package compiler
 
 import (
+	"fmt"
+	"math/rand"
+	"os"
+	"path/filepath"
+	"runtime/debug"
+	"sort"
 	"strings"
 	"testing"
 
@@ -150,6 +156,54 @@ func TestAnalysisCompletionOutline(t *testing.T) {
 	}
 	if len(out[0].Children) != 3 {
 		t.Errorf("Point 的大纲应有 3 个成员，得到 %d", len(out[0].Children))
+	}
+}
+
+// TestAnalysisMutations 对变异后的程序（模拟编辑中不完整的代码）做分析，并在随机位置查询，确认不会崩溃。
+func TestAnalysisMutations(t *testing.T) {
+	var files []string
+	for _, pat := range []string{"../tests/run/*.ae", "../examples/*.ae"} {
+		fs, _ := filepath.Glob(pat)
+		files = append(files, fs...)
+	}
+	sort.Strings(files)
+	n := 4
+	if s := os.Getenv("MUTATIONS"); s != "" {
+		fmt.Sscanf(s, "%d", &n)
+	}
+	rng := rand.New(rand.NewSource(11))
+	for _, f := range files {
+		data, _ := os.ReadFile(f)
+		lines := strings.Split(string(data), "\n")
+		for i := 0; i <= n; i++ {
+			cur := lines
+			if i > 0 {
+				cur = mutate(rng, lines)
+			}
+			src := strings.Join(cur, "\n")
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						t.Errorf("%s 变异 %d：分析时崩溃：%v\n%s", filepath.Base(f), i, r, debug.Stack())
+					}
+				}()
+				a := Analyze(f, []byte(src), assets.Lib())
+				for _, d := range a.Diags {
+					if strings.HasPrefix(d.Msg, "内部错误") {
+						t.Errorf("%s 变异 %d：%s\n--- 源码 ---\n%s", filepath.Base(f), i, d.Msg, src)
+					}
+				}
+				a.Outline()
+				for k := 0; k < 20; k++ {
+					line := 1 + rng.Intn(len(cur))
+					col := 1 + rng.Intn(len([]rune(cur[line-1]))+1)
+					a.Hover(line, col)
+					a.Definition(line, col)
+					a.MembersBefore(line, col)
+					a.NamesAt(line, col)
+				}
+			}()
+		}
 	}
 }
 

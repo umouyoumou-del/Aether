@@ -1416,6 +1416,31 @@ func (g *Gen) builtin(e *Call) string {
 		if a := kw["end"]; a != nil {
 			end = g.expr(a.X)
 		}
+		if kw["file"] != nil || kw["flush"] != nil {
+			// print(..., file=f, flush=...)
+			file, flush := "nil", "false"
+			if a := kw["file"]; a != nil {
+				file = g.expr(a.X)
+			}
+			if a := kw["flush"]; a != nil {
+				flush = g.expr(a.X)
+			}
+			if spread {
+				r := g.tmp()
+				var b strings.Builder
+				fmt.Fprintf(&b, "func() { var %s []any", r)
+				for i, a := range e.Final {
+					if _, ok := a.(*StarExpr); ok {
+						fmt.Fprintf(&b, "; for v := range %s { %s = append(%s, v) }", args[i], r, r)
+					} else {
+						fmt.Fprintf(&b, "; %s = append(%s, %s)", r, r, args[i])
+					}
+				}
+				fmt.Fprintf(&b, "; %s.PrintTo(%s, %s, %s, %s, %s...) }()", rt, file, sep, end, flush, r)
+				return b.String()
+			}
+			return rt + ".PrintTo(" + joinArgs(file+", "+sep+", "+end+", "+flush, args) + ")"
+		}
 		if spread {
 			// print(a, *xs)：先收集所有参数
 			r := g.tmp()
@@ -1540,6 +1565,12 @@ func (g *Gen) builtin(e *Call) string {
 		}
 		return fmt.Sprintf("%s.Enumerate(%s, %s)", rt, arg(0), start)
 	case "zip":
+		if e.Extra == "star" {
+			if lt, ok := argT(0).(*ListT); ok && isStr(lt.Elem) {
+				return rt + ".ZipStrs(" + arg(0) + ")"
+			}
+			return rt + ".ZipLists(" + arg(0) + ")"
+		}
 		if len(e.Final) == 3 {
 			return fmt.Sprintf("%s.Zip3(%s, %s, %s)", rt, arg(0), arg(1), arg(2))
 		}

@@ -1160,7 +1160,7 @@ func (c *Checker) builtinCall(e *Call, name string, want Type) Type {
 	kw := map[string]*Arg{}
 	var pos []*Arg
 	for _, a := range args {
-		if a.Star && name != "print" {
+		if a.Star && name != "print" && name != "zip" {
 			c.errorf(a.Pos, "内置函数 %s 不支持 *展开", name)
 			continue
 		}
@@ -1198,7 +1198,15 @@ func (c *Checker) builtinCall(e *Call, name string, want Type) Type {
 	e.Final = nil
 	switch name {
 	case "print":
-		allowKw("sep", "end")
+		allowKw("sep", "end", "file", "flush")
+		if a := kw["file"]; a != nil {
+			if fs := c.universe.Syms["File"]; fs != nil && fs.TD != nil {
+				c.exprTo(&a.X, &NamedT{D: fs.TD}, "file")
+			}
+		}
+		if a := kw["flush"]; a != nil {
+			c.exprTo(&a.X, tBool, "flush")
+		}
 		for _, a := range pos {
 			if a.Star {
 				// print(*xs)：逐个打印可迭代对象的元素
@@ -1365,6 +1373,37 @@ func (c *Checker) builtinCall(e *Call, name string, want Type) Type {
 		return &IterT{&TupleT{Elems: []Type{tInt, et}}}
 	case "zip":
 		allowKw()
+		if len(pos) == 1 && pos[0].Star {
+			// zip(*rows)：转置，每一列是一个列表（Python 中是元组）
+			at := c.expr(pos[0].X, nil)
+			lt, ok := at.(*ListT)
+			var col Type
+			if ok {
+				switch inner := lt.Elem.(type) {
+				case *ListT:
+					col = inner.Elem
+				case *Basic:
+					if inner.Kind == BStr {
+						col = tChar
+					}
+				}
+			}
+			if col == nil {
+				if !isInvalid(at) {
+					c.errorf(pos[0].X.P(), "zip(*xs) 要求 xs 是列表的列表或字符串的列表，得到 %s", at)
+				}
+				return tInvalid
+			}
+			e.Final = []Expr{pos[0].X}
+			e.Extra = "star"
+			return &IterT{&ListT{col}}
+		}
+		for _, a := range pos {
+			if a.Star {
+				c.errorf(a.Pos, "zip 只支持 zip(*xs) 这一种 *展开")
+				return tInvalid
+			}
+		}
 		if !nargs(2, 3) {
 			return tInvalid
 		}

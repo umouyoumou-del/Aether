@@ -9,10 +9,11 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
-// File 是 open() 返回的文件对象。
+// File 是 open() 返回的文件对象，也用于 sys.stdin、sys.stdout、sys.stderr。
 type File struct {
 	f      *os.File
 	r      *bufio.Reader
@@ -20,6 +21,7 @@ type File struct {
 	path   string
 	mode   string
 	closed bool
+	std    int // 0：普通文件；1、2、3：标准输入、标准输出、标准错误
 }
 
 // Open 实现 open(path, mode)。
@@ -75,6 +77,75 @@ func raiseIO(err error, path string) {
 	Raise("IOError", "%v", err)
 }
 
+// ===== 标准流 =====
+
+var (
+	stdOnce                           sync.Once
+	stdinFile, stdoutFile, stderrFile *File
+)
+
+func initStd() {
+	stdOnce.Do(func() {
+		if stdin == nil {
+			stdin = bufio.NewReader(os.Stdin)
+		}
+		stdinFile = &File{f: os.Stdin, r: stdin, path: "<stdin>", mode: "r", std: 1}
+		stdoutFile = &File{f: os.Stdout, path: "<stdout>", mode: "w", std: 2}
+		stderrFile = &File{f: os.Stderr, path: "<stderr>", mode: "w", std: 3}
+	})
+}
+
+// Stdin、Stdout、Stderr 实现 sys.stdin、sys.stdout、sys.stderr。标准输入与 input() 共用缓冲，
+// 写入标准输出与 print 共用缓冲（因此顺序一致），标准错误不缓冲。
+func Stdin() *File  { initStd(); return stdinFile }
+func Stdout() *File { initStd(); return stdoutFile }
+func Stderr() *File { initStd(); return stderrFile }
+
+// PrintTo 实现 print(..., file=f, flush=...)。f 为 nil 表示标准输出。
+func PrintTo(f *File, sep, end string, flush bool, args ...any) {
+	if f == nil || f.std == 2 {
+		PrintSE(sep, end, args...)
+		if flush {
+			Flush()
+		}
+		return
+	}
+	var sb strings.Builder
+	for i, a := range args {
+		if i > 0 {
+			sb.WriteString(sep)
+		}
+		if s, ok := a.(string); ok {
+			sb.WriteString(s)
+		} else {
+			sb.WriteString(Str(a))
+		}
+	}
+	sb.WriteString(end)
+	f.Write(sb.String())
+	if flush {
+		f.Flush()
+	}
+}
+
+var scriptName = "aether"
+
+// SetScript 记录主程序的源文件名（sys.argv[0]）。
+func SetScript(name string) { scriptName = name }
+
+// SysArgv 实现 sys.argv：第一个元素是程序的源文件名。
+func SysArgv() *List[string] {
+	return &List[string]{S: append([]string{scriptName}, progArgs...)}
+}
+
+// SysPlatform 返回与 Python 的 sys.platform 相同的平台名：win32、linux、darwin……
+func SysPlatform() string {
+	if goos() == "windows" {
+		return "win32"
+	}
+	return goos()
+}
+
 func (f *File) check() {
 	if f.closed {
 		Raise("IOError", "文件已关闭：%s", f.path)
@@ -83,6 +154,7 @@ func (f *File) check() {
 
 func (f *File) Read() string {
 	f.check()
+	f.beforeRead()
 	if f.r == nil {
 		Raise("IOError", "文件不是以读模式打开的")
 	}
@@ -95,6 +167,7 @@ func (f *File) Read() string {
 
 func (f *File) ReadLine() Opt[string] {
 	f.check()
+	f.beforeRead()
 	if f.r == nil {
 		Raise("IOError", "文件不是以读模式打开的")
 	}
@@ -131,8 +204,25 @@ func (f *File) Lines() iter.Seq[string] {
 	}
 }
 
+// beforeRead：从终端读标准输入之前先输出缓冲中的提示。
+func (f *File) beforeRead() {
+	if f.std == 1 && interactive {
+		Flush()
+	}
+}
+
 func (f *File) Write(s string) {
 	f.check()
+	switch f.std {
+	case 1:
+		Raise("IOError", "不能写入标准输入")
+	case 2:
+		Write(s)
+		return
+	case 3:
+		os.Stderr.WriteString(s)
+		return
+	}
 	if f.w == nil {
 		Raise("IOError", "文件不是以写模式打开的")
 	}
@@ -147,13 +237,16 @@ func (f *File) WriteLine(s string) {
 }
 
 func (f *File) Flush() {
+	if f.std == 2 {
+		Flush()
+	}
 	if f.w != nil {
 		f.w.Flush()
 	}
 }
 
 func (f *File) Close() {
-	if f.closed {
+	if f.closed || f.std != 0 {
 		return
 	}
 	if f.w != nil {
@@ -289,6 +382,37 @@ func SetArgs(a []string) { progArgs = a }
 
 func Args() *List[string] {
 	return &List[string]{S: append([]string(nil), progArgs...)}
+}
+
+func PathIsAbs(p string) bool   { return filepath.IsAbs(p) }
+func PathClean(p string) string { return filepath.Clean(p) }
+func PathSep() string           { return string(filepath.Separator) }
+
+// PathRel 实现 os.path.relpath。
+func PathRel(p, start string) string {
+	if !filepath.IsAbs(p) {
+		p = PathAbs(p)
+	}
+	if !filepath.IsAbs(start) {
+		start = PathAbs(start)
+	}
+	r, err := filepath.Rel(start, p)
+	if err != nil {
+		Raise("ValueError", "无法计算 %s 相对于 %s 的路径", QuoteStr(p), QuoteStr(start))
+	}
+	return r
+}
+
+// ExpandUser 把开头的 ~ 替换为用户主目录。
+func ExpandUser(p string) string {
+	if p != "~" && !strings.HasPrefix(p, "~/") && !strings.HasPrefix(p, `~\`) {
+		return p
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return p
+	}
+	return home + p[1:]
 }
 
 func Cwd() string {

@@ -237,6 +237,43 @@ func AllOf(it iter.Seq[bool]) bool {
 	return true
 }
 
+// ZipLists 实现 zip(*rows)：按列遍历（以最短的一行为准），每一列是一个列表。
+func ZipLists[T any](rows *List[*List[T]]) iter.Seq[*List[T]] {
+	return func(yield func(*List[T]) bool) {
+		if len(rows.S) == 0 {
+			return
+		}
+		n := len(rows.S[0].S)
+		for _, r := range rows.S {
+			n = min(n, len(r.S))
+		}
+		for i := 0; i < n; i++ {
+			col := make([]T, len(rows.S))
+			for k, r := range rows.S {
+				col[k] = r.S[i]
+			}
+			if !yield(&List[T]{S: col}) {
+				return
+			}
+		}
+	}
+}
+
+// ZipStrs 实现 zip(*strs)：按位置取出各个字符串的字符。
+func ZipStrs(rows *List[string]) iter.Seq[*List[Char]] {
+	lists := &List[*List[Char]]{}
+	for _, s := range rows.S {
+		lists.S = append(lists.S, &List[Char]{S: []Char(func() []Char {
+			var cs []Char
+			for _, r := range s {
+				cs = append(cs, Char(r))
+			}
+			return cs
+		}())})
+	}
+	return ZipLists(lists)
+}
+
 // ===== 迭代器的扩展方法 =====
 
 func IterMap[T, U any](it iter.Seq[T], f func(T) U) iter.Seq[U] {

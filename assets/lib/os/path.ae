@@ -1,0 +1,32 @@
+# os.path 模块：路径操作（import os 之后可以写 os.path.join(...)）
+
+@go("rt.PathJoin") def join(*parts: str) -> str
+@go("rt.Exists") def exists(path: str) -> bool
+@go("rt.IsFile") def isfile(path: str) -> bool
+@go("rt.IsDir") def isdir(path: str) -> bool
+@go("rt.PathIsAbs") def isabs(path: str) -> bool
+@go("rt.PathBase") def basename(path: str) -> str
+@go("rt.PathDir") def dirname(path: str) -> str
+@go("rt.PathAbs") def abspath(path: str) -> str
+@go("rt.PathClean") def normpath(path: str) -> str
+@go("rt.PathRel") def relpath(path: str, start: str = ".") -> str
+@go("rt.ExpandUser") def expanduser(path: str) -> str
+@go("rt.FileSize") def getsize(path: str) -> int
+@go("rt.ModTime") def getmtime(path: str) -> float
+@go("rt.PathSep") def _sep() -> str
+
+# 路径分隔符（Windows 上是 \，其它系统是 /）
+sep = _sep()
+
+# 分为 (目录, 文件名)
+def split(path: str) -> (str, str):
+    return (dirname(path), basename(path))
+
+# 分为 (去掉扩展名的部分, 扩展名)：splitext("a/b.txt") == ("a/b", ".txt")；以点开头的文件名没有扩展名
+def splitext(path: str) -> (str, str):
+    name = basename(path)
+    i = name.rfind(".")
+    if i <= 0 or name[:i].strip(".") == "":
+        return (path, "")
+    cut = len(path) - (len(name) - i)
+    return (path[:cut], path[cut:])

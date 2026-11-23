@@ -861,6 +861,9 @@ func (g *Gen) genMain() {
 		g.line("%s.IsExcHook = ꞏexc_is", rt)
 	}
 	g.line("%s.SetArgs(%s.Args[1:])", rt, g.pkg("os"))
+	if mm := g.c.Main; mm != nil && mm.Src != nil {
+		g.line("%s.SetScript(%q)", rt, mm.Src.Name)
+	}
 	inits := func() {
 		for _, m := range g.c.Mods {
 			g.line("%s()", initName(m))
