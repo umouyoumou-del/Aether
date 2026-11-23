@@ -1,0 +1,14 @@
+# csv 模块：读写 CSV（逗号分隔值）
+#     rows = csv.read("data.csv")              # list[list[str]]
+#     people = csv.read_dicts("people.csv")    # 第一行是表头：list[dict[str, str]]
+#     csv.write("out.csv", [["名字", "分数"], ["小明", 92]])
+# 写入时每个值用 str() 转换；字段中的逗号、引号、换行会被正确地加引号。格式错误抛出 ValueError。
+
+@go("rtcsv.Parse") def parse(text: str, delimiter: char = ',') -> list[list[str]]
+@go("rtcsv.Read") def read(path: str, delimiter: char = ',') -> list[list[str]]
+@go("rtcsv.ParseDicts") def parse_dicts(text: str, delimiter: char = ',') -> list[dict[str, str]]
+@go("rtcsv.ReadDicts") def read_dicts(path: str, delimiter: char = ',') -> list[dict[str, str]]
+@go("rtcsv.Format") def format[T](rows: list[list[T]], delimiter: char = ',') -> str
+@go("rtcsv.Write") def write[T](path: str, rows: list[list[T]], delimiter: char = ',')
+@go("rtcsv.FormatDicts") def format_dicts[V](rows: list[dict[str, V]], fieldnames: list[str]? = null, delimiter: char = ',') -> str
+@go("rtcsv.WriteDicts") def write_dicts[V](path: str, rows: list[dict[str, V]], fieldnames: list[str]? = null, delimiter: char = ',')

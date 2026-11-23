@@ -1,0 +1,43 @@
+# bisect 模块：在有序列表中二分查找与插入（用纯五行代码编写）
+# 元素可以是数字、字符串、定义了 __lt__ 的类型，或由它们组成的元组。hi 为 -1 表示列表末尾。
+
+# 第一个不小于 x 的位置（x 应插入的最左位置）
+def bisect_left[T: Sortable](a: list[T], x: T, lo: int = 0, hi: int = -1) -> int:
+    if lo < 0:
+        raise ValueError("lo 不能为负数")
+    if hi < 0:
+        hi = len(a)
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if a[mid] < x:
+            lo = mid + 1
+        else:
+            hi = mid
+    return lo
+
+# 第一个大于 x 的位置（x 应插入的最右位置）
+def bisect_right[T: Sortable](a: list[T], x: T, lo: int = 0, hi: int = -1) -> int:
+    if lo < 0:
+        raise ValueError("lo 不能为负数")
+    if hi < 0:
+        hi = len(a)
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if x < a[mid]:
+            hi = mid
+        else:
+            lo = mid + 1
+    return lo
+
+def bisect[T: Sortable](a: list[T], x: T, lo: int = 0, hi: int = -1) -> int:
+    return bisect_right(a, x, lo, hi)
+
+# 把 x 插入到有序列表中，保持有序
+def insort_left[T: Sortable](a: list[T], x: T, lo: int = 0, hi: int = -1):
+    a.insert(bisect_left(a, x, lo, hi), x)
+
+def insort_right[T: Sortable](a: list[T], x: T, lo: int = 0, hi: int = -1):
+    a.insert(bisect_right(a, x, lo, hi), x)
+
+def insort[T: Sortable](a: list[T], x: T, lo: int = 0, hi: int = -1):
+    insort_right(a, x, lo, hi)

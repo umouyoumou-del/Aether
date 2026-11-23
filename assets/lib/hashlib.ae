@@ -1,0 +1,22 @@
+# hashlib 模块：消息摘要（MD5、SHA-1、SHA-2）
+#     hashlib.sha256("abc").hexdigest()
+#     h = hashlib.md5()
+#     h.update("第一部分")
+#     h.update("第二部分")
+# 字符串按 UTF-8 编码；二进制数据用 update_bytes。
+
+@go("*rtenc.Hash")
+class Hash:
+    @go("Update") def update(self, data: str)
+    @go("UpdateBytes") def update_bytes(self, data: list[u8])
+    @go("HexDigest") def hexdigest(self) -> str
+    @go("Digest") def digest(self) -> list[u8]
+    @go("Name") prop name -> str
+    @go("Size") prop digest_size -> int
+
+@go("rtenc.NewMD5") def md5(data: str = "") -> Hash
+@go("rtenc.NewSHA1") def sha1(data: str = "") -> Hash
+@go("rtenc.NewSHA256") def sha256(data: str = "") -> Hash
+@go("rtenc.NewSHA512") def sha512(data: str = "") -> Hash
+# 按名字创建：md5、sha1、sha224、sha256、sha384、sha512
+@go("rtenc.NewHash") def new(name: str, data: str = "") -> Hash

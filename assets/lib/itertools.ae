@@ -1,0 +1,244 @@
+# itertools 模块：迭代器工具（用纯五行代码编写）
+# 与 Python 不同：排列、组合、笛卡尔积的每一项是列表（Python 是元组），
+# 可以直接解构：for a, b in combinations(xs, 2)
+
+# 无限递增序列 start, start + step, ...
+def count(start: int = 0, step: int = 1) -> iter[int]:
+    n = start
+    while true:
+        yield n
+        n += step
+
+# 无限循环地重复 items 中的元素
+def cycle[T](items: list[T]) -> iter[T]:
+    if len(items) == 0:
+        return
+    while true:
+        for x in items:
+            yield x
+
+# 重复 x，times < 0 时无限重复
+def repeat[T](x: T, times: int = -1) -> iter[T]:
+    i = 0
+    while times < 0 or i < times:
+        yield x
+        i += 1
+
+# 依次产生各个可迭代对象的元素
+def chain[T](*parts: iter[T]) -> iter[T]:
+    for p in parts:
+        yield from p
+
+# 依次产生每个子序列的元素（相当于 Python 的 chain.from_iterable）
+def chain_from[T](parts: iter[list[T]]) -> iter[T]:
+    for p in parts:
+        yield from p
+
+# 累积：默认求前缀和；也可以给出二元函数，例如 accumulate(xs, max)
+def accumulate[T: Number](items: iter[T], f: (fn(T, T) -> T)? = null, initial: T? = null) -> iter[T]:
+    first = true
+    acc: T = 0
+    if initial != null:
+        acc = initial
+        first = false
+        yield acc
+    for x in items:
+        if first:
+            acc = x
+            first = false
+        elif f != null:
+            acc = f(acc, x)
+        else:
+            acc = acc + x
+        yield acc
+
+# 相邻的两个元素：pairwise([1, 2, 3]) -> (1, 2), (2, 3)
+def pairwise[T](items: iter[T]) -> iter[(T, T)]:
+    prev: list[T] = []          # 上一个元素（用列表保存，元素本身可以是可空类型）
+    for x in items:
+        if len(prev) > 0:
+            yield (prev[0], x)
+            prev[0] = x
+        else:
+            prev.append(x)
+
+# 把连续的、key 相同的元素分为一组：groupby("aabccc", c => c) -> ('a', [a, a]), ('b', [b]), ('c', [c, c, c])
+def groupby[T, K](items: iter[T], key: fn(T) -> K) -> iter[(K, list[T])]:
+    group: list[T] = []
+    cur: list[K] = []           # 当前组的键
+    for x in items:
+        k = key(x)
+        if len(cur) == 0:
+            cur.append(k)
+        elif k != cur[0]:
+            yield (cur[0], group)
+            group = []
+            cur[0] = k
+        group.append(x)
+    if len(group) > 0:
+        yield (cur[0], group)
+
+# 每 n 个元素一组（最后一组可能不足 n 个）
+def batched[T](items: iter[T], n: int) -> iter[list[T]]:
+    if n < 1:
+        raise ValueError("batched 的 n 必须至少为 1")
+    batch: list[T] = []
+    for x in items:
+        batch.append(x)
+        if len(batch) == n:
+            yield batch
+            batch = []
+    if len(batch) > 0:
+        yield batch
+
+# 切片：islice(it, stop) 或 islice(it, start, stop, step)；stop 为 -1 表示到结尾
+def islice[T](items: iter[T], start: int, stop: int = -2, step: int = 1) -> iter[T]:
+    if stop == -2:
+        # 只给了一个参数：它是 stop
+        stop = start
+        start = 0
+    if start < 0 or step < 1:
+        raise ValueError("islice 的 start 不能为负，step 必须至少为 1")
+    i = 0
+    next_i = start
+    for x in items:
+        if stop >= 0 and i >= stop:
+            return
+        if i == next_i:
+            yield x
+            next_i += step
+        i += 1
+
+# 保留使 f 为假的元素
+def filterfalse[T](f: fn(T) -> bool, items: iter[T]) -> iter[T]:
+    for x in items:
+        if not f(x):
+            yield x
+
+def takewhile[T](f: fn(T) -> bool, items: iter[T]) -> iter[T]:
+    for x in items:
+        if not f(x):
+            return
+        yield x
+
+def dropwhile[T](f: fn(T) -> bool, items: iter[T]) -> iter[T]:
+    dropping = true
+    for x in items:
+        if dropping and f(x):
+            continue
+        dropping = false
+        yield x
+
+# 按 selectors 中为真的位置选取元素
+def compress[T](items: iter[T], selectors: iter[bool]) -> iter[T]:
+    for x, keep in zip(items, selectors):
+        if keep:
+            yield x
+
+# 两个序列按位置配对，较短的一方用 null 补齐
+def zip_longest[A, B](a: list[A], b: list[B]) -> iter[(A?, B?)]:
+    n = max(len(a), len(b))
+    for i in range(n):
+        x: A? = null
+        y: B? = null
+        if i < len(a):
+            x = a[i]
+        if i < len(b):
+            y = b[i]
+        yield (x, y)
+
+# 笛卡尔积：product([1, 2], [3, 4]) -> [1, 3], [1, 4], [2, 3], [2, 4]；
+# product([0, 1], repeat=3) 相当于 product([0, 1], [0, 1], [0, 1])
+def product[T](*pools: iter[T], repeat: int = 1) -> iter[list[T]]:
+    lists: list[list[T]] = []
+    for _ in range(repeat):
+        for p in pools:
+            lists.append(list(p))
+    if len(lists) == 0:
+        yield list[T]()
+        return
+    for ls in lists:
+        if len(ls) == 0:
+            return
+    idx = [0] * len(lists)
+    while true:
+        yield [lists[k][idx[k]] for k in range(len(lists))]
+        k = len(lists) - 1
+        while k >= 0:
+            idx[k] += 1
+            if idx[k] < len(lists[k]):
+                break
+            idx[k] = 0
+            k -= 1
+        if k < 0:
+            return
+
+# r 个元素的排列（按字典序的位置顺序）；r 省略时为全排列
+def permutations[T](items: iter[T], r: int = -1) -> iter[list[T]]:
+    pool = list(items)
+    n = len(pool)
+    if r < 0:
+        r = n
+    if r > n:
+        return
+    idx = list(range(n))
+    cycles = list(range(n, n - r, -1))
+    yield [pool[i] for i in idx[:r]]
+    while n > 0:
+        found = false
+        i = r - 1
+        while i >= 0:
+            cycles[i] -= 1
+            if cycles[i] == 0:
+                moved = idx[i]
+                for j in range(i, n - 1):
+                    idx[j] = idx[j + 1]
+                idx[n - 1] = moved
+                cycles[i] = n - i
+            else:
+                j = cycles[i]
+                idx[i], idx[n - j] = idx[n - j], idx[i]
+                yield [pool[k] for k in idx[:r]]
+                found = true
+                break
+            i -= 1
+        if not found:
+            return
+
+# r 个元素的组合（不重复，保持原来的顺序）
+def combinations[T](items: iter[T], r: int) -> iter[list[T]]:
+    pool = list(items)
+    n = len(pool)
+    if r > n or r < 0:
+        return
+    idx = list(range(r))
+    yield [pool[i] for i in idx]
+    while true:
+        i = r - 1
+        while i >= 0 and idx[i] == i + n - r:
+            i -= 1
+        if i < 0:
+            return
+        idx[i] += 1
+        for j in range(i + 1, r):
+            idx[j] = idx[j - 1] + 1
+        yield [pool[k] for k in idx]
+
+# 可以重复选取同一元素的组合
+def combinations_with_replacement[T](items: iter[T], r: int) -> iter[list[T]]:
+    pool = list(items)
+    n = len(pool)
+    if n == 0 and r > 0:
+        return
+    idx = [0] * r
+    yield [pool[i] for i in idx]
+    while true:
+        i = r - 1
+        while i >= 0 and idx[i] == n - 1:
+            i -= 1
+        if i < 0:
+            return
+        v = idx[i] + 1
+        for j in range(i, r):
+            idx[j] = v
+        yield [pool[k] for k in idx]

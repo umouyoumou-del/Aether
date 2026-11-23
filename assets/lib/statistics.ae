@@ -1,0 +1,160 @@
+# statistics 模块：描述性统计（用纯五行代码编写）
+# 与 Python 不同：mean、median 等总是返回 float。空数据抛出 ValueError。
+
+import math
+
+def _need[T](data: list[T], n: int, what: str):
+    if len(data) < n:
+        if n == 1:
+            raise ValueError(f"{what} 需要至少一个数据")
+        raise ValueError(f"{what} 需要至少 {n} 个数据")
+
+# 算术平均数
+def mean[T: Number](data: list[T]) -> float:
+    _need(data, 1, "mean")
+    total = 0.0
+    for x in data:
+        total += float(x)
+    return total / len(data)
+
+def fmean[T: Number](data: list[T]) -> float:
+    return mean(data)
+
+# 几何平均数（数据必须为正数）
+def geometric_mean[T: Number](data: list[T]) -> float:
+    _need(data, 1, "geometric_mean")
+    s = 0.0
+    for x in data:
+        v = float(x)
+        if v <= 0.0:
+            raise ValueError("geometric_mean 要求所有数据都是正数")
+        s += math.log(v)
+    return math.exp(s / len(data))
+
+# 调和平均数
+def harmonic_mean[T: Number](data: list[T]) -> float:
+    _need(data, 1, "harmonic_mean")
+    s = 0.0
+    for x in data:
+        v = float(x)
+        if v < 0.0:
+            raise ValueError("harmonic_mean 不接受负数")
+        if v == 0.0:
+            return 0.0
+        s += 1.0 / v
+    return len(data) / s
+
+# 中位数：个数为偶数时取中间两个数的平均
+def median[T: Number](data: list[T]) -> float:
+    _need(data, 1, "median")
+    xs = data.sorted()
+    n = len(xs)
+    if n % 2 == 1:
+        return float(xs[n // 2])
+    return (float(xs[n // 2 - 1]) + float(xs[n // 2])) / 2.0
+
+# 偶数个数时取中间较小 / 较大的一个
+def median_low[T: Number](data: list[T]) -> T:
+    _need(data, 1, "median_low")
+    xs = data.sorted()
+    n = len(xs)
+    return xs[n // 2] if n % 2 == 1 else xs[n // 2 - 1]
+
+def median_high[T: Number](data: list[T]) -> T:
+    _need(data, 1, "median_high")
+    xs = data.sorted()
+    return xs[len(xs) // 2]
+
+# 出现次数最多的值（有多个时取最先出现的）
+def mode[T: Hashable](data: list[T]) -> T:
+    _need(data, 1, "mode")
+    counts = counter(data)
+    best = data[0]
+    for x in data:
+        if counts[x] > counts[best]:
+            best = x
+    return best
+
+# 所有出现次数最多的值（按第一次出现的顺序）
+def multimode[T: Hashable](data: list[T]) -> list[T]:
+    if len(data) == 0:
+        return []
+    counts = counter(data)
+    top = max(counts.values())
+    return [k for k, v in counts.items() if v == top]
+
+def _ss[T: Number](data: list[T]) -> float:
+    m = mean(data)
+    s = 0.0
+    for x in data:
+        d = float(x) - m
+        s += d * d
+    return s
+
+# 总体方差、总体标准差
+def pvariance[T: Number](data: list[T]) -> float:
+    _need(data, 1, "pvariance")
+    return _ss(data) / len(data)
+
+def pstdev[T: Number](data: list[T]) -> float:
+    return math.sqrt(pvariance(data))
+
+# 样本方差、样本标准差（除以 n - 1）
+def variance[T: Number](data: list[T]) -> float:
+    _need(data, 2, "variance")
+    return _ss(data) / (len(data) - 1)
+
+def stdev[T: Number](data: list[T]) -> float:
+    return math.sqrt(variance(data))
+
+# 把数据分为 n 等份的 n - 1 个分位点（与 Python 默认的 exclusive 方法相同）
+def quantiles[T: Number](data: list[T], n: int = 4) -> list[float]:
+    if n < 1:
+        raise ValueError("n 必须至少为 1")
+    _need(data, 2, "quantiles")
+    xs = [float(x) for x in data.sorted()]
+    m = len(xs) + 1
+    out: list[float] = []
+    for i in range(1, n):
+        j = i * m // n
+        j = 1 if j < 1 else (len(xs) - 1 if j > len(xs) - 1 else j)
+        delta = i * m - j * n          # 两端之外按直线外推
+        out.append((xs[j - 1] * (n - delta) + xs[j] * delta) / n)
+    return out
+
+# 样本协方差与皮尔逊相关系数
+def covariance[A: Number, B: Number](x: list[A], y: list[B]) -> float:
+    if len(x) != len(y):
+        raise ValueError("covariance 的两组数据长度必须相同")
+    _need(x, 2, "covariance")
+    mx, my = mean(x), mean(y)
+    s = 0.0
+    for i in range(len(x)):
+        s += (float(x[i]) - mx) * (float(y[i]) - my)
+    return s / (len(x) - 1)
+
+def correlation[A: Number, B: Number](x: list[A], y: list[B]) -> float:
+    if len(x) != len(y):
+        raise ValueError("correlation 的两组数据长度必须相同")
+    _need(x, 2, "correlation")
+    sx, sy = stdev(x), stdev(y)
+    if sx == 0.0 or sy == 0.0:
+        raise ValueError("correlation 的数据不能是常数")
+    return covariance(x, y) / (sx * sy)
+
+# 最小二乘直线 y = slope * x + intercept，返回 (slope, intercept)
+def linear_regression[A: Number, B: Number](x: list[A], y: list[B]) -> (float, float):
+    if len(x) != len(y):
+        raise ValueError("linear_regression 的两组数据长度必须相同")
+    _need(x, 2, "linear_regression")
+    mx, my = mean(x), mean(y)
+    sxy = 0.0
+    sxx = 0.0
+    for i in range(len(x)):
+        dx = float(x[i]) - mx
+        sxy += dx * (float(y[i]) - my)
+        sxx += dx * dx
+    if sxx == 0.0:
+        raise ValueError("linear_regression 的 x 不能是常数")
+    slope = sxy / sxx
+    return slope, my - slope * mx

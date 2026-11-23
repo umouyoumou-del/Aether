@@ -1,0 +1,126 @@
+# 标准库：itertools、bisect、statistics、string、textwrap、base64、hashlib、csv、datetime
+import itertools as it
+from itertools import permutations, combinations, product
+import bisect
+import statistics as st
+import string
+import textwrap
+import base64
+import hashlib
+import csv
+import os
+from datetime import datetime, date, timedelta
+import datetime as dtm
+
+print(list(it.islice(it.count(10, 5), 4)), list(it.islice(it.cycle([1, 2]), 5)), list(it.repeat("x", 3)))
+print(list(it.chain([1, 2], [3], range(4, 6))), list(it.chain_from([[1], [2, 3]])))
+print(list(it.accumulate([1, 2, 3, 4])), list(it.accumulate([3, 1, 4, 1, 5], max)), list(it.accumulate([1.5, 2.0], initial=10.0)))
+print(list(it.pairwise("abcd")), list(it.pairwise([1])))
+for k, g in it.groupby("aabcccaa", c => c):
+    print(k, g)
+print([(k, len(g)) for k, g in it.groupby([1, 3, 2, 4, 5], x => x % 2)])
+print(list(it.batched(range(7), 3)), list(it.islice(range(10), 2, 8, 2)), list(it.islice(range(10), 3)))
+print(list(it.filterfalse(x => x % 2 == 0, range(6))), list(it.takewhile(x => x < 3, [1, 2, 3, 1])), list(it.dropwhile(x => x < 3, [1, 2, 3, 1])))
+print(list(it.compress("abcdef", [true, false, true])), list(it.zip_longest([1, 2, 3], ["a"])))
+print(list(product([1, 2], [3, 4])), len(list(product(range(3), repeat=3))))
+for dx, dy in product([-1, 0, 1], repeat=2):
+    if dx != 0 or dy != 0:
+        print(f"({dx},{dy})", end=" ")
+print()
+print(list(permutations([1, 2, 3])), list(permutations("abc", 2)), list(permutations([1, 2], 0)))
+print(list(combinations([1, 2, 3, 4], 2)), list(combinations("abc", 3)), list(combinations([1], 2)))
+print(list(it.combinations_with_replacement("ab", 2)), len(list(permutations(range(6)))))
+print(sum(1 for a, b, c in combinations(range(10), 3) if a + b + c == 12))
+
+
+a = [1, 3, 3, 5, 8]
+print(bisect.bisect_left(a, 3), bisect.bisect_right(a, 3), bisect.bisect(a, 4), bisect.bisect_left(a, 9), bisect.bisect_left(a, 0))
+bisect.insort(a, 4)
+bisect.insort_left(a, 3)
+print(a)
+names = ["amy", "bob", "zed"]
+bisect.insort(names, "kim")
+print(names, bisect.bisect_left([(1, "a"), (3, "c")], (2, "b")))
+
+data = [2, 4, 4, 4, 5, 5, 7, 9]
+print(st.mean(data), st.median(data), st.median([3, 1, 2]), st.median_low(data), st.median_high(data))
+print(st.mode([1, 2, 2, 3, 3]), st.multimode("aabbc".chars()), st.pstdev(data), st.stdev(data))
+print(f"{st.variance(data):.4f} {st.pvariance(data):.4f} {st.geometric_mean([1, 2, 4]):.4f} {st.harmonic_mean([1, 2, 4]):.4f}")
+print(st.quantiles([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]), st.quantiles(data, n=10))
+x = [1, 2, 3, 4, 5]
+y = [2.1, 3.9, 6.2, 7.8, 10.1]
+print(f"{st.covariance(x, y):.4f} {st.correlation(x, y):.6f}", st.linear_regression(x, y))
+try:
+    st.mean(list[int]())
+except ValueError as e:
+    print("错误：", e)
+
+print(string.ascii_lowercase, string.digits, len(string.punctuation), string.capwords("hello   wide world"))
+text = "The quick brown fox jumps over the lazy dog and keeps running far away"
+print(textwrap.wrap(text, 20))
+print(textwrap.fill("a bb ccc dddd eeeee", 9))
+print(textwrap.shorten(text, 30), "|", textwrap.shorten("短文本", 30))
+print(repr(textwrap.dedent("    def f():\n        return 1\n\n    x = 2")))
+print(repr(textwrap.indent("a\n\nb", "> ")))
+print(textwrap.wrap("一二三四五六七八九十", 4))
+
+
+s = "你好, Aether!"
+e = base64.b64encode(s)
+print(e, base64.b64decode(e), base64.urlsafe_b64encode("??>>"), base64.b16encode("hi"), base64.b16decode("6869"))
+print(base64.encode_bytes([0, 255, 16]), base64.decode_bytes("AP8Q"), base64.b64decode("YWJj"))
+try:
+    base64.b64decode("@@@")
+except ValueError as ex:
+    print("错误：", ex)
+print(hashlib.md5("abc").hexdigest(), hashlib.sha1("abc").hexdigest())
+print(hashlib.sha256("abc").hexdigest())
+h = hashlib.new("sha256")
+h.update("a")
+h.update("bc")
+print(h.hexdigest() == hashlib.sha256("abc").hexdigest(), h.name, h.digest_size, len(h.digest()))
+
+text = "name,score,note\n小明,92,\"好, 很好\"\n小红,88,\"说 \"\"你好\"\"\"\n"
+rows = csv.parse(text)
+print(rows)
+for d in csv.parse_dicts(text):
+    print(d["name"], int(d["score"]) + 1, d["note"])
+out = csv.format([["a", "b,c"], ["x\ny", "z"]])
+print(repr(out))
+print(csv.format([[1, 2.5], [3, 4.0]]), end="")
+csv.write("t.csv", [["id", "v"], [1, 10], [2, 20]])
+print(csv.read("t.csv"), csv.read_dicts("t.csv"))
+csv.write_dicts("t2.csv", [{"x": 1, "y": 2}, {"x": 3, "y": 4}])
+print(repr(os.read_file("t2.csv")), csv.format_dicts([{"a": "1"}], fieldnames=["a", "b"]).strip())
+print(csv.parse("a;b\n1;2", delimiter=';'))
+os.remove("t.csv")
+os.remove("t2.csv")
+
+
+d = datetime(2024, 2, 28, 23, 30)
+print(d, repr(d), d + timedelta(hours=1), d.weekday(), d.isocalendar())
+ev = datetime(2024, 3, 1, 1, 15, 30, 123456)
+delta = ev - d
+print(delta, repr(delta), delta.total_seconds(), delta.days, delta.seconds)
+print(ev - timedelta(days=1), ev.strftime("%Y/%m/%d %H:%M:%S.%f %a %b %j"), ev.isoformat())
+print(timedelta(days=-1, seconds=1), timedelta(hours=25), timedelta(weeks=1) / 7, timedelta(minutes=90) * 2, -timedelta(seconds=1))
+print(repr(timedelta()), repr(timedelta(days=1, seconds=3600)), str(timedelta(microseconds=5)))
+print(date(2024, 1, 1) - date(2023, 1, 1), date(2024, 3, 1) - timedelta(days=1), date(2000, 2, 29).replace(year=2004))
+print(date.fromisoformat("2023-12-31").isocalendar(), date(2021, 1, 3).isocalendar(), date(1, 1, 1).toordinal(), date.fromordinal(738000))
+print(datetime.fromisoformat("2024-05-06T07:08:09.5"), datetime.fromisoformat("2024-05-06 07:08"), datetime.strptime("2023-07-14 09:30:00", "%Y-%m-%d %H:%M:%S"))
+ds = [date(2024, 5, 1), date(2023, 1, 9), date(2024, 1, 2)]
+print(sorted(ds), max(ds), date(2024, 1, 2) in ds, {date(2024, 1, 2): "x"}[date(2024, 1, 2)])
+print(dtm.MAXYEAR, dtm.date(2020, 1, 1) < dtm.date(2020, 1, 2), datetime(2020, 1, 1) == datetime(2020, 1, 1, 0, 0, 0))
+ts = datetime(2024, 1, 1, 12).timestamp()
+print(datetime.fromtimestamp(ts), date.fromtimestamp(ts))
+now = datetime.now()
+print((datetime.now() - now).total_seconds() < 1.0, now.year >= 2024, date.today() == now.date())
+for bad in ["2023-02-29", "2023-13-01", "x"]:
+    try:
+        date.fromisoformat(bad)
+    except ValueError as ex:
+        print("错误：", ex)
+try:
+    datetime(2024, 1, 1, 24)
+except ValueError as ex:
+    print("错误：", ex)

@@ -1,0 +1,351 @@
+# datetime 模块：日期、时间与时间间隔
+#     from datetime import datetime, date, timedelta
+#     now = datetime.now()
+#     week_ago = now - timedelta(days=7)
+#     print(now.strftime("%Y-%m-%d %H:%M"), (now - week_ago).days)
+# 表示的是不带时区的本地时间（与 Python 的 naive datetime 相同）；精确到微秒，
+# 年份范围 1 到 9999。三个类型都是值类型：可以比较、排序、作为字典的键。
+
+const MINYEAR = 1
+const MAXYEAR = 9999
+
+@go("rt.NaiveNowUs") def _now_us() -> int
+@go("rt.NaiveUTCNowUs") def _utcnow_us() -> int
+@go("rt.NaiveFromTimestamp") def _from_ts(ts: float) -> int
+@go("rt.NaiveToTimestamp") def _to_ts(us: int) -> float
+@go("rt.NaiveFormat") def _format(us: int, layout: str) -> str
+@go("rt.NaiveParse") def _parse(s: str, layout: str) -> int
+
+const _US_PER_SEC = 1000000
+const _US_PER_DAY = 86400000000
+const _MONTH_DAYS = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+
+def _is_leap(y: int) -> bool:
+    return y % 4 == 0 and (y % 100 != 0 or y % 400 == 0)
+
+def _days_in_month(y: int, m: int) -> int:
+    if m == 2 and _is_leap(y):
+        return 29
+    return _MONTH_DAYS[m]
+
+# 公历日期与距 1970-01-01 的天数互相转换（Howard Hinnant 的算法）
+def _days_from_civil(y: int, m: int, d: int) -> int:
+    if m <= 2:
+        y -= 1
+    era = y // 400
+    yoe = y - era * 400
+    mp = (m + 9) % 12
+    doy = (153 * mp + 2) // 5 + d - 1
+    doe = yoe * 365 + yoe // 4 - yoe // 100 + doy
+    return era * 146097 + doe - 719468
+
+def _civil_from_days(z: int) -> (int, int, int):
+    z += 719468
+    era = z // 146097
+    doe = z - era * 146097
+    yoe = (doe - doe // 1460 + doe // 36524 - doe // 146096) // 365
+    y = yoe + era * 400
+    doy = doe - (365 * yoe + yoe // 4 - yoe // 100)
+    mp = (5 * doy + 2) // 153
+    d = doy - (153 * mp + 2) // 5 + 1
+    m = mp + 3 if mp < 10 else mp - 9
+    return (y + 1 if m <= 2 else y, m, d)
+
+def _check_date(y: int, m: int, d: int):
+    if y < MINYEAR or y > MAXYEAR:
+        raise ValueError(f"年份 {y} 超出范围（{MINYEAR} 到 {MAXYEAR}）")
+    if m < 1 or m > 12:
+        raise ValueError(f"月份必须在 1 到 12 之间，得到 {m}")
+    if d < 1 or d > _days_in_month(y, m):
+        raise ValueError(f"{y} 年 {m} 月没有第 {d} 天")
+
+def _check_time(h: int, mi: int, s: int, us: int):
+    if h < 0 or h > 23:
+        raise ValueError(f"小时必须在 0 到 23 之间，得到 {h}")
+    if mi < 0 or mi > 59:
+        raise ValueError(f"分钟必须在 0 到 59 之间，得到 {mi}")
+    if s < 0 or s > 59:
+        raise ValueError(f"秒必须在 0 到 59 之间，得到 {s}")
+    if us < 0 or us > 999999:
+        raise ValueError(f"微秒必须在 0 到 999999 之间，得到 {us}")
+
+def _check_range(days: int):
+    if days < _days_from_civil(MINYEAR, 1, 1) or days > _days_from_civil(MAXYEAR, 12, 31):
+        raise OverflowError("日期超出了可以表示的范围")
+
+def _two(n: int) -> str:
+    return f"{n:02d}"
+
+# ===== timedelta =====
+
+struct timedelta:
+    _us: int
+
+    def __init__(self, days: float = 0.0, seconds: float = 0.0, microseconds: float = 0.0, milliseconds: float = 0.0, minutes: float = 0.0, hours: float = 0.0, weeks: float = 0.0):
+        total = (((weeks * 7.0 + days) * 24.0 + hours) * 60.0 + minutes) * 60.0 + seconds
+        self._us = round(total * 1000000.0 + milliseconds * 1000.0 + microseconds)
+
+    # 与 Python 相同：days 可以为负，seconds 与 microseconds 总是非负
+    prop days -> int => self._us // _US_PER_DAY
+    prop seconds -> int => self._us % _US_PER_DAY // _US_PER_SEC
+    prop microseconds -> int => self._us % _US_PER_SEC
+
+    def total_seconds(self) -> float:
+        return self._us / 1000000.0
+
+    def __add__(self, o: timedelta) -> timedelta:
+        return _td(self._us + o._us)
+    def __sub__(self, o: timedelta) -> timedelta:
+        return _td(self._us - o._us)
+    def __neg__(self) -> timedelta:
+        return _td(-self._us)
+    def __pos__(self) -> timedelta:
+        return self
+    def __mul__(self, k: float) -> timedelta:
+        return _td(round(self._us * k))
+    def __rmul__(self, k: float) -> timedelta:
+        return _td(round(self._us * k))
+    def __truediv__(self, k: float) -> timedelta:
+        if k == 0.0:
+            raise ZeroDivisionError("时间间隔除以零")
+        return _td(round(self._us / k))
+    def __floordiv__(self, k: int) -> timedelta:
+        return _td(self._us // k)
+    def __lt__(self, o: timedelta) -> bool:
+        return self._us < o._us
+    def __bool__(self) -> bool:
+        return self._us != 0
+    def __radd__(self, d: datetime) -> datetime:
+        return d + self
+
+    def __str__(self) -> str:
+        secs = self.seconds
+        s = f"{secs // 3600}:{_two(secs // 60 % 60)}:{_two(secs % 60)}"
+        days = self.days
+        if days != 0:
+            s = f"{days} day{"" if abs(days) == 1 else "s"}, " + s
+        if self.microseconds != 0:
+            s += f".{self.microseconds:06d}"
+        return s
+
+    def __repr__(self) -> str:
+        parts: list[str] = []
+        if self.days != 0:
+            parts.append(f"days={self.days}")
+        if self.seconds != 0:
+            parts.append(f"seconds={self.seconds}")
+        if self.microseconds != 0:
+            parts.append(f"microseconds={self.microseconds}")
+        return "datetime.timedelta(" + (", ".join(parts) if parts else "0") + ")"
+
+def _td(us: int) -> timedelta:
+    t = timedelta()
+    t._us = us
+    return t
+
+const min = timedelta(days=-999999999)
+const max = timedelta(days=999999999, hours=23, minutes=59, seconds=59, microseconds=999999)
+const resolution = timedelta(microseconds=1)
+
+# ===== date =====
+
+struct date:
+    _days: int          # 距 1970-01-01 的天数
+
+    def __init__(self, year: int, month: int, day: int):
+        _check_date(year, month, day)
+        self._days = _days_from_civil(year, month, day)
+
+    static def today() -> date:
+        return _date(_now_us() // _US_PER_DAY)
+
+    # 解析 YYYY-MM-DD
+    static def fromisoformat(s: str) -> date:
+        parts = s.strip().split("-")
+        if len(parts) != 3 or len(parts[0]) != 4 or len(parts[1]) != 2 or len(parts[2]) != 2:
+            raise ValueError(f"无效的 ISO 日期：{s!r}")
+        try:
+            return date(int(parts[0]), int(parts[1]), int(parts[2]))
+        except ValueError:
+            raise ValueError(f"无效的 ISO 日期：{s!r}")
+
+    # 公元 1 年 1 月 1 日是第 1 天
+    static def fromordinal(n: int) -> date:
+        d = _date(n - 1 + _days_from_civil(1, 1, 1))
+        _check_range(d._days)
+        return d
+
+    static def fromtimestamp(ts: float) -> date:
+        return _date(_from_ts(ts) // _US_PER_DAY)
+
+    prop year -> int => _civil_from_days(self._days)[0]
+    prop month -> int => _civil_from_days(self._days)[1]
+    prop day -> int => _civil_from_days(self._days)[2]
+
+    def toordinal(self) -> int:
+        return self._days - _days_from_civil(1, 1, 1) + 1
+
+    # 星期几：星期一为 0（isoweekday 中星期一为 1）
+    def weekday(self) -> int:
+        return (self._days + 3) % 7
+    def isoweekday(self) -> int:
+        return self.weekday() + 1
+
+    # ISO 日历：(年, 第几周, 星期几)
+    def isocalendar(self) -> (int, int, int):
+        y = self.year
+        week1 = _iso_week1(y)
+        if self._days < week1:
+            y -= 1
+            week1 = _iso_week1(y)
+        elif self._days >= _iso_week1(y + 1):
+            y += 1
+            week1 = _iso_week1(y)
+        return (y, (self._days - week1) // 7 + 1, self.isoweekday())
+
+    def replace(self, year: int? = null, month: int? = null, day: int? = null) -> date:
+        y, m, d = _civil_from_days(self._days)
+        return date(year ?? y, month ?? m, day ?? d)
+
+    def isoformat(self) -> str:
+        y, m, d = _civil_from_days(self._days)
+        return f"{y:04d}-{m:02d}-{d:02d}"
+
+    def strftime(self, fmt: str) -> str:
+        return _format(self._days * _US_PER_DAY, fmt)
+
+    def __add__(self, t: timedelta) -> date:
+        d = _date(self._days + t.days)
+        _check_range(d._days)
+        return d
+    def __sub__(self, t: timedelta) -> date:
+        d = _date(self._days - t.days)
+        _check_range(d._days)
+        return d
+    # d1 - d2：两个日期相差的天数
+    def __rsub__(self, o: date) -> timedelta:
+        return _td((o._days - self._days) * _US_PER_DAY)
+    def __lt__(self, o: date) -> bool:
+        return self._days < o._days
+
+    def __str__(self) -> str:
+        return self.isoformat()
+    def __repr__(self) -> str:
+        y, m, d = _civil_from_days(self._days)
+        return f"datetime.date({y}, {m}, {d})"
+
+def _date(days: int) -> date:
+    d = date(1970, 1, 1)
+    d._days = days
+    return d
+
+# ISO 年份第一周的星期一（包含 1 月 4 日的那一周）
+def _iso_week1(y: int) -> int:
+    jan4 = _days_from_civil(y, 1, 4)
+    return jan4 - (jan4 + 3) % 7
+
+# ===== datetime =====
+
+struct datetime:
+    _us: int            # 距 1970-01-01 00:00 的微秒数
+
+    def __init__(self, year: int, month: int, day: int, hour: int = 0, minute: int = 0, second: int = 0, microsecond: int = 0):
+        _check_date(year, month, day)
+        _check_time(hour, minute, second, microsecond)
+        self._us = _days_from_civil(year, month, day) * _US_PER_DAY + ((hour * 60 + minute) * 60 + second) * _US_PER_SEC + microsecond
+
+    static def now() -> datetime:
+        return _dt(_now_us())
+    static def today() -> datetime:
+        return _dt(_now_us())
+    static def utcnow() -> datetime:
+        return _dt(_utcnow_us())
+    static def fromtimestamp(ts: float) -> datetime:
+        return _dt(_from_ts(ts))
+    static def combine(d: date, hour: int = 0, minute: int = 0, second: int = 0, microsecond: int = 0) -> datetime:
+        return datetime(d.year, d.month, d.day, hour, minute, second, microsecond)
+    static def strptime(s: str, fmt: str) -> datetime:
+        return _dt(_parse(s, fmt))
+
+    # 解析 YYYY-MM-DD、YYYY-MM-DDTHH:MM[:SS[.ffffff]]（也可以用空格代替 T）
+    static def fromisoformat(s: str) -> datetime:
+        text = s.strip()
+        if len(text) == 10:
+            return datetime.combine(date.fromisoformat(text))
+        if len(text) < 16 or (text[10] != 'T' and text[10] != ' '):
+            raise ValueError(f"无效的 ISO 时间：{s!r}")
+        d = date.fromisoformat(text[:10])
+        t = text[11:]
+        frac = 0
+        if "." in t:
+            t, f = t.split(".", 1)
+            if len(f) == 0 or len(f) > 6 or not f.isdigit():
+                raise ValueError(f"无效的 ISO 时间：{s!r}")
+            frac = int(f.ljust(6, "0"))
+        hms = t.split(":")
+        if len(hms) < 2 or len(hms) > 3 or any(len(p) != 2 or not p.isdigit() for p in hms):
+            raise ValueError(f"无效的 ISO 时间：{s!r}")
+        sec = int(hms[2]) if len(hms) == 3 else 0
+        return datetime.combine(d, int(hms[0]), int(hms[1]), sec, frac)
+
+    prop year -> int => _civil_from_days(self._us // _US_PER_DAY)[0]
+    prop month -> int => _civil_from_days(self._us // _US_PER_DAY)[1]
+    prop day -> int => _civil_from_days(self._us // _US_PER_DAY)[2]
+    prop hour -> int => self._us % _US_PER_DAY // (3600 * _US_PER_SEC)
+    prop minute -> int => self._us % (3600 * _US_PER_SEC) // (60 * _US_PER_SEC)
+    prop second -> int => self._us % (60 * _US_PER_SEC) // _US_PER_SEC
+    prop microsecond -> int => self._us % _US_PER_SEC
+
+    def date(self) -> date:
+        return _date(self._us // _US_PER_DAY)
+    def timestamp(self) -> float:
+        return _to_ts(self._us)
+    def weekday(self) -> int:
+        return self.date().weekday()
+    def isoweekday(self) -> int:
+        return self.date().isoweekday()
+    def isocalendar(self) -> (int, int, int):
+        return self.date().isocalendar()
+    def toordinal(self) -> int:
+        return self.date().toordinal()
+
+    def replace(self, year: int? = null, month: int? = null, day: int? = null, hour: int? = null, minute: int? = null, second: int? = null, microsecond: int? = null) -> datetime:
+        return datetime(year ?? self.year, month ?? self.month, day ?? self.day, hour ?? self.hour, minute ?? self.minute, second ?? self.second, microsecond ?? self.microsecond)
+
+    def isoformat(self, sep: char = 'T') -> str:
+        s = self.date().isoformat() + str(sep) + f"{self.hour:02d}:{self.minute:02d}:{self.second:02d}"
+        if self.microsecond != 0:
+            s += f".{self.microsecond:06d}"
+        return s
+
+    def strftime(self, fmt: str) -> str:
+        return _format(self._us, fmt)
+
+    def __add__(self, t: timedelta) -> datetime:
+        r = _dt(self._us + t._us)
+        _check_range(r._us // _US_PER_DAY)
+        return r
+    def __sub__(self, t: timedelta) -> datetime:
+        r = _dt(self._us - t._us)
+        _check_range(r._us // _US_PER_DAY)
+        return r
+    # dt1 - dt2：两个时间之间的间隔
+    def __rsub__(self, o: datetime) -> timedelta:
+        return _td(o._us - self._us)
+    def __lt__(self, o: datetime) -> bool:
+        return self._us < o._us
+
+    def __str__(self) -> str:
+        return self.isoformat(' ')
+    def __repr__(self) -> str:
+        s = f"datetime.datetime({self.year}, {self.month}, {self.day}, {self.hour}, {self.minute}"
+        if self.second != 0 or self.microsecond != 0:
+            s += f", {self.second}"
+        if self.microsecond != 0:
+            s += f", {self.microsecond}"
+        return s + ")"
+
+def _dt(us: int) -> datetime:
+    d = datetime(1970, 1, 1)
+    d._us = us
+    return d

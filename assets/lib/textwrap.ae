@@ -1,0 +1,77 @@
+# textwrap 模块：文本换行与缩进（用纯五行代码编写）
+# 宽度按字符计算；不含空格的长段落（例如中文）按宽度硬切分。
+
+# 把文本拆成每行不超过 width 个字符的行（连续的空白合并为一个空格）
+def wrap(text: str, width: int = 70) -> list[str]:
+    if width <= 0:
+        raise ValueError(f"width 必须大于 0，得到 {width}")
+    lines: list[str] = []
+    cur = ""
+    for word in text.split():
+        # 比一整行还长的单词切成几段
+        while len(word) > width:
+            if cur != "":
+                lines.append(cur)
+                cur = ""
+            lines.append(word[:width])
+            word = word[width:]
+        if word == "":
+            continue
+        if cur == "":
+            cur = word
+        elif len(cur) + 1 + len(word) <= width:
+            cur += " " + word
+        else:
+            lines.append(cur)
+            cur = word
+    if cur != "":
+        lines.append(cur)
+    return lines
+
+# 与 wrap 相同，但返回用换行符连接的字符串
+def fill(text: str, width: int = 70) -> str:
+    return "\n".join(wrap(text, width))
+
+# 把文本压缩为一行，超过 width 时截断并加上 placeholder
+def shorten(text: str, width: int, placeholder: str = " [...]") -> str:
+    one = " ".join(text.split())
+    if len(one) <= width:
+        return one
+    keep = width - len(placeholder)
+    if keep < 0:
+        raise ValueError("placeholder 太长")
+    out = ""
+    for word in one.split():
+        cand = word if out == "" else out + " " + word
+        if len(cand) > keep:
+            break
+        out = cand
+    return out + placeholder if out != "" else placeholder.lstrip()
+
+# 去掉所有行共同的前导空白（空白行不参与计算）
+def dedent(text: str) -> str:
+    lines = text.split("\n")
+    prefix: str? = null
+    for line in lines:
+        if line.strip() == "":
+            continue
+        ws = line[:len(line) - len(line.lstrip())]
+        if prefix == null:
+            prefix = ws
+        else:
+            p = prefix
+            i = 0
+            while i < len(p) and i < len(ws) and p[i] == ws[i]:
+                i += 1
+            prefix = p[:i]
+    if prefix == null or prefix == "":
+        return "\n".join(line if line.strip() != "" else "" for line in lines)
+    n = len(prefix)
+    return "\n".join(line[n:] if line.strip() != "" else "" for line in lines)
+
+# 给每个非空白行加上前缀
+def indent(text: str, prefix: str) -> str:
+    out: list[str] = []
+    for line in text.split("\n"):
+        out.append(prefix + line if line.strip() != "" else line)
+    return "\n".join(out)

@@ -697,7 +697,12 @@ func (c *Checker) inferElems(elems []Expr, what string, anyCtx ...bool) Type {
 		}
 		j := c.join(et, t)
 		if j == nil && ctx {
-			et = tAny
+			// [["id", "v"], [1, 10]]：元素都是列表字面量时推断为 list[list[any]]
+			if allListLits(elems) {
+				et = &ListT{tAny}
+			} else {
+				et = tAny
+			}
 			continue
 		}
 		if j == nil {
@@ -716,9 +721,28 @@ func (c *Checker) inferElems(elems []Expr, what string, anyCtx ...bool) Type {
 		}
 	}
 	for i := range elems {
+		if ll, ok := elems[i].(*ListLit); ok {
+			if lt, ok := et.(*ListT); ok && isAny(lt.Elem) && !identical(types[i], et) {
+				// 新建的列表字面量可以直接改为 list[any]
+				for j := range ll.Elems {
+					c.convert(&ll.Elems[j], ll.Elems[j].Typ(), tAny, what)
+				}
+				ll.T = et
+				continue
+			}
+		}
 		c.convert(&elems[i], types[i], et, what)
 	}
 	return et
+}
+
+func allListLits(elems []Expr) bool {
+	for _, e := range elems {
+		if _, ok := e.(*ListLit); !ok {
+			return false
+		}
+	}
+	return len(elems) > 0
 }
 
 func (c *Checker) listLit(e *ListLit, want Type) Type {

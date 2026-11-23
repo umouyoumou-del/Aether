@@ -1,0 +1,16 @@
+# string 模块：常用字符集合与辅助函数（用纯五行代码编写）
+
+const ascii_lowercase = "abcdefghijklmnopqrstuvwxyz"
+const ascii_uppercase = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+const ascii_letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+const digits = "0123456789"
+const hexdigits = "0123456789abcdefABCDEF"
+const octdigits = "01234567"
+const punctuation = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
+const whitespace = " \t\n\r\v\f"
+const printable = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~ \t\n\r\v\f"
+
+# 按空白分割、每个单词首字母大写后用 sep 连接
+def capwords(s: str, sep: str? = null) -> str:
+    words = s.split(sep)
+    return (sep ?? " ").join(w.capitalize() for w in words)

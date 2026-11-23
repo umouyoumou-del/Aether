@@ -39,7 +39,51 @@ func FormatTime(ts float64, layout string) string {
 
 func NowStr(layout string) string { return strftime(time.Now(), layout) }
 
-func strftime(t time.Time, layout string) string {
+// ===== datetime 模块的辅助函数 =====
+// datetime 表示不带时区的“墙上时间”（与 Python 的 naive datetime 相同）：
+// 内部是按 UTC 解释的、距 1970-01-01 00:00 的微秒数，运算时不受夏令时影响。
+
+func naiveUs(t time.Time) int {
+	y, mo, d := t.Date()
+	h, mi, sec := t.Clock()
+	return int(time.Date(y, mo, d, h, mi, sec, t.Nanosecond(), time.UTC).UnixMicro())
+}
+
+// NaiveNowUs 返回当前的本地墙上时间。
+func NaiveNowUs() int { return naiveUs(time.Now()) }
+
+// NaiveUTCNowUs 返回当前的 UTC 时间。
+func NaiveUTCNowUs() int { return int(time.Now().UTC().UnixMicro()) }
+
+// NaiveFromTimestamp 把时间戳转换为本地墙上时间。
+func NaiveFromTimestamp(ts float64) int {
+	return naiveUs(time.UnixMicro(int64(math.Round(ts * 1e6))))
+}
+
+// NaiveToTimestamp 把本地墙上时间转换为时间戳。
+func NaiveToTimestamp(us int) float64 {
+	t := time.UnixMicro(int64(us)).UTC()
+	local := time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), time.Local)
+	return float64(local.UnixMicro()) / 1e6
+}
+
+// NaiveFormat 按 strftime 风格的格式格式化墙上时间（%z、%Z 为空，与 Python 的 naive datetime 相同）。
+func NaiveFormat(us int, layout string) string {
+	return strftimeIn(time.UnixMicro(int64(us)).UTC(), layout, true)
+}
+
+// NaiveParse 按 strftime 风格的格式解析墙上时间。
+func NaiveParse(s, layout string) int {
+	t, err := time.ParseInLocation(goLayout(layout), s, time.UTC)
+	if err != nil {
+		Raise("ValueError", "时间 %s 与格式 %s 不匹配", QuoteStr(s), QuoteStr(layout))
+	}
+	return int(t.UnixMicro())
+}
+
+func strftime(t time.Time, layout string) string { return strftimeIn(t, layout, false) }
+
+func strftimeIn(t time.Time, layout string, naive bool) string {
 	var out []byte
 	for i := 0; i < len(layout); i++ {
 		c := layout[i]
@@ -72,7 +116,7 @@ func strftime(t time.Time, layout string) string {
 		case 'A':
 			out = t.AppendFormat(out, "Monday")
 		case 'f':
-			out = t.AppendFormat(out, "000000")
+			out = append(out, []byte(Fmt(t.Nanosecond()/1000, "06d"))...)
 		case 'j':
 			out = append(out, []byte(Fmt(t.YearDay(), "03d"))...)
 		case 'p':
@@ -80,9 +124,13 @@ func strftime(t time.Time, layout string) string {
 		case 'I':
 			out = t.AppendFormat(out, "03")
 		case 'z':
-			out = t.AppendFormat(out, "-0700")
+			if !naive {
+				out = t.AppendFormat(out, "-0700")
+			}
 		case 'Z':
-			out = t.AppendFormat(out, "MST")
+			if !naive {
+				out = t.AppendFormat(out, "MST")
+			}
 		case '%':
 			out = append(out, '%')
 		default:
@@ -92,22 +140,33 @@ func strftime(t time.Time, layout string) string {
 	return string(out)
 }
 
-// ParseTime 解析 strftime 风格的时间字符串，返回时间戳。
-func ParseTime(s, layout string) float64 {
-	repl := map[byte]string{'Y': "2006", 'm': "01", 'd': "02", 'H': "15", 'M': "04", 'S': "05", 'y': "06", 'b': "Jan", 'B': "January", 'z': "-0700"}
-	var goLayout []byte
+// goLayout 把 strftime 风格的格式转换为 Go 的时间格式。
+func goLayout(layout string) string {
+	repl := map[byte]string{'Y': "2006", 'm': "01", 'd': "02", 'H': "15", 'M': "04", 'S': "05", 'y': "06",
+		'b': "Jan", 'B': "January", 'a': "Mon", 'A': "Monday", 'f': "000000", 'p': "PM", 'I': "03", 'j': "002", 'z': "-0700"}
+	var out []byte
 	for i := 0; i < len(layout); i++ {
 		c := layout[i]
 		if c == '%' && i+1 < len(layout) {
+			if layout[i+1] == '%' {
+				out = append(out, '%')
+				i++
+				continue
+			}
 			if r, ok := repl[layout[i+1]]; ok {
-				goLayout = append(goLayout, r...)
+				out = append(out, r...)
 				i++
 				continue
 			}
 		}
-		goLayout = append(goLayout, c)
+		out = append(out, c)
 	}
-	t, err := time.ParseInLocation(string(goLayout), s, time.Local)
+	return string(out)
+}
+
+// ParseTime 解析 strftime 风格的时间字符串，返回时间戳。
+func ParseTime(s, layout string) float64 {
+	t, err := time.ParseInLocation(goLayout(layout), s, time.Local)
 	if err != nil {
 		Raise("ValueError", "无法按 %s 解析时间 %s", QuoteStr(layout), QuoteStr(s))
 	}

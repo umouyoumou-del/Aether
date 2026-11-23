@@ -1,0 +1,12 @@
+# base64 模块：Base64 / Base16 编码
+# 与 Python 不同：参数和结果都是 str（按 UTF-8 编码）；处理二进制数据请用 encode_bytes / decode_bytes。
+# 解码失败抛出 ValueError。
+
+@go("rtenc.B64Encode") def b64encode(s: str) -> str
+@go("rtenc.B64Decode") def b64decode(s: str) -> str
+@go("rtenc.B64URLEncode") def urlsafe_b64encode(s: str) -> str
+@go("rtenc.B64URLDecode") def urlsafe_b64decode(s: str) -> str
+@go("rtenc.B64EncodeBytes") def encode_bytes(data: list[u8]) -> str
+@go("rtenc.B64DecodeBytes") def decode_bytes(s: str) -> list[u8]
+@go("rtenc.B16Encode") def b16encode(s: str) -> str
+@go("rtenc.B16Decode") def b16decode(s: str) -> str
