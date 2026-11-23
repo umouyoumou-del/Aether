@@ -1693,7 +1693,7 @@ func (p *parser) bitAnd() Expr { return p.binLevel(p.shift, TAmp) }
 func (p *parser) shift() Expr  { return p.binLevel(p.arith, TShl, TShr) }
 func (p *parser) arith() Expr  { return p.binLevel(p.term, TPlus, TMinus) }
 func (p *parser) term() Expr {
-	return p.binLevel(p.castExpr, TStar, TSlash, TDSlash, TPercent)
+	return p.binLevel(p.castExpr, TStar, TSlash, TDSlash, TPercent, TAt)
 }
 
 func (p *parser) castExpr() Expr {

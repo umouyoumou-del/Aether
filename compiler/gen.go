@@ -338,7 +338,14 @@ func (g *Gen) assignNames() {
 				f.Sym.GoName = f.GoName
 			}
 		}
+		ovIndex := map[string]int{}
 		for _, m := range td.MethodList {
+			if td.Overloads[m.Name] != nil && td.Methods[m.Name] != m {
+				// 运算符方法的重载：Go 方法名加上序号
+				ovIndex[m.Name]++
+				m.GoName = memberName(m.Name) + "ꞏ" + strconv.Itoa(ovIndex[m.Name])
+				continue
+			}
 			switch {
 			case m.Static:
 				m.GoName = g.alloc(td.GoName + "ꞏ" + m.Name)

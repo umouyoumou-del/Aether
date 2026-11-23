@@ -184,6 +184,10 @@ func (c *Checker) callValueOf(e *Call, sym *Symbol, ft Type, want Type) Type {
 		}
 		e.Kind = CallValue
 		return c.callFuncValue(e, f, want)
+	case *NamedT:
+		if t, ok := c.callDunder(e, e.Fn, f, want); ok {
+			return t
+		}
 	case *OptT:
 		if _, ok := f.Elem.(*FuncT); ok {
 			d := c.errorf(e.Pos, "函数值可能为 null，不能直接调用")
@@ -195,6 +199,28 @@ func (c *Checker) callValueOf(e *Call, sym *Symbol, ft Type, want Type) Type {
 	c.errorf(e.Pos, "%s 不能被调用", ft)
 	c.checkArgsQuiet(e)
 	return tInvalid
+}
+
+// callDunder 处理 obj(...)：obj 的类型定义了 __call__ 时调用它。recv 是 obj 的表达式。
+func (c *Checker) callDunder(e *Call, recv Expr, t Type, want Type) (Type, bool) {
+	nt, ok := t.(*NamedT)
+	if !ok {
+		return nil, false
+	}
+	mem, _, m := c.findMember(nt, "__call__")
+	mt, ok := mem.(*Method)
+	if !ok || mt.Static {
+		return nil, false
+	}
+	e.Kind = CallMethod
+	e.Method = mt
+	e.Recv = recv
+	e.Sig = mt.Sig
+	e.ViaCall = true
+	if nt.D.Kind == DStruct {
+		c.structCalls = append(c.structCalls, structCall{recv: recv, method: mt, pos: e.Pos})
+	}
+	return c.checkCall(e, mt.Sig, m, mt.Sig.TParams, nil, want), true
 }
 
 func (c *Checker) checkArgsQuiet(e *Call) {
@@ -642,6 +668,9 @@ func (c *Checker) methodCall0(e *Call, fn *Attr, rt Type, want Type) Type {
 					e.Kind = CallValue
 					return c.callFuncValue(e, f, want)
 				}
+				if t, ok := c.callDunder(e, fn, ft, want); ok {
+					return t
+				}
 				c.errorf(fn.Pos, "字段 %s 的类型是 %s，不能调用", fn.Name, ft)
 				c.checkArgsQuiet(e)
 				return tInvalid
@@ -652,6 +681,9 @@ func (c *Checker) methodCall0(e *Call, fn *Attr, rt Type, want Type) Type {
 				if f, ok := pt.(*FuncT); ok {
 					e.Kind = CallValue
 					return c.callFuncValue(e, f, want)
+				}
+				if t, ok := c.callDunder(e, fn, pt, want); ok {
+					return t
 				}
 				c.errorf(fn.Pos, "属性 %s 不是方法，不能调用（去掉括号即可访问）", fn.Name)
 				c.checkArgsQuiet(e)

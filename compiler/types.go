@@ -348,6 +348,7 @@ type TypeDecl struct {
 	Statics    map[string]*Field
 	Methods    map[string]*Method
 	MethodList []*Method
+	Overloads  map[string][]*Method // 运算符方法按参数类型的其它重载（第一个在 Methods 中）
 	Props      map[string]*Prop
 	PropList   []*Prop
 	Variants   []*Variant

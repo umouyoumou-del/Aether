@@ -1,0 +1,45 @@
+# 运算符方法按参数类型重载、@（__matmul__）、可调用对象（__call__）
+struct Vec:
+    x: float
+    y: float
+    def __add__(self, o: Vec) -> Vec:
+        return Vec(self.x + o.x, self.y + o.y)
+    def __mul__(self, o: Vec) -> float:
+        return self.x * o.x + self.y * o.y
+    def __mul__(self, k: float) -> Vec:
+        return Vec(self.x * k, self.y * k)
+    def __rmul__(self, k: float) -> Vec:
+        return Vec(self.x * k, self.y * k)
+    def __matmul__(self, o: Vec) -> float:
+        return self.x * o.y - self.y * o.x
+
+a = Vec(1.0, 2.0)
+b = Vec(3.0, 4.0)
+print(a + b, a * b, a * 2, 3 * a, a * 0.5, a @ b)
+c = a
+c *= 10.0
+print(c)
+
+class Adder:
+    base: int
+    def __call__(self, x: int) -> int:
+        return self.base + x
+
+class Pipeline:
+    first: Adder
+    second: Adder
+    def run(self, x: int) -> int:
+        return self.second(self.first(x))
+
+add5 = Adder(5)
+print(add5(10), Pipeline(Adder(1), Adder(100)).run(1), [add5(i) for i in range(3)])
+fs: list[Adder] = [Adder(1), Adder(2)]
+print(fs[1](40))
+
+class Mat:
+    v: float
+    def __matmul__(self, o: Mat) -> Mat:
+        return Mat(self.v * o.v)
+    def __str__(self) -> str:
+        return f"Mat({self.v})"
+print(Mat(2.0) @ Mat(3.0) @ Mat(4.0))

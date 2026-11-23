@@ -735,6 +735,30 @@ func (c *Checker) resolveClassMembers(td *TypeDecl) {
 		td.FieldMap[f.Name] = f
 	}
 	for _, fd := range cd.Methods {
+		if first := td.Methods[fd.Name]; first != nil && overloadableOps[fd.Name] {
+			// 运算符方法可以按参数类型重载：Vec * Vec 与 Vec * float
+			m := c.resolveMethod(td, fd, sc)
+			if td.Kind == DClass && (len(td.Subs) > 0 || td.Abstract || td.Base != nil) {
+				c.errorf(fd.NamePos, "只有结构体、外部类型和不参与继承的类可以按参数类型重载运算符方法 %s", fd.Name)
+				continue
+			}
+			clash := false
+			for _, o := range append([]*Method{first}, td.Overloads[fd.Name]...) {
+				if len(o.Sig.Params) == 1 && len(m.Sig.Params) == 1 && identical(o.Sig.Params[0].T, m.Sig.Params[0].T) {
+					clash = true
+				}
+			}
+			if clash || len(m.Sig.Params) != 1 {
+				c.errorf(fd.NamePos, "运算符方法 %s 的各个重载需要不同的参数类型", fd.Name)
+				continue
+			}
+			if td.Overloads == nil {
+				td.Overloads = map[string][]*Method{}
+			}
+			td.Overloads[fd.Name] = append(td.Overloads[fd.Name], m)
+			td.MethodList = append(td.MethodList, m)
+			continue
+		}
 		if dup(fd.Name, fd.NamePos) {
 			continue
 		}
@@ -750,6 +774,14 @@ func (c *Checker) resolveClassMembers(td *TypeDecl) {
 		td.Props[p.Name] = p
 		td.PropList = append(td.PropList, p)
 	}
+}
+
+// overloadableOps 是可以按参数类型重载的运算符方法。
+var overloadableOps = map[string]bool{
+	"__add__": true, "__sub__": true, "__mul__": true, "__truediv__": true, "__floordiv__": true, "__mod__": true,
+	"__pow__": true, "__matmul__": true, "__and__": true, "__or__": true, "__xor__": true, "__lshift__": true, "__rshift__": true,
+	"__radd__": true, "__rsub__": true, "__rmul__": true, "__rtruediv__": true, "__rfloordiv__": true, "__rmod__": true,
+	"__rpow__": true, "__rmatmul__": true,
 }
 
 func (c *Checker) resolveProp(td *TypeDecl, x *ExtBlock, pd *PropDecl, sc *Scope) *Prop {
@@ -941,9 +973,11 @@ func (c *Checker) checkDunder(td *TypeDecl, m *Method) {
 	case "__eq__", "__ne__", "__lt__", "__le__", "__gt__", "__ge__", "__contains__":
 		want, ret = 1, tBool
 	case "__add__", "__sub__", "__mul__", "__truediv__", "__floordiv__", "__mod__", "__pow__",
-		"__radd__", "__rsub__", "__rmul__", "__rtruediv__", "__rfloordiv__", "__rmod__",
-		"__and__", "__or__", "__xor__", "__lshift__", "__rshift__":
+		"__radd__", "__rsub__", "__rmul__", "__rtruediv__", "__rfloordiv__", "__rmod__", "__rpow__",
+		"__and__", "__or__", "__xor__", "__lshift__", "__rshift__", "__matmul__", "__rmatmul__":
 		want = 1
+	case "__call__":
+		return
 	case "__neg__", "__pos__", "__invert__", "__enter__", "__exit__", "__iter__", "__hash__", "__bool__":
 		want = 0
 		if m.Name == "__bool__" {
@@ -956,7 +990,7 @@ func (c *Checker) checkDunder(td *TypeDecl, m *Method) {
 		want = 1
 	case "__setitem__":
 		want, ret = 2, tVoid
-	case "__call__", "__del__", "__getattr__", "__setattr__", "__new__", "__format__":
+	case "__del__", "__getattr__", "__setattr__", "__new__", "__format__":
 		c.errorf(m.Pos, "Aether 不支持特殊方法 %s", m.Name)
 		return
 	default:

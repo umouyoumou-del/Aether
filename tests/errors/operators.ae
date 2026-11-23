@@ -1,0 +1,24 @@
+struct V:
+    x: float
+    def __mul__(self, o: V) -> V:
+        return V(self.x * o.x)
+    def __mul__(self, o: V) -> V:          # 错误: 需要不同的参数类型
+        return V(self.x)
+
+class Base:
+    x: float
+    def __add__(self, o: Base) -> Base:
+        return self
+    def __add__(self, k: float) -> Base:   # 错误: 不参与继承的类
+        return self
+
+class Sub(Base):
+    pass
+
+class NotCallable:
+    x: int
+
+n = NotCallable(1)
+print(n(3))                                # 错误: 不能被调用
+print(1 @ 2)                               # 错误: 运算符 @ 不能用于
+print(V(1.0) * "s")                        # 错误: 运算符 * 不能用于

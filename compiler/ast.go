@@ -218,6 +218,7 @@ type Call struct {
 	ConvTo   Type
 	Extra    any
 	Subst    Subst // 调用时的类型代换（含接收者的类型实参）
+	ViaCall  bool  // obj(...) 调用的是 obj.__call__(...)（Recv 是 obj）
 }
 
 type Index struct {

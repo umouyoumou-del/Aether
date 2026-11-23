@@ -331,10 +331,11 @@ func (g *Gen) genClassMethods(td *TypeDecl) {
 			if m.Static || len(m.Sig.TParams) > 0 || m.Name == "__init__" {
 				continue
 			}
-			if seen[m.Name] {
+			// 子类的同名方法覆盖基类的（运算符方法的重载有各自的 Go 名字）
+			if seen[m.GoName] {
 				continue
 			}
-			seen[m.Name] = true
+			seen[m.GoName] = true
 			if m.Name == "__str__" {
 				hasStr = true
 			}

@@ -1143,8 +1143,56 @@ func dunderFor(op TokKind) string {
 		return "lshift"
 	case TShr:
 		return "rshift"
+	case TAt:
+		return "matmul"
 	}
 	return ""
+}
+
+// opCand 是一个运算符方法候选（签名已代入类型实参）。
+type opCand struct {
+	m   *Method
+	sig *FuncSig
+}
+
+// operatorMethods 返回类型 t 上名为 name 的运算符方法及其按参数类型的重载。
+func (c *Checker) operatorMethods(t Type, name string) []opCand {
+	m, sig := c.operatorMethod(t, name)
+	if m == nil {
+		return nil
+	}
+	out := []opCand{{m, sig}}
+	if m.Owner != nil && len(m.Owner.Overloads[name]) > 0 {
+		var sub Subst
+		if nt, ok := t.(*NamedT); ok {
+			for _, anc := range supertypes(nt) {
+				if anc.D == m.Owner {
+					sub = makeSubst(anc.D.TParams, anc.Args)
+				}
+			}
+		}
+		for _, o := range m.Owner.Overloads[name] {
+			out = append(out, opCand{o, substSig(o.Sig, sub)})
+		}
+	}
+	return out
+}
+
+// pickOperator 从候选中选出参数类型与 argT 一致的运算符方法；没有时选能隐式转换的第一个。
+func (c *Checker) pickOperator(cands []opCand, argT Type) (*Method, *FuncSig) {
+	for _, cd := range cands {
+		if len(cd.sig.Params) == 1 && identical(cd.sig.Params[0].T, argT) {
+			return cd.m, cd.sig
+		}
+	}
+	for _, cd := range cands {
+		if len(cd.sig.Params) == 1 {
+			if _, ok := c.assignable(argT, cd.sig.Params[0].T); ok {
+				return cd.m, cd.sig
+			}
+		}
+	}
+	return nil, nil
 }
 
 // operatorMethod 在类型 t 上查找运算符方法 __name__，并检查参数是否接受 argT。
@@ -1280,20 +1328,16 @@ func (c *Checker) binary(e *Binary, want Type) Type {
 	}
 	// 运算符重载
 	if name := dunderFor(e.Op); name != "" {
-		if m, sig := c.operatorMethod(xt, "__"+name+"__"); m != nil {
-			if _, ok := c.assignable(yt, sig.Params[0].T); ok {
-				e.Op2 = m
-				c.convert(&e.Y, yt, sig.Params[0].T, "运算符参数")
-				return sig.Ret
-			}
+		if m, sig := c.pickOperator(c.operatorMethods(xt, "__"+name+"__"), yt); m != nil {
+			e.Op2 = m
+			c.convert(&e.Y, yt, sig.Params[0].T, "运算符参数")
+			return sig.Ret
 		}
-		if m, sig := c.operatorMethod(yt, "__r"+name+"__"); m != nil {
-			if _, ok := c.assignable(xt, sig.Params[0].T); ok {
-				e.Op2 = m
-				e.Rev = true
-				c.convert(&e.X, xt, sig.Params[0].T, "运算符参数")
-				return sig.Ret
-			}
+		if m, sig := c.pickOperator(c.operatorMethods(yt, "__r"+name+"__"), xt); m != nil {
+			e.Op2 = m
+			e.Rev = true
+			c.convert(&e.X, xt, sig.Params[0].T, "运算符参数")
+			return sig.Ret
 		}
 	}
 	switch e.Op {
@@ -1369,6 +1413,10 @@ func (c *Checker) binary(e *Binary, want Type) Type {
 			}
 			return xt
 		}
+	}
+	if e.Op == TAt {
+		c.errorf(e.Pos, "运算符 @ 不能用于 %s 和 %s（@ 是矩阵乘法，需要类型定义 __matmul__）", xt, yt)
+		return tInvalid
 	}
 	// 数值运算
 	if isNumeric(xt) && isNumeric(yt) {

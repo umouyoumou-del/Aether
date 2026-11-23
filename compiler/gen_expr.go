@@ -1224,6 +1224,14 @@ func (g *Gen) call(e *Call) string {
 		}
 		return fn + "(" + strings.Join(g.argList(e), ", ") + ")"
 	case CallMethod, CallExt:
+		if e.ViaCall {
+			// obj(...) → obj.__call__(...)
+			rc := g.expr(e.Recv)
+			if e.Method != nil && e.Method.Mutating {
+				rc = g.addrExpr(e.Recv)
+			}
+			return g.methodOn(e.Recv, e.Method, rc, g.argList(e), e.TArgs)
+		}
 		fa, _ := unwrapTypeAppX(e.Fn).(*Attr)
 		if fa != nil && fa.Safe {
 			memberT := optElem(e.T)
