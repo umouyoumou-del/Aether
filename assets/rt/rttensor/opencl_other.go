@@ -13,7 +13,8 @@ var (
 	clGetPlatformIDs, clGetDeviceIDs, clGetDeviceInfo, clCreateContext, clCreateCommandQueue,
 	clCreateProgramWithSource, clBuildProgram, clGetProgramBuildInfo, clCreateKernel, clCreateBuffer,
 	clReleaseMemObject, clSetKernelArg, clEnqueueNDRangeKernel, clEnqueueReadBuffer,
-	clEnqueueWriteBuffer, clFinish, clGetKernelWorkGroupInfo *clProc
+	clEnqueueWriteBuffer, clFinish, clGetKernelWorkGroupInfo, clWaitForEvents, clGetEventProfilingInfo,
+	clReleaseEvent *clProc
 )
 
 func clAvailable() error {

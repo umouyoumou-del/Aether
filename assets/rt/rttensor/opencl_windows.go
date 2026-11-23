@@ -40,6 +40,9 @@ var (
 	clEnqueueWriteBuffer      = clDLL.NewProc("clEnqueueWriteBuffer")
 	clFinish                  = clDLL.NewProc("clFinish")
 	clGetKernelWorkGroupInfo  = clDLL.NewProc("clGetKernelWorkGroupInfo")
+	clWaitForEvents           = clDLL.NewProc("clWaitForEvents")
+	clGetEventProfilingInfo   = clDLL.NewProc("clGetEventProfilingInfo")
+	clReleaseEvent            = clDLL.NewProc("clReleaseEvent")
 )
 
 func clAvailable() error { return clDLL.Load() }

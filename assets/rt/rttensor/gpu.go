@@ -28,6 +28,10 @@ type gpuBackend struct {
 	kernels map[string]clKernel
 	info    string
 
+	// 环境变量 AETHER_GPU_PROFILE=1 时记录每个内核的运行时间（会让 GPU 串行执行，只用于分析性能）
+	profiling bool
+	profile   map[string]*kernelStat
+
 	// 显存池：张量被垃圾回收时（终结器）把显存块放回池中，之后分配同样大小的块时直接复用。
 	// Go 的垃圾回收器看不到显存的占用，所以自上次回收以来分配的显存累计超过 gcBudget 时
 	// 主动触发一次回收：显存占用不超过“仍在使用的张量 + gcBudget”左右。
@@ -206,7 +210,12 @@ func initGPU() (*gpuBackend, error) {
 	if errc != 0 {
 		return nil, fmt.Errorf("创建 OpenCL 上下文失败（错误码 %d）", errc)
 	}
-	g.queue, errc = clCallPtr(clCreateCommandQueue, g.ctx, g.device, 0)
+	var queueProps uintptr
+	if os.Getenv("AETHER_GPU_PROFILE") == "1" {
+		g.profiling, g.profile = true, map[string]*kernelStat{}
+		queueProps = 1 << 1 // CL_QUEUE_PROFILING_ENABLE
+	}
+	g.queue, errc = clCallPtr(clCreateCommandQueue, g.ctx, g.device, queueProps)
 	if errc != 0 {
 		return nil, fmt.Errorf("创建 OpenCL 命令队列失败（错误码 %d）", errc)
 	}
@@ -476,10 +485,73 @@ func (g *gpuBackend) launch(name string, global, localSize []int, args ...any) {
 			ls[i] = uintptr(n)
 		}
 	}
+	if g.profiling {
+		g.launchProfiled(name, k, len(global), gs, ls)
+		runtime.KeepAlive(args)
+		return
+	}
 	r := clCall(clEnqueueNDRangeKernel, g.queue, k, uintptr(len(global)), 0, uintptr(unsafe.Pointer(&gs[0])), uintptr(unsafe.Pointer(&ls[0])), 0, 0, 0)
 	// 内核排队之后才能让参数中的张量被回收（之后复用这块显存的命令一定排在它后面）
 	runtime.KeepAlive(args)
 	g.check(r, "运行内核 "+name)
+}
+
+type kernelStat struct {
+	calls int
+	nanos uint64
+}
+
+// launchProfiled 提交内核并等待它完成，记录 GPU 上的运行时间（调用者持有 g.mu）。
+func (g *gpuBackend) launchProfiled(name string, k uintptr, dims int, gs, ls []uintptr) {
+	ev := new(uintptr)
+	r := clCall(clEnqueueNDRangeKernel, g.queue, k, uintptr(dims), 0, uintptr(unsafe.Pointer(&gs[0])), uintptr(unsafe.Pointer(&ls[0])), 0, 0, uintptr(unsafe.Pointer(ev)))
+	g.check(r, "运行内核 "+name)
+	clCall(clWaitForEvents, 1, uintptr(unsafe.Pointer(ev)))
+	times := make([]uint64, 2)
+	clCall(clGetEventProfilingInfo, *ev, 0x1282, 8, uintptr(unsafe.Pointer(&times[0])), 0) // CL_PROFILING_COMMAND_START
+	clCall(clGetEventProfilingInfo, *ev, 0x1283, 8, uintptr(unsafe.Pointer(&times[1])), 0) // CL_PROFILING_COMMAND_END
+	clCall(clReleaseEvent, *ev)
+	st := g.profile[name]
+	if st == nil {
+		st = &kernelStat{}
+		g.profile[name] = st
+	}
+	st.calls++
+	if times[1] > times[0] {
+		st.nanos += times[1] - times[0]
+	}
+}
+
+// GpuProfile 返回各个 GPU 内核的调用次数与总运行时间（需要设置环境变量 AETHER_GPU_PROFILE=1）。
+func GpuProfile() string {
+	g := gpuInst
+	if g == nil || !g.profiling {
+		return "没有性能数据：请设置环境变量 AETHER_GPU_PROFILE=1 后再运行程序（并使用 GPU）"
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	type row struct {
+		name string
+		st   *kernelStat
+	}
+	var rows []row
+	var total uint64
+	for name, st := range g.profile {
+		rows = append(rows, row{name, st})
+		total += st.nanos
+	}
+	for i := 1; i < len(rows); i++ {
+		for j := i; j > 0 && rows[j].st.nanos > rows[j-1].st.nanos; j-- {
+			rows[j], rows[j-1] = rows[j-1], rows[j]
+		}
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "%-18s %8s %10s %7s\n", "内核", "次数", "毫秒", "占比")
+	for _, r := range rows {
+		fmt.Fprintf(&sb, "%-18s %8d %10.1f %6.1f%%\n", r.name, r.st.calls, float64(r.st.nanos)/1e6, 100*float64(r.st.nanos)/float64(max(total, 1)))
+	}
+	fmt.Fprintf(&sb, "合计 %.1f 毫秒", float64(total)/1e6)
+	return sb.String()
 }
 
 func roundUp(n, m int) int { return (n + m - 1) / m * m }
@@ -526,6 +598,21 @@ func (g *gpuBackend) reduce(op int, x, out, idx *storage, outer, dim, inner int)
 		g.launch("reduce_dim", []int{1}, nil, rSum, part, out, part, 1, groups, 1, false)
 		return
 	}
+	if op == rSum && inner == 1 && dim >= 32 && outer > 1 {
+		// 对每一行求和（例如 softmax 的反向）：一个工作组处理一行
+		l := rowGroup(dim)
+		g.launch("reduce_rows", []int{outer * l}, []int{l}, x, out, outer, dim, local(l*4))
+		return
+	}
+	if op == rSum && dim > 1024 && outer*inner < 1<<14 {
+		// 输出很少、每个输出要加很多数：先分段求和（并行度高得多），再把各段的和加起来
+		const chunk = 256
+		chunks := (dim + chunk - 1) / chunk
+		part := g.alloc(outer * chunks * inner)
+		g.launch("reduce_chunks", []int{outer * chunks * inner}, nil, x, part, outer, dim, inner, chunk, chunks)
+		g.launch("reduce_dim", []int{outer * inner}, nil, rSum, part, out, out, outer, chunks, inner, false)
+		return
+	}
 	want := idx != nil
 	if idx == nil {
 		idx = out
@@ -534,6 +621,11 @@ func (g *gpuBackend) reduce(op int, x, out, idx *storage, outer, dim, inner int)
 }
 
 func (g *gpuBackend) matmul(a, b, c *storage, batch, m, k, n int, ta, tb bool, sa, sb int) {
+	if k <= 32 || m <= 32 || n <= 32 {
+		// 小矩阵或很窄的矩阵：分块的内核会浪费大部分工作项
+		g.launch("matmul_small", []int{roundUp(n, 16), roundUp(m, 16), batch}, []int{16, 16, 1}, a, b, c, m, n, k, ta, tb, sa, sb)
+		return
+	}
 	if m >= 128 && n >= 128 && k >= 16 {
 		// 大矩阵：128x128 的输出块
 		global := []int{roundUp(n, 128) / 8, roundUp(m, 128) / 8, batch}
@@ -599,8 +691,32 @@ func (g *gpuBackend) indexSelect(w, idx, out *storage, nidx, rows, cols int) {
 	g.launch("index_select", []int{nidx * cols}, nil, w, idx, out, nidx, rows, cols)
 }
 
+// indexAdd 先在内存中按目标行给梯度行排序（下标张量很小），再由每个工作项求一个输出元素的和。
+// 直接用原子加法时，很多行加到同一个位置（例如位置编码、只有两行的段编码）会严重冲突。
 func (g *gpuBackend) indexAdd(gr, idx, out *storage, nidx, rows, cols int) {
-	g.launch("index_add", []int{nidx * cols}, nil, gr, idx, out, nidx, rows, cols)
+	h := g.download(idx, nidx)
+	offsets := make([]float32, rows+1)
+	for _, v := range h {
+		if r := int(v); r >= 0 && r < rows {
+			offsets[r+1]++
+		}
+	}
+	for r := 0; r < rows; r++ {
+		offsets[r+1] += offsets[r]
+	}
+	next := append([]float32(nil), offsets[:rows]...)
+	order := make([]float32, int(offsets[rows]))
+	for i, v := range h {
+		if r := int(v); r >= 0 && r < rows {
+			order[int(next[r])] = float32(i)
+			next[r]++
+		}
+	}
+	if len(order) == 0 {
+		return
+	}
+	og, oo := g.upload(order), g.upload(offsets)
+	g.launch("index_add_csr", []int{rows * cols}, nil, gr, og, oo, out, rows, cols)
 }
 
 func (g *gpuBackend) pick(x, idx, out *storage, rows, cols int) {

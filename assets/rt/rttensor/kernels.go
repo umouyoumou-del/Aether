@@ -105,20 +105,15 @@ __kernel void binary_same(int op, __global const float* x, __global const float*
     if (i < n) out[i] = binary_f(op, x[i], y[i]);
 }
 
+// 广播：由线性下标求出两个输入中的位置。各维的长度与步长直接取向量的分量（展开写），
+// 不放进私有数组——GPU 上按变量下标访问的私有数组会放到很慢的显存中
+#define BCAST_DIM(c) if (c < nd) { int k = rem % shape.s##c; rem /= shape.s##c; ox += k * sx.s##c; oy += k * sy.s##c; }
 __kernel void binary_bcast(int op, __global const float* x, __global const float* y, __global float* out, int n,
                            int nd, int8 shape, int8 sx, int8 sy) {
     int i = get_global_id(0);
     if (i >= n) return;
-    int dims[8] = {shape.s0, shape.s1, shape.s2, shape.s3, shape.s4, shape.s5, shape.s6, shape.s7};
-    int stx[8] = {sx.s0, sx.s1, sx.s2, sx.s3, sx.s4, sx.s5, sx.s6, sx.s7};
-    int sty[8] = {sy.s0, sy.s1, sy.s2, sy.s3, sy.s4, sy.s5, sy.s6, sy.s7};
     int rem = i, ox = 0, oy = 0;
-    for (int d = nd - 1; d >= 0; d--) {
-        int k = rem % dims[d];
-        rem /= dims[d];
-        ox += k * stx[d];
-        oy += k * sty[d];
-    }
+    BCAST_DIM(7) BCAST_DIM(6) BCAST_DIM(5) BCAST_DIM(4) BCAST_DIM(3) BCAST_DIM(2) BCAST_DIM(1) BCAST_DIM(0)
     out[i] = binary_f(op, x[ox], y[oy]);
 }
 
@@ -159,6 +154,34 @@ __kernel void reduce_dim(int op, __global const float* x, __global float* out, _
         out[t] = best;
         if (want_idx) idx[t] = (float)bi;
     }
+}
+
+// 沿很长的一维求和的第一步：把 dim 分成长度为 chunk 的段，part[o, c, i] = 第 c 段的和
+__kernel void reduce_chunks(__global const float* x, __global float* part, int outer, int dim, int inner, int chunk, int chunks) {
+    int t = get_global_id(0);
+    if (t >= outer * chunks * inner) return;
+    int i = t % inner, c = (t / inner) % chunks, o = t / (inner * chunks);
+    int d0 = c * chunk, d1 = min(d0 + chunk, dim);
+    __global const float* p = x + (o * dim + d0) * inner + i;
+    float s = 0.0f;
+    for (int d = d0; d < d1; d++, p += inner) s += *p;
+    part[t] = s;
+}
+
+// 对每一行（最后一维）求和：每个工作组处理一行，组内的工作项读取相邻的元素
+__kernel void reduce_rows(__global const float* x, __global float* out, int rows, int cols, __local float* tmp) {
+    int r = get_group_id(0), lid = get_local_id(0), lsz = get_local_size(0);
+    if (r >= rows) return;
+    __global const float* row = x + r * cols;
+    float s = 0.0f;
+    for (int j = lid; j < cols; j += lsz) s += row[j];
+    tmp[lid] = s;
+    barrier(CLK_LOCAL_MEM_FENCE);
+    for (int k = lsz / 2; k > 0; k >>= 1) {
+        if (lid < k) tmp[lid] += tmp[lid + k];
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+    if (lid == 0) out[r] = tmp[0];
 }
 
 // 对一大段连续数据求和的第一步：每个工作组得到一个部分和
@@ -225,6 +248,42 @@ void matmul(__global const float* A, __global const float* B, __global float* C,
             if (gn < N) C[gm * N + gn] = acc[i][j];
         }
     }
+}
+
+// 小矩阵或很窄的矩阵（例如注意力中每个头的 [长度, 16] 矩阵）：16x16 的块，每个工作项算一个输出元素。
+// 输入是转置存储时换一种方式把块读进局部内存，让相邻的工作项读取相邻的地址
+__kernel __attribute__((reqd_work_group_size(16, 16, 1)))
+void matmul_small(__global const float* A, __global const float* B, __global float* C,
+                  int M, int N, int K, int ta, int tb, int sa, int sb) {
+    int tx = get_local_id(0), ty = get_local_id(1);
+    int row0 = get_group_id(1) * 16, col0 = get_group_id(0) * 16;
+    int i = row0 + ty, j = col0 + tx, bz = get_global_id(2);
+    A += bz * sa;
+    B += bz * sb;
+    __local float As[16][17];
+    __local float Bs[16][17];
+    float acc = 0.0f;
+    for (int k0 = 0; k0 < K; k0 += 16) {
+        if (ta) {
+            int gi = row0 + tx, gk = k0 + ty;
+            As[tx][ty] = (gi < M && gk < K) ? A[gk * M + gi] : 0.0f;
+        } else {
+            int gk = k0 + tx;
+            As[ty][tx] = (i < M && gk < K) ? A[i * K + gk] : 0.0f;
+        }
+        if (tb) {
+            int gj = col0 + ty, gk = k0 + tx;
+            Bs[tx][ty] = (gj < N && gk < K) ? B[gj * K + gk] : 0.0f;
+        } else {
+            int gk = k0 + ty;
+            Bs[ty][tx] = (gk < K && j < N) ? B[gk * N + j] : 0.0f;
+        }
+        barrier(CLK_LOCAL_MEM_FENCE);
+        #pragma unroll
+        for (int p = 0; p < 16; p++) acc = fma(As[ty][p], Bs[p][tx], acc);
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+    if (i < M && j < N) C[bz * M * N + i * N + j] = acc;
 }
 
 // 大矩阵的乘法：每个工作组（16x16 个工作项）计算 128x128 的输出块，每个工作项计算 8x8 个元素。
@@ -434,12 +493,17 @@ __kernel void index_select(__global const float* w, __global const float* idx, _
     out[t] = (r >= 0 && r < rows) ? w[r * cols + j] : 0.0f;
 }
 
-__kernel void index_add(__global const float* g, __global const float* idx, __global float* out, int nidx, int rows, int cols) {
+// embedding 的反向：order 是按目标行排好的梯度行号，offsets[r]..offsets[r+1] 是第 r 行的那一段。
+// 每个工作项负责输出的一个元素，自己把对应的梯度加起来（不需要原子操作，结果也是确定的）
+__kernel void index_add_csr(__global const float* g, __global const float* order, __global const float* offsets,
+                            __global float* out, int rows, int cols) {
     int t = get_global_id(0);
-    if (t >= nidx * cols) return;
-    int i = t / cols, j = t % cols;
-    int r = (int)idx[i];
-    if (r >= 0 && r < rows) atomic_add_f(&out[r * cols + j], g[t]);
+    if (t >= rows * cols) return;
+    int r = t / cols, j = t % cols;
+    int a = (int)offsets[r], b = (int)offsets[r + 1];
+    float s = 0.0f;
+    for (int p = a; p < b; p++) s += g[(int)order[p] * cols + j];
+    out[t] += s;
 }
 
 __kernel void pick(__global const float* x, __global const float* idx, __global float* out, int rows, int cols) {

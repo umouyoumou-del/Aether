@@ -316,6 +316,10 @@ class MultiheadAttention(Module):
         self.drop = Dropout(dropout)
 
     def forward(self, x: Tensor) -> Tensor:
+        return self.attend(x, null)
+
+    # key_mask：[批次, 长度] 的 0/1 张量，0 表示填充的位置（不被任何位置关注）
+    def attend(self, x: Tensor, key_mask: Tensor?) -> Tensor:
         b, t, e = x.size(0), x.size(1), x.size(2)
         h = self.num_heads
         d = e // h
@@ -327,9 +331,50 @@ class MultiheadAttention(Module):
         scores = (q @ k.transpose(2, 3)) * (1.0 / math.sqrt(d))
         if self.causal:
             scores = scores + tensor.causal_mask(t).to(x.device)
+        if key_mask != null:
+            scores = scores + ((key_mask.to(x.device) - 1.0) * 1e9).reshape(b, 1, 1, t)
         att = self.drop(scores.softmax(dim=-1))
         out = (att @ v).transpose(1, 2).reshape(b, t, e)
         return self.proj(out)
+
+# 多头交叉注意力：x 中的每个位置关注 memory 中的位置（例如问题关注状态、解码器关注编码器的输出）。
+# x：[批次, 长度, embed_dim]；memory：[批次, memory 的长度, embed_dim]；memory_mask 中为 0 的位置不被关注
+class CrossAttention(Module):
+    embed_dim: int
+    num_heads: int
+    q: Linear
+    kv: Linear
+    proj: Linear
+    drop: Dropout
+
+    def __init__(self, embed_dim: int, num_heads: int, dropout: float = 0.0):
+        if embed_dim % num_heads != 0:
+            raise ValueError(f"embed_dim（{embed_dim}）必须是 num_heads（{num_heads}）的倍数")
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.q = Linear(embed_dim, embed_dim)
+        self.kv = Linear(embed_dim, 2 * embed_dim)
+        self.proj = Linear(embed_dim, embed_dim)
+        self.drop = Dropout(dropout)
+
+    # 只给一个输入时就是自注意力
+    def forward(self, x: Tensor) -> Tensor:
+        return self.attend(x, x, null)
+
+    def attend(self, x: Tensor, memory: Tensor, memory_mask: Tensor? = null) -> Tensor:
+        b, t, e = x.size(0), x.size(1), x.size(2)
+        s = memory.size(1)
+        h = self.num_heads
+        d = e // h
+        q = self.q(x).reshape(b, t, h, d).transpose(1, 2)
+        kv = self.kv(memory)
+        k = kv.narrow(2, 0, e).reshape(b, s, h, d).transpose(1, 2)
+        v = kv.narrow(2, e, e).reshape(b, s, h, d).transpose(1, 2)
+        scores = (q @ k.transpose(2, 3)) * (1.0 / math.sqrt(d))
+        if memory_mask != null:
+            scores = scores + ((memory_mask.to(x.device) - 1.0) * 1e9).reshape(b, 1, 1, s)
+        att = self.drop(scores.softmax(dim=-1))
+        return self.proj((att @ v).transpose(1, 2).reshape(b, t, e))
 
 # Transformer 的一层（先归一化的写法）：x + 注意力(LayerNorm(x))，再 x + 前馈网络(LayerNorm(x))
 class TransformerEncoderLayer(Module):
@@ -350,7 +395,11 @@ class TransformerEncoderLayer(Module):
         self.drop = Dropout(dropout)
 
     def forward(self, x: Tensor) -> Tensor:
-        h = x + self.drop(self.attn(self.norm1(x)))
+        return self.encode(x, null)
+
+    # 带填充掩码的版本（key_mask 的含义见 MultiheadAttention.attend）
+    def encode(self, x: Tensor, key_mask: Tensor?) -> Tensor:
+        h = x + self.drop(self.attn.attend(self.norm1(x), key_mask))
         return h + self.drop(self.ff2(self.ff1(self.norm2(h)).gelu()))
 
 # 单层 LSTM：输入 [批次, 长度, input_size]，输出每个时刻的隐藏状态 [批次, 长度, hidden_size]

@@ -251,6 +251,8 @@ def log_softmax(x: Tensor, dim: int = -1) -> Tensor:
 @go("rttensor.Synchronize") def synchronize()
 @go("rttensor.EmptyCache") def empty_cache()
 @go("rttensor.GpuMemoryAllocated") def gpu_memory_allocated() -> int
+# 各个 GPU 内核的调用次数与运行时间（设置环境变量 AETHER_GPU_PROFILE=1 后运行程序时记录）
+@go("rttensor.GpuProfile") def gpu_profile() -> str
 
 # ===== 图像：[通道, 高, 宽]，数值在 [0, 1] 中 =====
 

@@ -33,17 +33,25 @@ func unaryRaw(op int, x *Tensor, a, b float32) *Tensor {
 	return out
 }
 
+// gradIf 只在 t 需要梯度时计算它的梯度（例如加上一个常数掩码时，不必为掩码归约梯度）。
+func gradIf(t *Tensor, f func() *Tensor) *Tensor {
+	if !t.requiresGrad {
+		return nil
+	}
+	return f()
+}
+
 func (a *Tensor) Add(b *Tensor) *Tensor {
 	out := binaryRaw("加法", bAdd, a, b)
 	return record(out, "add", []*Tensor{a, b}, func(g *Tensor) []*Tensor {
-		return []*Tensor{sumTo(g, a.shape), sumTo(g, b.shape)}
+		return []*Tensor{gradIf(a, func() *Tensor { return sumTo(g, a.shape) }), gradIf(b, func() *Tensor { return sumTo(g, b.shape) })}
 	})
 }
 
 func (a *Tensor) Sub(b *Tensor) *Tensor {
 	out := binaryRaw("减法", bSub, a, b)
 	return record(out, "sub", []*Tensor{a, b}, func(g *Tensor) []*Tensor {
-		return []*Tensor{sumTo(g, a.shape), sumTo(g.Neg(), b.shape)}
+		return []*Tensor{gradIf(a, func() *Tensor { return sumTo(g, a.shape) }), gradIf(b, func() *Tensor { return sumTo(g.Neg(), b.shape) })}
 	})
 }
 

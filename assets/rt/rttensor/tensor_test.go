@@ -292,6 +292,25 @@ func TestGPUKernels(t *testing.T) {
 	check("长向量求和", a, b, 1e-4)
 	a, b = onBoth(func(dev backend) *Tensor { return fromHost(dev, big.shape, big.host()).Max(none, false) })
 	check("长向量最大值", a, b, 0)
+	// 按行求和（最后一维至少 32 个数时一个工作组处理一行），以及它的反向（softmax）
+	rws := randT(16, -1, 1, 37, 70)
+	a, b = onBoth(func(dev backend) *Tensor { return fromHost(dev, rws.shape, rws.host()).Sum(some(-1), false) })
+	check("按行求和", a, b, 1e-5)
+	a, b = onBoth(func(dev backend) *Tensor {
+		x := fromHost(dev, rws.shape, rws.host()).SetRequiresGrad(true)
+		x.Softmax(-1).Mul(fromHost(dev, rws.shape, randT(17, -1, 1, 37, 70).host())).Sum(none, false).Backward(rt.Opt[*Tensor]{})
+		return x.grad
+	})
+	check("softmax 的反向（长行）", a, b, 1e-5)
+	// 沿很长的一维求和（分段求和的路径），以及多维广播
+	col := randT(13, -1, 1, 5000, 3, 7)
+	a, b = onBoth(func(dev backend) *Tensor { return fromHost(dev, col.shape, col.host()).Sum(some(0), false) })
+	check("长维度求和", a, b, 1e-4)
+	s4, m3 := randT(14, -1, 1, 3, 4, 5, 6), randT(15, -1, 1, 3, 1, 1, 6)
+	a, b = onBoth(func(dev backend) *Tensor {
+		return fromHost(dev, s4.shape, s4.host()).Add(fromHost(dev, m3.shape, m3.host())).Mul(fromHost(dev, []int{5, 1}, []float32{1, 2, 3, 4, 5}))
+	})
+	check("四维广播", a, b, 1e-6)
 	m := randT(8, -1, 1, 37, 1001)
 	for d := 0; d < 2; d++ {
 		a, b = onBoth(func(dev backend) *Tensor { return fromHost(dev, m.shape, m.host()).Argmax(some(d), false) })
@@ -485,7 +504,7 @@ func TestMatmulShapes(t *testing.T) {
 		devs = append(devs, g)
 	}
 	sizes := [][3]int{{1, 1, 1}, {6, 16, 1}, {7, 17, 3}, {5, 300, 33}, {13, 1, 600}, {64, 64, 64}, {97, 131, 259}, {1, 513, 70}, {300, 7, 9},
-		{128, 16, 128}, {130, 40, 257}, {255, 129, 140}}
+		{128, 16, 128}, {130, 40, 257}, {255, 129, 140}, {100, 16, 100}, {100, 100, 16}, {40, 33, 33}}
 	seed := uint64(100)
 	for _, sz := range sizes {
 		m, k, n := sz[0], sz[1], sz[2]
