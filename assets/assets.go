@@ -1,4 +1,4 @@
-// Package assets 嵌入五行的运行时库（Go 源码）和标准库（.ae 源码）。
+// Package assets 嵌入 Aether 的运行时库（Go 源码）和标准库（.ae 源码）。
 package assets
 
 import (

@@ -1,4 +1,4 @@
-// Package compiler 实现五行 (Aether) 语言的编译器：词法、语法、类型检查与 Go 代码生成。
+// Package compiler 实现 Aether 语言的编译器：词法、语法、类型检查与 Go 代码生成。
 package compiler
 
 import "fmt"

@@ -1,4 +1,4 @@
-# functools 模块：高阶函数工具（用纯五行代码编写）
+# functools 模块：高阶函数工具（用纯 Aether 代码编写）
 # @cache 与 @lru_cache(maxsize=128) 是由编译器处理的装饰器（见《语言参考》第 7 节）；
 # 这里的同名函数只是为了可以写 from functools import cache。
 

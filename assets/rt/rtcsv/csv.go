@@ -1,4 +1,4 @@
-// Package rtcsv 实现五行的 csv 模块（只在用到时链接）。
+// Package rtcsv 实现 Aether 的 csv 模块（只在用到时链接）。
 package rtcsv
 
 import (

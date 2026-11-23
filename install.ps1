@@ -1,4 +1,4 @@
-﻿# 构建五行 (Aether) 编译器：  powershell -ExecutionPolicy Bypass -File install.ps1 [-AddToPath]
+﻿# 构建 Aether 编译器：  powershell -ExecutionPolicy Bypass -File install.ps1 [-AddToPath]
 param([switch]$AddToPath)
 
 $ErrorActionPreference = "Stop"
@@ -8,7 +8,7 @@ if (-not (Get-Command go -ErrorAction SilentlyContinue)) {
     Write-Error "找不到 go 命令。请先安装 Go 1.23 或更新版本：https://go.dev/dl/"
 }
 
-# 如果 GOCACHE 指向的目录无法创建（例如所在的盘不存在），改用五行自己的缓存目录
+# 如果 GOCACHE 指向的目录无法创建（例如所在的盘不存在），改用 Aether 自己的缓存目录
 if ($env:GOCACHE) {
     try {
         New-Item -ItemType Directory -Force -Path $env:GOCACHE -ErrorAction Stop | Out-Null

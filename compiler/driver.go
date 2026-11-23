@@ -341,7 +341,7 @@ func BuildGo(goSrc string, key string, cfg BuildConfig) (string, error) {
 	if p, err := exec.LookPath("go"); err == nil {
 		goBin = p
 	} else {
-		return "", errors.New("找不到 Go 工具链（go 命令）。五行需要 Go 1.23 或更新版本：https://go.dev/dl/")
+		return "", errors.New("找不到 Go 工具链（go 命令）。Aether 需要 Go 1.23 或更新版本：https://go.dev/dl/")
 	}
 	start := time.Now()
 	cmd := exec.Command(goBin, "build", "-o", exe, ".")
@@ -364,7 +364,7 @@ func BuildGo(goSrc string, key string, cfg BuildConfig) (string, error) {
 type GoBuildError struct{ Output string }
 
 func (e *GoBuildError) Error() string {
-	return "内部错误：生成的 Go 代码编译失败（这是五行编译器的问题，请反馈）：\n" + e.Output
+	return "内部错误：生成的 Go 代码编译失败（这是 Aether 编译器的问题，请反馈）：\n" + e.Output
 }
 
 // BuildKey 根据主文件路径生成构建目录名。

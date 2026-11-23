@@ -51,7 +51,7 @@ server.get("/boom", boom)
 
 base = server.start(":0")
 print("服务器地址已就绪")
-print(http.get(base + "/?name=五行").text)
+print(http.get(base + "/?name=Aether").text)
 print(http.get(base + "/items").text)
 r = http.post(base + "/items", "{\"name\": \"显示器\", \"price\": 1299.0}")
 print(r.status, r.text)

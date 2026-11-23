@@ -1,4 +1,4 @@
-# itertools 模块：迭代器工具（用纯五行代码编写）
+# itertools 模块：迭代器工具（用纯 Aether 代码编写）
 # 与 Python 不同：排列、组合、笛卡尔积的每一项是列表（Python 是元组），
 # 可以直接解构：for a, b in combinations(xs, 2)
 

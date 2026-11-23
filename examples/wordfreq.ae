@@ -3,10 +3,10 @@ import os
 import re
 
 text = """
-五行是一门融合了多种语言优点的编程语言。
+Aether 是一门融合了多种语言优点的编程语言。
 It borrows the readable syntax of Python, the speed of C++,
 the goroutines of Go, the type safety of Java and the elegance of C#.
-Python Python Go Go Go 五行 五行 五行 五行
+Python Python Go Go Go Aether Aether Aether Aether
 """
 
 path = "wordfreq_demo.txt"

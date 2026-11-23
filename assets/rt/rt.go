@@ -1,4 +1,4 @@
-// Package rt 是五行 (Aether) 程序的运行时库。生成的 Go 代码依赖这里的类型与函数。
+// Package rt 是 Aether 程序的运行时库。生成的 Go 代码依赖这里的类型与函数。
 package rt
 
 import (
@@ -9,7 +9,7 @@ import (
 	"sync"
 )
 
-// Char 是五行的 char 类型（一个 Unicode 码点）。
+// Char 是 Aether 的 char 类型（一个 Unicode 码点）。
 type Char int32
 
 // Unit 用于没有返回值的 Task。

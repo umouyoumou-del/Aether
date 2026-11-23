@@ -105,7 +105,7 @@ func (s *Scope) lookupWithScope(name string) (*Symbol, *Scope) {
 
 func (s *Scope) insert(sym *Symbol) { s.Syms[sym.Name] = sym }
 
-// Module 是一个五行模块（一个 .wx 文件）。
+// Module 是一个 Aether 模块（一个 .ae 文件）。
 type Module struct {
 	Name      string
 	Path      string
@@ -520,7 +520,7 @@ func (c *Checker) collect(m *Module) {
 	}
 }
 
-// checkClassDecorators 处理类上的装饰器：Python 中常用但五行不需要的给出警告，其余报错。
+// checkClassDecorators 处理类上的装饰器：Python 中常用但 Aether 不需要的给出警告，其余报错。
 func (c *Checker) checkClassDecorators(decs []*Decorator) {
 	for _, d := range decs {
 		switch d.Name {
@@ -530,7 +530,7 @@ func (c *Checker) checkClassDecorators(decs []*Decorator) {
 		case "total_ordering", "functools.total_ordering":
 			c.warnf(d.Pos, "不需要 @total_ordering：只定义 __lt__ 时 > <= >= 也可以使用")
 		default:
-			c.errorf(d.Pos, "五行不支持类装饰器 @%s", d.Name)
+			c.errorf(d.Pos, "Aether 不支持类装饰器 @%s", d.Name)
 		}
 	}
 }
@@ -782,15 +782,15 @@ func (c *Checker) undefined(pos Pos, name string) {
 	}
 	switch name {
 	case "True", "False":
-		d.Notes = append(d.Notes, "五行的布尔值写作 true / false")
+		d.Notes = append(d.Notes, "Aether 的布尔值写作 true / false")
 	case "None", "nil", "nullptr":
-		d.Notes = append(d.Notes, "五行的空值写作 null")
+		d.Notes = append(d.Notes, "Aether 的空值写作 null")
 	case "this":
-		d.Notes = append(d.Notes, "五行用 self 表示当前对象")
+		d.Notes = append(d.Notes, "Aether 用 self 表示当前对象")
 	case "lambda":
-		d.Notes = append(d.Notes, "五行的 lambda 写作 x => 表达式，例如 xs.map(x => x * 2)")
+		d.Notes = append(d.Notes, "Aether 的 lambda 写作 x => 表达式，例如 xs.map(x => x * 2)")
 	case "__name__":
-		d.Notes = append(d.Notes, "五行不需要 if __name__ == \"__main__\"：定义 def main() 即可作为程序入口")
+		d.Notes = append(d.Notes, "Aether 不需要 if __name__ == \"__main__\"：定义 def main() 即可作为程序入口")
 	case "self":
 		d.Notes = append(d.Notes, "self 只能在方法中使用")
 	case "printf", "println", "console", "System", "fmt":

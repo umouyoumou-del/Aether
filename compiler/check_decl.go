@@ -93,7 +93,7 @@ func (c *Checker) resolveNamedType(t *NamedTypeX, scope *Scope) Type {
 				c.errorf(t.Pos, "可空类型写作 T?")
 				return tInvalid
 			case "List", "Dict", "Set", "String", "Int", "Float", "Bool", "string", "double", "long", "boolean", "Integer32":
-				c.errorf(t.Pos, "未知的类型 '%s'（五行的内置类型名为 int、float、str、bool、list、dict、set）", t.Name)
+				c.errorf(t.Pos, "未知的类型 '%s'（Aether 的内置类型名为 int、float、str、bool、list、dict、set）", t.Name)
 				return tInvalid
 			}
 			d := c.errorf(t.Pos, "未知的类型 '%s'", t.Name)
@@ -777,7 +777,7 @@ func (c *Checker) resolveProp(td *TypeDecl, x *ExtBlock, pd *PropDecl, sc *Scope
 	return p
 }
 
-// checkDecorators 处理函数上的装饰器（where 为 func、method 或 nested），对五行不支持的给出提示。
+// checkDecorators 处理函数上的装饰器（where 为 func、method 或 nested），对 Aether 不支持的给出提示。
 func (c *Checker) checkDecorators(fd *FuncDecl, decs []*Decorator, where string) {
 	for _, d := range decs {
 		switch d.Name {
@@ -817,17 +817,17 @@ func (c *Checker) checkDecorators(fd *FuncDecl, decs []*Decorator, where string)
 				}
 			}
 		case "staticmethod", "classmethod":
-			c.errorf(d.Pos, "五行用 static def 定义静态方法，不需要 @%s", d.Name)
+			c.errorf(d.Pos, "Aether 用 static def 定义静态方法，不需要 @%s", d.Name)
 		case "property":
-			c.errorf(d.Pos, "五行用 prop 名字 -> 类型: 定义属性，不需要 @property")
+			c.errorf(d.Pos, "Aether 用 prop 名字 -> 类型: 定义属性，不需要 @property")
 		case "dataclass", "dataclasses.dataclass":
 			c.errorf(d.Pos, "不需要 @dataclass：声明了字段但没有 __init__ 的类会自动生成构造函数")
 		case "abstractmethod", "abc.abstractmethod":
-			c.errorf(d.Pos, "五行用 abstract def 定义抽象方法")
+			c.errorf(d.Pos, "Aether 用 abstract def 定义抽象方法")
 		case "override", "Override":
-			c.errorf(d.Pos, "五行用 override def 标记覆盖方法")
+			c.errorf(d.Pos, "Aether 用 override def 标记覆盖方法")
 		default:
-			c.errorf(d.Pos, "五行不支持装饰器 @%s", d.Name)
+			c.errorf(d.Pos, "Aether 不支持装饰器 @%s", d.Name)
 		}
 	}
 }
@@ -950,14 +950,14 @@ func (c *Checker) checkDunder(td *TypeDecl, m *Method) {
 			ret = tBool
 		}
 		if m.Name == "__hash__" {
-			c.errorf(m.Pos, "五行不支持 __hash__：类按对象身份哈希，结构体按字段值哈希")
+			c.errorf(m.Pos, "Aether 不支持 __hash__：类按对象身份哈希，结构体按字段值哈希")
 		}
 	case "__getitem__":
 		want = 1
 	case "__setitem__":
 		want, ret = 2, tVoid
 	case "__call__", "__del__", "__getattr__", "__setattr__", "__new__", "__format__":
-		c.errorf(m.Pos, "五行不支持特殊方法 %s", m.Name)
+		c.errorf(m.Pos, "Aether 不支持特殊方法 %s", m.Name)
 		return
 	default:
 		c.errorf(m.Pos, "未知的特殊方法 %s", m.Name)

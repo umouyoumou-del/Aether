@@ -12,7 +12,7 @@ import (
 
 // RTPath 是生成程序中运行时包的导入路径。
 // 生成的程序使用模块路径 aether/assets，使运行时及其子包的导入路径
-// 与五行源码树中一致（子包可以导入 aether/assets/rt）。
+// 与 Aether 源码树中一致（子包可以导入 aether/assets/rt）。
 const RTPath = "aether/assets/rt"
 
 var goKeywords = map[string]bool{
@@ -151,7 +151,7 @@ func Generate(c *Checker, testMode bool, opts GenOptions) (string, error) {
 	g.genGlobals()
 
 	var out strings.Builder
-	out.WriteString("// 由五行 (Aether) 编译器生成，请勿手动修改。\n\npackage main\n\n")
+	out.WriteString("// 由 Aether 编译器生成，请勿手动修改。\n\npackage main\n\n")
 	paths := make([]string, 0, len(g.imports))
 	for p := range g.imports {
 		paths = append(paths, p)
@@ -664,7 +664,7 @@ func isPolyType(t Type) bool {
 	return false
 }
 
-// goEqOK 判断能否直接用 Go 的 == 比较该类型的值（且语义与五行一致）。
+// goEqOK 判断能否直接用 Go 的 == 比较该类型的值（且语义与 Aether 一致）。
 func (g *Gen) goEqOK(t Type) bool {
 	t = subst(t, g.subst)
 	switch x := t.(type) {

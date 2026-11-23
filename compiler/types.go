@@ -4,7 +4,7 @@ import (
 	"strings"
 )
 
-// Type 是五行的类型。
+// Type 是 Aether 的类型。
 type Type interface {
 	String() string
 }

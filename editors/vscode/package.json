@@ -1,7 +1,7 @@
 {
   "name": "aether",
-  "displayName": "五行 (Aether)",
-  "description": "五行 (Aether) 编程语言：语法高亮、实时诊断、悬停显示类型、跳转到定义、补全与大纲",
+  "displayName": "Aether",
+  "description": "Aether 编程语言：语法高亮、实时诊断、悬停显示类型、跳转到定义、补全与大纲",
   "version": "0.2.0",
   "publisher": "aether-lang",
   "engines": { "vscode": "^1.60.0" },
@@ -12,7 +12,7 @@
     "languages": [
       {
         "id": "aether",
-        "aliases": ["五行", "Aether", "aether"],
+        "aliases": ["Aether", "aether"],
         "extensions": [".ae"],
         "configuration": "./language-configuration.json"
       }
@@ -25,7 +25,7 @@
       }
     ],
     "configuration": {
-      "title": "五行 (Aether)",
+      "title": "Aether",
       "properties": {
         "aether.path": {
           "type": "string",
@@ -37,7 +37,7 @@
     "commands": [
       {
         "command": "aether.restartServer",
-        "title": "五行：重启语言服务器"
+        "title": "Aether：重启语言服务器"
       }
     ]
   }

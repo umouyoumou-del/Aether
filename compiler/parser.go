@@ -295,7 +295,7 @@ func (p *parser) stmt(top bool) []Stmt {
 		cond := p.expr()
 		body := p.block("while 语句")
 		if p.at(KElse) {
-			p.fail("五行不支持 while...else")
+			p.fail("Aether 不支持 while...else")
 		}
 		return []Stmt{&WhileStmt{Pos: pos, Cond: cond, Body: body}}
 	case KFor:
@@ -519,7 +519,7 @@ func (p *parser) params(lambda bool) []*Param {
 			continue
 		}
 		if p.at(TDStar) {
-			p.fail("五行不支持 **kwargs；可以改用 dict[str, any] 参数或带默认值的参数")
+			p.fail("Aether 不支持 **kwargs；可以改用 dict[str, any] 参数或带默认值的参数")
 		}
 		variadic := p.got(TStar)
 		nt := p.expectIdent("参数")
@@ -1115,7 +1115,7 @@ func (p *parser) forStmt() *ForStmt {
 	iter := p.exprList()
 	body := p.block("for 语句")
 	if p.at(KElse) {
-		p.fail("五行不支持 for...else")
+		p.fail("Aether 不支持 for...else")
 	}
 	return &ForStmt{Pos: pos, Target: target, Iter: iter, Body: body}
 }
@@ -1924,7 +1924,7 @@ func (p *parser) atom() Expr {
 	switch t.Kind {
 	case TIdent:
 		if t.Text == "lambda" && (p.peek(1).Kind == TIdent || p.peek(1).Kind == TColon) {
-			p.fail("五行的 lambda 写作 x => 表达式（多个参数：(a, b) => a + b）")
+			p.fail("Aether 的 lambda 写作 x => 表达式（多个参数：(a, b) => a + b）")
 		}
 		p.advance()
 		if t.Text == "super" && p.at(TLParen) && p.peek(1).Kind == TRParen {

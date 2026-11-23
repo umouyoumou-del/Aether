@@ -1349,7 +1349,7 @@ func (c *Checker) binary(e *Binary, want Type) Type {
 		}
 	case TPercent:
 		if isStr(xt) {
-			c.errorf(e.Pos, "五行不支持 %% 格式化字符串，请使用 f\"...{x}...\"")
+			c.errorf(e.Pos, "Aether 不支持 %% 格式化字符串，请使用 f\"...{x}...\"")
 			return tInvalid
 		}
 	case TAmp, TPipe, TCaret:

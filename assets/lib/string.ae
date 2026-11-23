@@ -1,4 +1,4 @@
-# string 模块：常用字符集合与辅助函数（用纯五行代码编写）
+# string 模块：常用字符集合与辅助函数（用纯 Aether 代码编写）
 
 const ascii_lowercase = "abcdefghijklmnopqrstuvwxyz"
 const ascii_uppercase = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"

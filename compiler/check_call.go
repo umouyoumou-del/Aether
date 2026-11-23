@@ -1584,7 +1584,7 @@ func (c *Checker) builtinCall(e *Call, name string, want Type) Type {
 		e.Extra = ie
 		return tBool
 	case "hash":
-		c.errorf(e.Pos, "五行不提供 hash()；字典和集合会自动处理哈希")
+		c.errorf(e.Pos, "Aether 不提供 hash()；字典和集合会自动处理哈希")
 		c.checkArgsQuiet(e)
 		return tInt
 	case "panic":

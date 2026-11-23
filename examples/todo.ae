@@ -53,7 +53,7 @@ class TodoList:
         return todo
 
 todo = TodoList()
-todo.add("学习五行的语法", Priority.High)
+todo.add("学习 Aether 的语法", Priority.High)
 todo.add("写一个计算器")
 todo.add("喝杯茶", Priority.Low)
 todo.complete(2)

@@ -198,7 +198,7 @@ func BoolStr(b bool) string {
 
 func CharStr(c Char) string { return string(rune(c)) }
 
-// TypeName 返回值的五行类型名。
+// TypeName 返回值的 Aether 类型名。
 func TypeName(v any) string {
 	switch v.(type) {
 	case nil:

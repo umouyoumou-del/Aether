@@ -9,7 +9,7 @@ a: float = 1
 print(a, a + 1)
 big = 1_000_000
 print(big, 0xff, 0b1010, 0o17)
-s = "五行 Aether"
+s = "以太 Aether"
 print(len(s), s[0], s[-1], s[0:2], s[3:], s[::-1])
 print(s.upper(), s.lower(), s.replace("Aether", "语言"))
 print("a,b,,c".split(","), "  hi  ".strip(), "x".center(5, "*"))

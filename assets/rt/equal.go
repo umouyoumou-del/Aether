@@ -9,7 +9,7 @@ import (
 type eqer interface{ Eqꞏ(o any) bool }
 type cmper interface{ Cmpꞏ(o any) int }
 
-// Equal 按五行语义比较两个值：容器逐元素比较，类按身份（或 __eq__），结构体按字段。
+// Equal 按 Aether 语义比较两个值：容器逐元素比较，类按身份（或 __eq__），结构体按字段。
 func Equal[T any](a, b T) bool {
 	return equalAny(any(a), any(b))
 }

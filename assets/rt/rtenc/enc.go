@@ -1,4 +1,4 @@
-// Package rtenc 实现五行的 base64 与 hashlib 模块（只在用到时链接）。
+// Package rtenc 实现 Aether 的 base64 与 hashlib 模块（只在用到时链接）。
 package rtenc
 
 import (

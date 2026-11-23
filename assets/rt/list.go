@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// List 是五行的 list[T]（引用语义，与 Python 列表一致）。
+// List 是 Aether 的 list[T]（引用语义，与 Python 列表一致）。
 type List[T any] struct {
 	S []T
 }

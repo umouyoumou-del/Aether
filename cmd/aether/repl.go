@@ -15,7 +15,7 @@ import (
 	"aether/compiler"
 )
 
-const replHelp = `五行交互模式：输入语句或表达式，表达式的值会被打印。
+const replHelp = `Aether 交互模式：输入语句或表达式，表达式的值会被打印。
   以冒号结尾的行开始一个代码块，输入空行结束。
   :show   显示当前会话的代码     :undo   撤销上一条输入
   :reset  清空会话               :quit   退出（也可以按 Ctrl+Z 回车 / Ctrl+D）
@@ -29,7 +29,7 @@ type replSession struct {
 }
 
 func cmdRepl(args []string) int {
-	fmt.Printf("五行 (Aether) %s 交互模式，输入 :help 查看帮助\n", compiler.Version)
+	fmt.Printf("Aether %s 交互模式，输入 :help 查看帮助\n", compiler.Version)
 	dir, _ := os.Getwd()
 	s := &replSession{dir: dir}
 	in := bufio.NewReader(os.Stdin)

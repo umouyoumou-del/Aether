@@ -1,6 +1,6 @@
-# 五行 (Aether) 入门：运行方式  aether run hello.ae
+# Aether 入门：运行方式  aether run hello.ae
 
-print("你好，五行！")
+print("你好，Aether！")
 
 # 变量会自动推断类型；也可以写出类型
 name = "Aether"
@@ -15,7 +15,7 @@ def greet(who: str, times: int = 1) -> str:
     return " ".join([f"你好，{who}！"] * times)
 
 print(greet("世界"))
-print(greet("五行", times=2))
+print(greet("Aether", times=2))
 
 # 列表推导式、切片、负下标
 squares = [n * n for n in range(1, 11)]

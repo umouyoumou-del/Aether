@@ -5,7 +5,7 @@ import (
 	"slices"
 )
 
-// Lesser 是定义了 __lt__ 的五行类型（编译器为其生成 Lessꞏ 方法）。
+// Lesser 是定义了 __lt__ 的 Aether 类型（编译器为其生成 Lessꞏ 方法）。
 type Lesser[T any] interface {
 	Lessꞏ(T) bool
 }

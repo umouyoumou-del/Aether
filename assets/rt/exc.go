@@ -9,7 +9,7 @@ import (
 	"sync"
 )
 
-// Error 是运行时库抛出的异常（由生成代码转换为对应的五行异常类）。
+// Error 是运行时库抛出的异常（由生成代码转换为对应的 Aether 异常类）。
 type Error struct {
 	Kind string
 	Msg  string
@@ -34,7 +34,7 @@ type Thrown struct {
 
 func (t *Thrown) Error() string { return fmt.Sprint(t.Exc) }
 
-// Throw 包装五行代码中 raise 的异常对象。
+// Throw 包装 Aether 代码中 raise 的异常对象。
 func Throw(exc any) *Thrown {
 	return &Thrown{Exc: exc, PCs: callers(3)}
 }
@@ -54,15 +54,15 @@ func PCsOf(r any) []uintptr {
 }
 
 var (
-	// ConvertHook 由生成代码设置：把 *Error 转换为五行异常对象。
+	// ConvertHook 由生成代码设置：把 *Error 转换为 Aether 异常对象。
 	ConvertHook func(e *Error) any
 	// DescribeHook 由生成代码设置：返回异常对象的类名和消息。
 	DescribeHook func(exc any) (string, string)
-	// IsExcHook 判断值是否为五行异常对象。
+	// IsExcHook 判断值是否为 Aether 异常对象。
 	IsExcHook func(x any) bool
 )
 
-// Catch 把 recover() 得到的值转换为五行异常对象。
+// Catch 把 recover() 得到的值转换为 Aether 异常对象。
 func Catch(r any) any {
 	if t, ok := r.(*Thrown); ok {
 		r = t.Exc
@@ -84,7 +84,7 @@ func Catch(r any) any {
 	return e
 }
 
-// Classify 把 Go 运行时错误归类为五行异常类型。
+// Classify 把 Go 运行时错误归类为 Aether 异常类型。
 func Classify(r any) (string, string) {
 	if err, ok := r.(runtime.Error); ok {
 		msg := err.Error()
@@ -158,7 +158,7 @@ func srcLine(file string, line int) string {
 	return strings.TrimSpace(lines[line-1])
 }
 
-// demangle 把 Go 函数名还原为五行中的名字。
+// demangle 把 Go 函数名还原为 Aether 中的名字。
 func demangle(fn string) string {
 	if i := strings.LastIndex(fn, "/"); i >= 0 {
 		fn = fn[i+1:]

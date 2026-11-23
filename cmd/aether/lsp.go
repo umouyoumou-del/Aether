@@ -285,7 +285,7 @@ func (s *lspServer) handle(m *lspMessage) (exit bool) {
 	return false
 }
 
-// position 解析 textDocument/position 参数，返回文档与五行的行、列（从 1 开始，列按字符计）。
+// position 解析 textDocument/position 参数，返回文档与 Aether 的行、列（从 1 开始，列按字符计）。
 func (s *lspServer) position(raw json.RawMessage) (*lspDoc, int, int) {
 	var p struct {
 		TextDocument struct {
@@ -347,7 +347,7 @@ func (s *lspServer) analyze(uri string) {
 		diags = append(diags, map[string]any{
 			"range":    lspRange(line, start, line, start+wordLen(ln, d.Pos.Col)),
 			"severity": sev,
-			"source":   "五行",
+			"source":   "aether",
 			"message":  msg,
 		})
 	}
@@ -635,7 +635,7 @@ func lineOf(text string, n int) string {
 	return strings.TrimRight(text, "\r")
 }
 
-// utf16ToRuneCol 把 LSP 的列（UTF-16 码元，从 0 开始）转换为五行的列（字符，从 1 开始）。
+// utf16ToRuneCol 把 LSP 的列（UTF-16 码元，从 0 开始）转换为 Aether 的列（字符，从 1 开始）。
 func utf16ToRuneCol(line string, ch int) int {
 	units, col := 0, 1
 	for _, r := range line {

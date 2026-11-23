@@ -49,7 +49,7 @@ func typeCheckGo(src string) error {
 	return first
 }
 
-// TestGeneratedGo 对能通过五行检查的程序（含随机变异），确认生成的 Go 代码能通过 Go 的类型检查。
+// TestGeneratedGo 对能通过 Aether 检查的程序（含随机变异），确认生成的 Go 代码能通过 Go 的类型检查。
 func TestGeneratedGo(t *testing.T) {
 	if testing.Short() {
 		t.Skip()

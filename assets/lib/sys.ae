@@ -23,7 +23,7 @@ const maxsize: int = 9223372036854775807
 # 刷新输出后以给定的状态码退出
 @go("rt.Exit") def exit(code: int = 0)
 
-# 五行的调用栈会自动增长，不需要设置递归深度；这两个函数只是为了兼容 Python 代码
+# Aether 的调用栈会自动增长，不需要设置递归深度；这两个函数只是为了兼容 Python 代码
 def setrecursionlimit(n: int):
     pass
 

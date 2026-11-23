@@ -1,4 +1,4 @@
-# statistics 模块：描述性统计（用纯五行代码编写）
+# statistics 模块：描述性统计（用纯 Aether 代码编写）
 # 与 Python 不同：mean、median 等总是返回 float。空数据抛出 ValueError。
 
 import math

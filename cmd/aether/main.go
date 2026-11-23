@@ -1,4 +1,4 @@
-// aether 是五行 (Aether) 语言的命令行工具。
+// aether 是 Aether 语言的命令行工具。
 package main
 
 import (
@@ -15,7 +15,7 @@ import (
 	"aether/compiler"
 )
 
-const usage = `五行 (Aether) %s —— 融合 Python、C++、Go、Java、C# 优点的编程语言
+const usage = `Aether %s —— 融合 Python、C++、Go、Java、C# 优点的编程语言
 
 用法：
   aether run   <文件.ae> [参数...]   编译并运行程序
@@ -56,7 +56,7 @@ func main() {
 	case "lsp":
 		os.Exit(cmdLSP(args))
 	case "version", "--version", "-v":
-		fmt.Printf("五行 (Aether) %s\n", compiler.Version)
+		fmt.Printf("Aether %s\n", compiler.Version)
 	case "help", "--help", "-h":
 		fmt.Printf(usage, compiler.Version)
 	default:
@@ -131,7 +131,7 @@ func build(file, src string, testMode bool) (string, bool) {
 	if err != nil {
 		var be *compiler.GoBuildError
 		if errors.As(err, &be) {
-			fmt.Fprintln(os.Stderr, "内部错误：生成的 Go 代码无法编译。这是五行编译器的 bug，下面是 Go 编译器的输出：")
+			fmt.Fprintln(os.Stderr, "内部错误：生成的 Go 代码无法编译。这是 Aether 编译器的 bug，下面是 Go 编译器的输出：")
 			fmt.Fprintln(os.Stderr, be.Output)
 		} else {
 			fmt.Fprintln(os.Stderr, err)

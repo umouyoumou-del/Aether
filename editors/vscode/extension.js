@@ -1,4 +1,4 @@
-// 五行 (Aether) 的 VS Code 插件：启动 `aether lsp`，提供实时诊断、悬停显示类型、跳转到定义、补全与大纲。
+// Aether 的 VS Code 插件：启动 `aether lsp`，提供实时诊断、悬停显示类型、跳转到定义、补全与大纲。
 // 为了不依赖任何 npm 包，这里直接实现了所需的那一小部分语言服务器协议（JSON-RPC over stdio）。
 'use strict';
 
@@ -23,7 +23,7 @@ class LspClient {
     this.proc.on('error', (e) => {
       this.alive = false;
       vscode.window.showErrorMessage(
-        `五行：无法启动 “${command} lsp”（${e.message}）。请把 aether 加入 PATH，或在设置中指定 aether.path。`);
+        `Aether：无法启动 “${command} lsp”（${e.message}）。请把 aether 加入 PATH，或在设置中指定 aether.path。`);
     });
     this.proc.on('exit', (code) => {
       this.alive = false;
@@ -163,7 +163,7 @@ function didOpen(doc) {
 }
 
 function activate(context) {
-  const output = vscode.window.createOutputChannel('五行 (Aether)');
+  const output = vscode.window.createOutputChannel('Aether');
   const diags = vscode.languages.createDiagnosticCollection('aether');
   start(context, diags, output);
 
