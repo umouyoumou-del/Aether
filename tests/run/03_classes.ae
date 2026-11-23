@@ -154,3 +154,15 @@ while cur != null:
     vals.append(cur.value)
     cur = cur.next
 print(vals)
+
+# 常量、字段默认值、参数默认值中构造对象（构造函数的签名需要提前确定）
+class Pt:
+    x: int
+    y: int = 0
+const ORIGIN = Pt(0)
+def norm1(p: Pt = ORIGIN) -> int:
+    return abs(p.x) + abs(p.y)
+class Seg:
+    a: Pt = Pt(1, 2)
+    b = Pt(3)
+print(ORIGIN, norm1(), norm1(Pt(-3, 4)), Seg().a, Seg().b, Seg(Pt(9)).a)

@@ -589,6 +589,11 @@ func (c *Checker) resolveAll() {
 			c.resolveEnumMembers(td)
 		}
 	}
+	// 构造函数的签名：常量、字段默认值和参数默认值中都可能构造对象
+	for _, td := range c.sortedClasses() {
+		c.computeCtor(td)
+		c.finishCtor(td)
+	}
 	// 4. 函数签名
 	for _, m := range c.Mods {
 		c.mod = m
@@ -636,9 +641,6 @@ func (c *Checker) resolveAll() {
 	for _, td := range c.Types {
 		c.mod = td.Mod
 		c.validateDecl(td)
-	}
-	for _, td := range c.sortedClasses() {
-		c.computeCtor(td)
 	}
 }
 
@@ -1476,6 +1478,13 @@ func (c *Checker) finishCtor(td *TypeDecl) {
 	}
 	nt := &NamedT{D: td, Args: tparamTypes(td.TParams)}
 	chain := supertypes(nt)
+	for _, anc := range chain {
+		for _, f := range anc.D.Fields {
+			if f.T == nil {
+				return // 字段类型要从默认值推断，稍后再计算
+			}
+		}
+	}
 	sig := td.Ctor
 	sig.Params = nil
 	td.CtorFields = nil
