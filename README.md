@@ -98,6 +98,10 @@ xs[1:3] = [0, 0, 0]                            # 切片赋值；del xs[::2]
 config = {**defaults, **overrides}
 while (line := f.read_line()) != null:         # 赋值表达式，并且 line 被窄化为 str
     print(line)
+
+@cache                                         # 缓存结果；也支持 @lru_cache(maxsize=...)
+def fib(n: int) -> int:
+    return n if n < 2 else fib(n - 1) + fib(n - 2)
 ```
 
 ### 集合、推导式与链式查询
@@ -282,7 +286,7 @@ $ aether test calc.ae
 ### 标准库
 
 内置：`print` `input` `len` `range` `enumerate` `zip` `sorted` `reversed` `sum` `min` `max` `any` `all` `abs` `round` `open` 等；
-模块：`math` `random` `time` `datetime` `os` `json` `re` `csv` `http` `heapq` `bisect` `collections` `itertools` `statistics` `string` `textwrap` `base64` `hashlib`。完整列表见 [docs/标准库.md](docs/标准库.md)。
+模块：`math` `random` `time` `datetime` `os` `json` `re` `csv` `http` `heapq` `bisect` `collections` `itertools` `functools` `statistics` `string` `textwrap` `base64` `hashlib`。完整列表见 [docs/标准库.md](docs/标准库.md)。
 
 ```python
 import http
@@ -339,6 +343,6 @@ editors/vscode/  VS Code 语法高亮插件
 ## 当前限制
 
 - 整数是 64 位，溢出时回绕（不像 Python 那样自动变成大整数）。
-- 方法不能重载（扩展方法可以按参数个数区分）；不支持装饰器、多重继承、`**kwargs`。
+- 方法不能重载（扩展方法可以按参数个数区分）；装饰器只支持 `@cache` / `@lru_cache`；不支持多重继承、`**kwargs`。
 - 无限递归会因栈空间耗尽而终止（`aether run` 会显示中文说明），不能被 `try` 捕获。
 - 运行需要本机安装 Go 工具链；`aether build` 生成的可执行文件可以在没有 Go 的机器上运行。

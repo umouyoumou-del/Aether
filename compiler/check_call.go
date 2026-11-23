@@ -744,6 +744,10 @@ func (c *Checker) methodCall0(e *Call, fn *Attr, rt Type, want Type) Type {
 	}
 	d := c.errorf(fn.NamePos, "类型 %s 没有方法 %s", rt, fn.Name)
 	d.Notes = append(d.Notes, c.extMissingNotes(rt, fn.Name, func(s string) string { return "是不是想用 " + s + "？" })...)
+	if lit, ok := unconv(recv).(*CharLit); ok && len(c.extCandidates(tStr, fn.Name)) > 0 {
+		// Python 习惯：' '.join(xs)
+		d.Notes = append(d.Notes, fmt.Sprintf("单引号表示字符 char；字符串要用双引号，例如 %q.%s(...)", string(lit.Val), fn.Name))
+	}
 	c.checkArgsQuiet(e)
 	return tInvalid
 }

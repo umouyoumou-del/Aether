@@ -201,6 +201,7 @@ func demangle(fn string) string {
 		rest := name[i+len("ꞏsuperꞏ"):]
 		name = strings.ReplaceAll(rest, "ꞏ", ".")
 	}
+	name = strings.TrimSuffix(name, "ꞏcached") // @cache 修饰的函数的函数体
 	name = strings.ReplaceAll(name, "ꞏget_", "")
 	name = strings.ReplaceAll(name, "ꞏset_", "")
 	name = strings.ReplaceAll(name, "ꞏ", "")

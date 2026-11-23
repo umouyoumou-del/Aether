@@ -1,0 +1,35 @@
+@cache                                 # 错误: 不能用于生成器
+def gen_cached(n: int) -> iter[int]:
+    yield n
+@cache                                 # 错误: 需要有返回值
+def no_ret(n: int):
+    print(n)
+@cache                                 # 错误: 不可哈希
+def bad_key(xs: list[int]) -> int:
+    return len(xs)
+@cache                                 # 错误: 不能用于泛型函数
+def generic_cached[T](x: T) -> T:
+    return x
+@lru_cache(maxsize=0)                  # 错误: maxsize 必须是正整数
+def zero_size(n: int) -> int:
+    return n
+@lru_cache(size=3)                     # 错误: 只支持 maxsize 参数
+def wrong_kw(n: int) -> int:
+    return n
+class WithMethod:
+    @cache                             # 错误: 不能用于方法
+    def m(self) -> int:
+        return 1
+@frozen                                # 错误: 不支持类装饰器
+class Frozen:
+    x: int
+@dataclass                             # 警告: 不需要 @dataclass
+class Data:
+    x: int
+@timer                                 # 错误: 不支持装饰器 @timer
+def timed() -> int:
+    return 1
+def outer():
+    @property                          # 错误: 不需要 @property
+    def inner() -> int:
+        return 1

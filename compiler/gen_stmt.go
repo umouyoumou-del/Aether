@@ -1159,13 +1159,26 @@ func (g *Gen) nestedFunc(fd *FuncDecl) {
 	}
 	name := g.local(fd.Sym)
 	sig := fd.Sig
-	g.line("%s = func(%s)%s {", name, g.paramList(fd.Fn, sig), g.retSig(sig))
+	target := name
+	var memo string
+	if fd.Cache {
+		// 每次执行到 def 时创建新的缓存（与 Python 相同）
+		memo, target = g.tmp(), g.tmp()
+		g.line("%s := %s.NewMemo[%s, %s](%d)", memo, g.rt(), g.cacheKeyType(sig), g.typ(sig.Ret), fd.CacheMax)
+		g.line("var %s func(%s)%s", target, g.paramList(fd.Fn, sig), g.retSig(sig))
+	}
+	g.line("%s = func(%s)%s {", target, g.paramList(fd.Fn, sig), g.retSig(sig))
 	g.ind++
 	saveFn := g.fn
 	g.funcBody(fd.Fn, fd.Body, sig)
 	g.fn = saveFn
 	g.ind--
 	g.line("}")
+	if fd.Cache {
+		g.line("%s = func(%s)%s {", name, g.paramList(fd.Fn, sig), g.retSig(sig))
+		g.cacheBody(fd, memo, target)
+		g.line("}")
+	}
 }
 
 // ===== select =====

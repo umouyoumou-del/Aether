@@ -1945,8 +1945,10 @@ func (c *Checker) nestedFunc(s *FuncDeclStmt) {
 	if len(fd.TypeParams) > 0 {
 		c.errorf(fd.NamePos, "嵌套函数不能是泛型的")
 	}
+	c.checkDecorators(fd, fd.Decorators, "nested")
 	sig := c.resolveSig(fd, c.scope, nil)
 	fd.Sig = sig
+	c.checkCache(fd)
 	if !fd.HasBody {
 		c.errorf(fd.NamePos, "函数 %s 缺少函数体", fd.Name)
 		return

@@ -598,9 +598,10 @@ func (c *Checker) resolveAll() {
 	for _, m := range c.Mods {
 		c.mod = m
 		for _, fd := range m.Funcs {
-			c.checkDecorators(fd.Decorators)
+			c.checkDecorators(fd, fd.Decorators, "func")
 			fd.Sig = c.resolveSig(fd, m.Scope, nil)
 			fd.Sym.Sig = fd.Sig
+			c.checkCache(fd)
 			if fd.Sym.Name == "main" && m.IsMain {
 				if len(fd.Sig.Params) > 0 || !isVoid(fd.Sig.Ret) {
 					c.errorf(fd.NamePos, "main 函数不能有参数和返回值")
@@ -776,12 +777,45 @@ func (c *Checker) resolveProp(td *TypeDecl, x *ExtBlock, pd *PropDecl, sc *Scope
 	return p
 }
 
-// checkDecorators 对五行不支持的装饰器给出提示。
-func (c *Checker) checkDecorators(decs []*Decorator) {
+// checkDecorators 处理函数上的装饰器（where 为 func、method 或 nested），对五行不支持的给出提示。
+func (c *Checker) checkDecorators(fd *FuncDecl, decs []*Decorator, where string) {
 	for _, d := range decs {
 		switch d.Name {
 		case "go":
 			continue
+		case "cache", "functools.cache", "lru_cache", "functools.lru_cache":
+			if where == "method" {
+				c.errorf(d.Pos, "@%s 只能用于函数，不能用于方法", d.Name)
+				continue
+			}
+			fd.Cache = true
+			fd.CachePos = d.Pos
+			fd.CacheMax = 0
+			if strings.HasSuffix(d.Name, "lru_cache") {
+				fd.CacheMax = 128 // 与 Python 的默认值相同
+				for _, a := range d.Args {
+					if a.Name != "" && a.Name != "maxsize" {
+						c.errorf(a.Pos, "lru_cache 只支持 maxsize 参数")
+						continue
+					}
+					switch x := a.X.(type) {
+					case *IntLit:
+						if x.Val == 0 || x.Val > 1<<31 {
+							c.errorf(a.Pos, "maxsize 必须是正整数，或者 null 表示不限大小")
+						}
+						fd.CacheMax = int(x.Val)
+					case *NullLit:
+						fd.CacheMax = 0
+					case *Ident:
+						if x.Name != "None" {
+							c.errorf(a.Pos, "maxsize 必须是整数常量或 null")
+						}
+						fd.CacheMax = 0
+					default:
+						c.errorf(a.Pos, "maxsize 必须是整数常量或 null")
+					}
+				}
+			}
 		case "staticmethod", "classmethod":
 			c.errorf(d.Pos, "五行用 static def 定义静态方法，不需要 @%s", d.Name)
 		case "property":
@@ -798,8 +832,42 @@ func (c *Checker) checkDecorators(decs []*Decorator) {
 	}
 }
 
+// checkCache 检查 @cache 修饰的函数：参数必须可哈希，用作缓存的键。
+func (c *Checker) checkCache(fd *FuncDecl) {
+	if !fd.Cache || fd.Sig == nil {
+		return
+	}
+	sig := fd.Sig
+	bad := func(format string, args ...any) {
+		c.errorf(fd.CachePos, format, args...)
+		fd.Cache = false
+	}
+	switch {
+	case len(sig.TParams) > 0:
+		bad("@cache 不能用于泛型函数")
+	case sig.Async:
+		bad("@cache 不能用于 async 函数")
+	case containsYield(fd.Body):
+		bad("@cache 不能用于生成器")
+	case isVoid(sig.Ret):
+		bad("@cache 修饰的函数需要有返回值")
+	case len(sig.Params) > 8:
+		bad("@cache 修饰的函数最多有 8 个参数")
+	}
+	for _, p := range sig.Params {
+		if !fd.Cache {
+			return
+		}
+		if p.Variadic {
+			bad("@cache 修饰的函数不能有 *%s 参数", p.Name)
+		} else if !c.hashable(p.T) && !isInvalid(p.T) {
+			bad("@cache 用参数作为缓存的键，参数 %s 的类型 %s 不可哈希", p.Name, p.T)
+		}
+	}
+}
+
 func (c *Checker) resolveMethod(td *TypeDecl, fd *FuncDecl, sc *Scope) *Method {
-	c.checkDecorators(fd.Decorators)
+	c.checkDecorators(fd, fd.Decorators, "method")
 	m := &Method{Name: fd.Name, Decl: fd, Owner: td, Static: fd.Static, Abstract: fd.Abstract, Override: fd.Override, Extern: fd.GoExtern, Pos: fd.NamePos}
 	fd.Method = m
 	fd.Sig = c.resolveSig(fd, sc, td)

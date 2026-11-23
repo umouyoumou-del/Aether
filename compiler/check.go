@@ -466,6 +466,7 @@ func (c *Checker) collect(m *Module) {
 					}
 				}
 			}
+			c.checkClassDecorators(s.Decorators)
 			s.TD = td
 			sym := &Symbol{Kind: SType, Name: s.Name, TD: td}
 			td.Sym = sym
@@ -515,6 +516,21 @@ func (c *Checker) collect(m *Module) {
 		default:
 			collectAssignedNames(st, m.pendingGlobals)
 			m.TopStmts = append(m.TopStmts, st)
+		}
+	}
+}
+
+// checkClassDecorators 处理类上的装饰器：Python 中常用但五行不需要的给出警告，其余报错。
+func (c *Checker) checkClassDecorators(decs []*Decorator) {
+	for _, d := range decs {
+		switch d.Name {
+		case "go":
+		case "dataclass", "dataclasses.dataclass":
+			c.warnf(d.Pos, "不需要 @dataclass：声明了字段、没有 __init__ 的类会自动生成构造函数、按字段打印")
+		case "total_ordering", "functools.total_ordering":
+			c.warnf(d.Pos, "不需要 @total_ordering：只定义 __lt__ 时 > <= >= 也可以使用")
+		default:
+			c.errorf(d.Pos, "五行不支持类装饰器 @%s", d.Name)
 		}
 	}
 }

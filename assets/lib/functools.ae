@@ -1,0 +1,34 @@
+# functools 模块：高阶函数工具（用纯五行代码编写）
+# @cache 与 @lru_cache(maxsize=128) 是由编译器处理的装饰器（见《语言参考》第 7 节）；
+# 这里的同名函数只是为了可以写 from functools import cache。
+
+def cache[T](f: T) -> T:
+    raise NotImplementedError("cache 只能作为装饰器使用：@cache")
+
+def lru_cache[T](f: T) -> T:
+    raise NotImplementedError("lru_cache 只能作为装饰器使用：@lru_cache(maxsize=128)")
+
+# 从左到右累积：reduce(f, [a, b, c]) == f(f(a, b), c)；给出 initial 时从它开始。
+# 序列为空且没有 initial 时抛出 TypeError（与 Python 相同）。
+def reduce[T](f: fn(T, T) -> T, items: iter[T], initial: T? = null) -> T:
+    acc: list[T] = []
+    if initial != null:
+        acc.append(initial)
+    for x in items:
+        if len(acc) == 0:
+            acc.append(x)
+        else:
+            acc[0] = f(acc[0], x)
+    if len(acc) == 0:
+        raise TypeError("reduce() 的序列为空，并且没有给出初始值")
+    return acc[0]
+
+# 把比较函数（返回负数、0、正数）转换为排序用的 key：sorted(xs, key=cmp_to_key(compare))
+struct CmpKey[T]:
+    value: T
+    cmp: fn(T, T) -> int
+    def __lt__(self, other: CmpKey[T]) -> bool:
+        return self.cmp(self.value, other.value) < 0
+
+def cmp_to_key[T](f: fn(T, T) -> int) -> fn(T) -> CmpKey[T]:
+    return x => CmpKey(x, f)

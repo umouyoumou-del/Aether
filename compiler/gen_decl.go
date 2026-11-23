@@ -133,14 +133,64 @@ func (g *Gen) genFunc(fd *FuncDecl) {
 	g.subst = nil
 	g.self = nil
 	sig := fd.Sig
+	name := fd.Sym.GoName
+	if fd.Cache {
+		// 函数体改名为 名字ꞏcached，原来的名字是带缓存的包装函数
+		memo := g.alloc(name + "ꞏmemo")
+		g.resetLine()
+		g.line("var %s = %s.NewMemo[%s, %s](%d)", memo, g.rt(), g.cacheKeyType(sig), g.typ(sig.Ret), fd.CacheMax)
+		g.line("func %s(%s)%s {", name, g.paramList(fd.Fn, sig), g.retSig(sig))
+		g.cacheBody(fd, memo, name+"ꞏcached")
+		g.line("}")
+		g.line("")
+		name += "ꞏcached"
+	}
 	g.pos(fd.Pos)
-	g.line("func %s%s(%s)%s {", fd.Sym.GoName, g.tparamDecl(sig.TParams), g.paramList(fd.Fn, sig), g.retSig(sig))
+	g.line("func %s%s(%s)%s {", name, g.tparamDecl(sig.TParams), g.paramList(fd.Fn, sig), g.retSig(sig))
 	g.ind++
 	g.funcBody(fd.Fn, fd.Body, sig)
 	g.ind--
 	g.line("}")
 	g.resetLine()
 	g.line("")
+}
+
+// cacheKeyType 返回 @cache 的缓存键的 Go 类型：一个参数时就是它的类型，多个时是元组。
+func (g *Gen) cacheKeyType(sig *FuncSig) string {
+	switch len(sig.Params) {
+	case 0:
+		return "bool"
+	case 1:
+		return g.typ(sig.Params[0].T)
+	}
+	tt := &TupleT{}
+	for _, p := range sig.Params {
+		tt.Elems = append(tt.Elems, p.T)
+	}
+	return g.typ(tt)
+}
+
+// cacheBody 生成 @cache 包装函数的函数体：先查缓存，没有时调用 impl 并保存结果。
+func (g *Gen) cacheBody(fd *FuncDecl, memo, impl string) {
+	var names []string
+	for _, p := range fd.Fn.Params {
+		names = append(names, g.local(p))
+	}
+	key := "false"
+	switch len(names) {
+	case 0:
+	case 1:
+		key = names[0]
+	default:
+		key = g.cacheKeyType(fd.Sig) + "{" + strings.Join(names, ", ") + "}"
+	}
+	g.line("	ꞏk := %s", key)
+	g.line("	if ꞏv, ok := %s.Get(ꞏk); ok {", memo)
+	g.line("		return ꞏv")
+	g.line("	}")
+	g.line("	ꞏv := %s(%s)", impl, strings.Join(names, ", "))
+	g.line("	%s.Put(ꞏk, ꞏv)", memo)
+	g.line("	return ꞏv")
 }
 
 // ===== 接口 =====

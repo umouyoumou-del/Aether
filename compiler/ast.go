@@ -749,6 +749,10 @@ type FuncDecl struct {
 	Fn     *FuncCtx
 	Method *Method
 	GoExtern string
+	// @cache / @lru_cache：缓存结果（CacheMax <= 0 表示不限大小）
+	Cache    bool
+	CacheMax int
+	CachePos Pos
 }
 
 type FieldDecl struct {
