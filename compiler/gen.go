@@ -32,7 +32,7 @@ var goPredeclared = []string{
 
 // 生成代码可能导入的包名。
 var knownPkgs = map[string]string{
-	"rt": RTPath, "rtjson": RTPath + "/rtjson", "rthttp": RTPath + "/rthttp", "rtre": RTPath + "/rtre", "rtenc": RTPath + "/rtenc", "rtcsv": RTPath + "/rtcsv", "fmt": "fmt", "math": "math", "strings": "strings", "strconv": "strconv",
+	"rt": RTPath, "rtjson": RTPath + "/rtjson", "rthttp": RTPath + "/rthttp", "rtre": RTPath + "/rtre", "rtenc": RTPath + "/rtenc", "rtcsv": RTPath + "/rtcsv", "rttensor": RTPath + "/rttensor", "fmt": "fmt", "math": "math", "strings": "strings", "strconv": "strconv",
 	"unicode": "unicode", "utf8": "unicode/utf8", "os": "os", "time": "time", "sort": "sort",
 	"slices": "slices", "maps": "maps", "cmp": "cmp", "iter": "iter", "sync": "sync", "atomic": "sync/atomic",
 	"runtime": "runtime", "errors": "errors", "reflect": "reflect", "regexp": "regexp",

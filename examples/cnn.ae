@@ -1,0 +1,94 @@
+# 卷积神经网络：识别 16x16 图像中的横线、竖线和斜线（合成数据），并保存、读回模型
+#
+#     aether run examples/cnn.ae          有 GPU 时使用 GPU
+#     aether run examples/cnn.ae cpu
+import os
+import random
+import sys
+import time
+import tensor
+import tensor.nn as nn
+import tensor.optim as optim
+from tensor import Tensor
+
+const SIZE = 16
+const KINDS = ["横线", "竖线", "斜线"]
+
+def make_data(n: int) -> (Tensor, Tensor):
+    pixels: list[float] = []
+    labels: list[int] = []
+    for _ in range(n):
+        img = [random.gauss(0.0, 0.3) for _ in range(SIZE * SIZE)]
+        kind = random.randrange(0, 3)
+        pos = random.randrange(2, SIZE - 2)
+        start = random.randrange(0, 5)
+        for k in range(start, min(start + random.randrange(7, 12), SIZE)):
+            if kind == 0:
+                img[pos * SIZE + k] += 1.0
+            elif kind == 1:
+                img[k * SIZE + pos] += 1.0
+            else:
+                img[k * SIZE + k] += 1.0
+        pixels.extend(img)
+        labels.append(kind)
+    return (tensor.tensor(pixels, [n, 1, SIZE, SIZE]), tensor.from_ints(labels))
+
+class CNN(nn.Module):
+    features: nn.Sequential
+    classifier: nn.Sequential
+
+    def __init__(self):
+        self.features = nn.Sequential(
+            nn.Conv2d(1, 16, 3, padding=1), nn.BatchNorm2d(16), nn.ReLU(), nn.MaxPool2d(2),   # -> 16x8x8
+            nn.Conv2d(16, 32, 3, padding=1), nn.BatchNorm2d(32), nn.ReLU(), nn.MaxPool2d(2),  # -> 32x4x4
+        )
+        self.classifier = nn.Sequential(nn.Flatten(), nn.Dropout(0.3), nn.Linear(32 * 4 * 4, 3))
+
+    def forward(self, x: Tensor) -> Tensor:
+        return self.classifier(self.features(x))
+
+def accuracy(model: CNN, x: Tensor, y: Tensor) -> float:
+    model.eval()
+    with tensor.no_grad():
+        return model(x).argmax(dim=1).eq(y).mean().item()
+
+device = sys.argv[1] if len(sys.argv) > 1 else ("gpu" if tensor.gpu_available() else "cpu")
+print("设备：", tensor.device_info() if device == "gpu" else "CPU")
+tensor.set_default_device(device)
+tensor.manual_seed(0)
+random.seed(0)
+
+train_x, train_y = make_data(4000)
+test_x, test_y = make_data(1000)
+model = CNN()
+print(f"参数个数：{model.num_parameters()}")
+opt = optim.AdamW(model.parameters(), lr=0.003)
+loss_fn = nn.CrossEntropyLoss()
+
+start = time.time()
+for epoch in range(6):
+    model.train()
+    for idx in tensor.batches(len(train_x), 128):
+        loss = loss_fn(model(train_x.index_select(0, idx)), train_y.index_select(0, idx))
+        opt.zero_grad()
+        loss.backward()
+        opt.step()
+    print(f"第 {epoch + 1} 轮：测试集准确率 {accuracy(model, test_x, test_y):.1%}")
+tensor.synchronize()
+print(f"训练用时 {time.time() - start:.2f} 秒")
+
+# 保存参数（包括 BatchNorm 的滑动平均），再读回到一个新模型中
+model_file = os.path.join(os.tempdir(), "aether_cnn.bin")
+model.save(model_file)
+restored = CNN()
+restored.load(model_file)
+restored.to(device)
+print(f"读回的模型：测试集准确率 {accuracy(restored, test_x, test_y):.1%}")
+os.remove(model_file)
+
+# 看看前几张测试图像的预测结果
+with tensor.no_grad():
+    probs = restored(test_x.narrow(0, 0, 5)).softmax(dim=1).rows()
+for i in range(5):
+    best = max(range(3), key=k => probs[i][k])
+    print(f"图像 {i}：预测为{KINDS[best]}（{probs[i][best]:.1%}），实际是{KINDS[int(test_y[i].item())]}")

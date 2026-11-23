@@ -1,0 +1,89 @@
+# tensor.optim 模块：优化器与学习率调度
+#
+#     opt = optim.Adam(model.parameters(), lr=0.001)
+#     for x, y in ...:
+#         loss = loss_fn(model(x), y)
+#         opt.zero_grad()
+#         loss.backward()
+#         opt.step()
+#
+# 每一步对每个参数只运行一次融合的更新运算（在 GPU 上不需要把数据传回内存）。
+
+import math
+from tensor import Tensor
+
+@go("*rttensor.Optimizer")
+class Optimizer:
+    # 用参数当前的梯度更新参数
+    @go("Step") def step(self)
+    # 清除所有参数的梯度
+    @go("ZeroGrad") def zero_grad(self)
+    @go("Lr") prop lr -> float
+    @go("SetLr") def set_lr(self, lr: float)
+    # 已经执行的 step() 次数
+    @go("Steps") prop steps -> int
+    @go("Params") def params(self) -> list[Tensor]
+
+@go("rttensor.NewSGD") def _sgd(params: list[Tensor], lr: float, momentum: float, weight_decay: float) -> Optimizer
+@go("rttensor.NewAdam") def _adam(params: list[Tensor], lr: float, beta1: float, beta2: float, eps: float, weight_decay: float, decoupled: bool) -> Optimizer
+
+# 随机梯度下降（momentum 为 0 时不使用动量）
+def SGD(params: list[Tensor], lr: float, momentum: float = 0.0, weight_decay: float = 0.0) -> Optimizer:
+    return _sgd(params, lr, momentum, weight_decay)
+
+def Adam(params: list[Tensor], lr: float = 0.001, betas: (float, float) = (0.9, 0.999), eps: float = 1e-8, weight_decay: float = 0.0) -> Optimizer:
+    b1, b2 = betas
+    return _adam(params, lr, b1, b2, eps, weight_decay, false)
+
+# AdamW：权重衰减直接作用于参数，而不是加到梯度上
+def AdamW(params: list[Tensor], lr: float = 0.001, betas: (float, float) = (0.9, 0.999), eps: float = 1e-8, weight_decay: float = 0.01) -> Optimizer:
+    b1, b2 = betas
+    return _adam(params, lr, b1, b2, eps, weight_decay, true)
+
+# ===== 学习率调度：每个 epoch 结束时调用 step() =====
+
+# 每 step_size 个 epoch 把学习率乘以 gamma
+class StepLR:
+    optimizer: Optimizer
+    step_size: int
+    gamma: float
+    _base_lr: float
+    _epoch: int = 0
+
+    def __init__(self, optimizer: Optimizer, step_size: int, gamma: float = 0.1):
+        self.optimizer = optimizer
+        self.step_size = step_size
+        self.gamma = gamma
+        self._base_lr = optimizer.lr
+
+    def step(self):
+        self._epoch += 1
+        self.optimizer.set_lr(self._base_lr * self.gamma ** (self._epoch // self.step_size))
+
+# 每个 epoch 把学习率乘以 gamma
+class ExponentialLR:
+    optimizer: Optimizer
+    gamma: float
+
+    def step(self):
+        self.optimizer.set_lr(self.optimizer.lr * self.gamma)
+
+# 余弦退火：t_max 个 epoch 内学习率从初始值按余弦曲线降到 eta_min
+class CosineAnnealingLR:
+    optimizer: Optimizer
+    t_max: int
+    eta_min: float
+    _base_lr: float
+    _epoch: int = 0
+
+    def __init__(self, optimizer: Optimizer, t_max: int, eta_min: float = 0.0):
+        self.optimizer = optimizer
+        self.t_max = t_max
+        self.eta_min = eta_min
+        self._base_lr = optimizer.lr
+
+    def step(self):
+        self._epoch += 1
+        t = min(self._epoch, self.t_max)
+        lr = self.eta_min + (self._base_lr - self.eta_min) * (1.0 + math.cos(math.pi * t / self.t_max)) / 2.0
+        self.optimizer.set_lr(lr)

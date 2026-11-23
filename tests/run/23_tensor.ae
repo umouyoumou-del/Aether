@@ -1,0 +1,151 @@
+# tensor 模块：张量运算、自动求导、神经网络与优化器（在 CPU 上运行，结果确定）
+import math
+import tensor
+import tensor.nn as nn
+import tensor.optim as optim
+from tensor import Tensor
+
+tensor.manual_seed(7)
+
+# ===== 创建与显示 =====
+a = tensor.arange(6).reshape(2, 3)
+print(a)
+print(a.shape, a.ndim, a.numel(), len(a), a.device)
+print(tensor.zeros(2, 2), tensor.ones(3), tensor.full([2], 2.5))
+print(tensor.eye(2), tensor.linspace(0, 1, 5))
+print(tensor.from_rows([[1.0, 2.0], [3.0, 4.0]]).tolist())
+print(tensor.from_ints([3, 1, 2]), tensor.scalar(1.5).item())
+print(tensor.arange(1, 3, 0.5))
+
+# ===== 运算与广播 =====
+b = tensor.tensor([10.0, 20.0, 30.0])
+print(a + b)
+print(a * 2 - 1, 1 - a, 2 ** tensor.tensor([0.0, 1.0, 3.0]))
+print(a / tensor.tensor([1.0, 2.0, 4.0]), -a[1])
+print(a @ a.T)
+print(tensor.tensor([1.0, 2.0]) @ tensor.tensor([3.0, 4.0]))
+print(a.sum(), a.sum(dim=0), a.mean(dim=1, keepdim=true).shape)
+print(a.max(), a.argmax(dim=1), a.min(dim=0), a.std())
+print(a.T.flatten(), a.permute(1, 0).shape, a.unsqueeze(0).shape, a.unsqueeze(0).squeeze().shape)
+print(tensor.cat([a, a], dim=1).shape, tensor.stack([a, a]).shape)
+print(a.narrow(1, 1, 2), a.slice(1, -1))
+print(a.index_select(1, tensor.from_ints([2, 0])))
+print(tensor.tensor([-1.0, 0.5, 2.0]).relu(), tensor.tensor([0.0]).sigmoid(), tensor.tensor([-2.0, 2.0]).clamp(-1, 1))
+print(tensor.tensor([1.0, 2.0, 3.0]).softmax(dim=0))
+print(a.gt_scalar(2), a.eq(tensor.tensor([0.0, 4.0, 2.0])))
+print(tensor.where(tensor.tensor([1.0, 0.0]), tensor.tensor([1.0, 2.0]), tensor.tensor([-1.0, -2.0])))
+print(tensor.one_hot(tensor.from_ints([2, 0]), 3))
+print(a.allclose(a + 1e-6, atol=1e-5), a.allclose(a + 1))
+
+# ===== 自动求导 =====
+x = tensor.tensor([1.0, 2.0, 3.0]).requires_grad_()
+y = (x * x + 3 * x).sum()
+y.backward()
+print(y, y.grad_fn, x.grad)
+w = tensor.from_rows([[1.0, -1.0], [0.5, 2.0]]).requires_grad_()
+h = (tensor.from_rows([[1.0, 2.0]]) @ w).tanh().sum()
+h.backward()
+g = w.grad
+if g != null:
+    print(g)
+x.zero_grad()
+(x.exp() / x.exp().sum()).max().backward()
+print(x.grad, x.is_leaf, (x * 2).is_leaf)
+with tensor.no_grad():
+    z = x * 2
+print(z.requires_grad, tensor.is_grad_enabled())
+v = tensor.tensor([1.0, 2.0]).requires_grad_()
+(v * v).backward(tensor.tensor([1.0, 0.5]))
+print(v.grad)
+
+# ===== 错误 =====
+try:
+    _ = a + tensor.zeros(4)
+except ValueError as e:
+    print("ValueError:", e)
+try:
+    _ = a @ a
+except ValueError as e:
+    print("ValueError:", e)
+try:
+    x.backward()
+except RuntimeError as e:
+    print("RuntimeError:", e)
+try:
+    tensor.zeros(2).to("tpu")
+except ValueError as e:
+    print("ValueError:", e)
+
+# ===== 神经网络：用 SGD 拟合 y = 3x - 1，用 Adam 训练分类器 =====
+class Regressor(nn.Module):
+    fc: nn.Linear
+
+    def __init__(self):
+        self.fc = nn.Linear(1, 1)
+
+    def forward(self, x: Tensor) -> Tensor:
+        return self.fc(x)
+
+xs = tensor.linspace(-1, 1, 20).reshape(20, 1)
+ys = xs * 3 - 1
+reg = Regressor()
+sgd = optim.SGD(reg.parameters(), lr=0.5, momentum=0.5)
+for step in range(60):
+    loss = nn.MSELoss()(reg(xs), ys)
+    sgd.zero_grad()
+    loss.backward()
+    sgd.step()
+print(f"w={reg.fc.weight.item():.3f} b={reg.fc.bias?.item() ?? 0.0:.3f} 步数={sgd.steps}")
+
+class Classifier(nn.Module):
+    net: nn.Sequential
+
+    def __init__(self):
+        self.net = nn.Sequential(nn.Linear(2, 16), nn.Tanh(), nn.Dropout(0.1), nn.Linear(16, 2))
+
+    def forward(self, x: Tensor) -> Tensor:
+        return self.net(x)
+
+# 两类：点在圆内还是圆外
+pts = tensor.uniform([400, 2], -1, 1)
+labels = (pts * pts).sum(dim=1).gt_scalar(0.4)
+model = Classifier()
+print(model)
+print(model.num_parameters(), [name for name, _ in model.named_parameters()])
+opt = optim.Adam(model.parameters(), lr=0.05)
+sched = optim.StepLR(opt, step_size=50, gamma=0.5)
+loss_fn = nn.CrossEntropyLoss()
+for epoch in range(100):
+    for idx in tensor.batches(400, 100):
+        loss = loss_fn(model(pts.index_select(0, idx)), labels.index_select(0, idx))
+        opt.zero_grad()
+        loss.backward()
+        nn.clip_grad_norm_(model.parameters(), 5.0)
+        opt.step()
+    sched.step()
+model.eval()
+print(model.training, model.net[2].training, opt.lr)
+with tensor.no_grad():
+    acc = model(pts).argmax(dim=1).eq(labels).mean().item()
+print("准确率超过 95%：", acc > 0.95)
+
+# ===== 保存与读取 =====
+model.save("classifier.bin")
+copy = Classifier()
+copy.load("classifier.bin")
+copy.eval()
+with tensor.no_grad():
+    print("读回后输出相同：", copy(pts).allclose(model(pts)))
+state = tensor.load("classifier.bin")
+print(sorted(list(state.keys())))
+try:
+    Regressor().load("classifier.bin")
+except KeyError as e:
+    print("KeyError:", e)
+
+# ===== 卷积网络的形状 =====
+conv = nn.Sequential(nn.Conv2d(3, 4, 3, padding=1), nn.BatchNorm2d(4), nn.ReLU(), nn.MaxPool2d(2), nn.Flatten())
+imgs = tensor.randn(2, 3, 8, 8)
+print(conv(imgs).shape, nn.AvgPool2d(2)(imgs).shape)
+emb = nn.Embedding(10, 3)
+print(emb(tensor.from_ints([1, 2, 1, 9], [2, 2])).shape, nn.LayerNorm(3)(tensor.randn(4, 3)).sum(dim=1).abs().max().item() < 1e-5)

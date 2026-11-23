@@ -284,10 +284,30 @@ $ aether test calc.ae
         右边：5
 ```
 
+### 深度学习（GPU 加速）
+
+```python
+import tensor
+import tensor.nn as nn
+import tensor.optim as optim
+
+tensor.set_default_device("gpu")              # NVIDIA、AMD、Intel 显卡都可以（通过驱动自带的 OpenCL）
+x, y = tensor.randn(256, 2), tensor.randint(0, 3, [256])
+model = nn.Sequential(nn.Linear(2, 64), nn.ReLU(), nn.Linear(64, 3))
+opt = optim.Adam(model.parameters(), lr=0.01)
+for step in range(100):
+    loss = nn.CrossEntropyLoss()(model(x), y)
+    opt.zero_grad()
+    loss.backward()                           # 自动求导
+    opt.step()
+```
+
+张量、自动求导、`Linear`/`Conv2d`/`BatchNorm`/`LayerNorm`/`Embedding`/`Dropout` 等层、SGD/Adam/AdamW、学习率调度、模型保存与读取，接口与 PyTorch 基本一致；GPU 后端不需要安装 CUDA 或 ROCm。详见 [docs/深度学习.md](docs/深度学习.md)。
+
 ### 标准库
 
 内置：`print` `input` `len` `range` `enumerate` `zip` `sorted` `reversed` `sum` `min` `max` `any` `all` `abs` `round` `open` 等；
-模块：`math` `random` `time` `datetime` `sys` `os` `os.path` `json` `re` `csv` `http` `heapq` `bisect` `collections` `itertools` `functools` `statistics` `string` `textwrap` `base64` `hashlib`。完整列表见 [docs/标准库.md](docs/标准库.md)。
+模块：`math` `random` `time` `datetime` `sys` `os` `os.path` `json` `re` `csv` `http` `heapq` `bisect` `collections` `itertools` `functools` `statistics` `string` `textwrap` `base64` `hashlib`，以及深度学习的 `tensor` `tensor.nn` `tensor.optim`。完整列表见 [docs/标准库.md](docs/标准库.md)。
 
 ```python
 import http
@@ -328,10 +348,10 @@ cmd/aether/      命令行工具
 compiler/        编译器：lexer、parser、checker、代码生成、构建驱动、测试
 assets/rt/       运行时库（Go）
 assets/lib/      预导入模块 prelude.ae 与标准库 math/random/time/os/json/re/http（.ae）
-examples/        示例程序（计算器、银行、并发、Web 服务、生命游戏……）
+examples/        示例程序（计算器、银行、并发、Web 服务、生命游戏、神经网络……）
 tests/run/       黄金测试（程序 + 期望输出）
 tests/errors/    编译错误测试
-docs/            语言参考、标准库、实现原理
+docs/            语言参考、标准库、深度学习、实现原理
 editors/vscode/  VS Code 插件（语法高亮，以及语言服务器的客户端）
 ```
 

@@ -1,0 +1,81 @@
+# 深度学习入门：用多层感知机给三条螺旋线上的点分类
+#
+#     aether run examples/deep_learning.ae          有 GPU 时使用 GPU
+#     aether run examples/deep_learning.ae cpu      指定设备
+import math
+import sys
+import time
+import tensor
+import tensor.nn as nn
+import tensor.optim as optim
+from tensor import Tensor
+
+# 生成数据：classes 条螺旋线，每条 n 个点（带一点噪声）
+def spiral(n: int, classes: int) -> (Tensor, Tensor):
+    coords: list[float] = []
+    labels: list[int] = []
+    noise = tensor.randn(n * classes * 2).tolist()
+    for c in range(classes):
+        for i in range(n):
+            r = i / n
+            t = c * 4.0 + 4.0 * r
+            k = 2 * (c * n + i)
+            coords.append(r * math.sin(t) + 0.03 * noise[k])
+            coords.append(r * math.cos(t) + 0.03 * noise[k + 1])
+            labels.append(c)
+    return (tensor.tensor(coords, [n * classes, 2]), tensor.from_ints(labels))
+
+class MLP(nn.Module):
+    layers: nn.Sequential
+
+    def __init__(self, hidden: int, classes: int):
+        self.layers = nn.Sequential(
+            nn.Linear(2, hidden), nn.ReLU(),
+            nn.Linear(hidden, hidden), nn.ReLU(),
+            nn.Linear(hidden, classes),
+        )
+
+    def forward(self, x: Tensor) -> Tensor:
+        return self.layers(x)
+
+device = sys.argv[1] if len(sys.argv) > 1 else ("gpu" if tensor.gpu_available() else "cpu")
+print("设备：", tensor.device_info() if device == "gpu" else "CPU")
+tensor.set_default_device(device)
+tensor.manual_seed(42)          # 结果可以重现：CPU 与 GPU 上生成的随机数相同
+
+x, y = spiral(1000, 3)
+model = MLP(128, 3)
+print(model)
+print(f"参数个数：{model.num_parameters()}")
+
+opt = optim.Adam(model.parameters(), lr=0.01)
+sched = optim.CosineAnnealingLR(opt, t_max=60)
+loss_fn = nn.CrossEntropyLoss()
+start = time.time()
+for epoch in range(60):
+    model.train()
+    for idx in tensor.batches(len(x), 200):
+        loss = loss_fn(model(x.index_select(0, idx)), y.index_select(0, idx))
+        opt.zero_grad()
+        loss.backward()
+        opt.step()
+    sched.step()
+    if (epoch + 1) % 10 == 0:
+        model.eval()
+        with tensor.no_grad():
+            out = model(x)
+            acc = out.argmax(dim=1).eq(y).mean().item()
+            print(f"第 {epoch + 1} 轮：损失 {loss_fn(out, y).item():.4f}，准确率 {acc:.1%}")
+tensor.synchronize()
+print(f"训练用时 {time.time() - start:.2f} 秒")
+
+# 用训练好的模型在一个网格上预测，画出三类区域
+with tensor.no_grad():
+    grid: list[float] = []
+    for row in range(16):
+        for col in range(40):
+            grid.append(-1.0 + 2.0 * col / 39)
+            grid.append(1.0 - 2.0 * row / 15)
+    pred = model(tensor.tensor(grid, [640, 2])).argmax(dim=1).tolist()
+for row in range(16):
+    print("".join(str(".ox"[int(pred[row * 40 + col])]) for col in range(40)))

@@ -21,6 +21,7 @@ import os.path    # 使 import os 之后可以使用 os.path.join(...)
 @go("rt.Remove") def remove(path: str)
 @go("rt.Rename") def rename(src: str, dst: str)
 @go("rt.Cwd") def cwd() -> str
+@go("os.TempDir") def tempdir() -> str
 @go("rt.Chdir") def chdir(path: str)
 @go("rt.RunCmd") def run(cmd: str, args: list[str] = []) -> str
 @go("rt.PathJoin") def join(*parts: str) -> str

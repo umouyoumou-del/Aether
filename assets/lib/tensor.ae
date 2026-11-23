@@ -1,0 +1,220 @@
+# tensor 模块：张量、自动求导与 GPU 加速
+#
+# 张量是 float32 的多维数组，可以放在 CPU 或 GPU 上。GPU 后端使用显卡驱动自带的 OpenCL
+# （NVIDIA、AMD、Intel 显卡都可以，不需要安装 CUDA 或 ROCm）。神经网络的层与优化器
+# 见 tensor.nn 与 tensor.optim。
+
+@go("*rttensor.NoGradCtx")
+class NoGrad:
+    @go("Enter") def __enter__(self)
+    @go("Exit") def __exit__(self)
+
+@go("*rttensor.Tensor")
+class Tensor:
+    # ===== 基本信息 =====
+    @go("Shape") prop shape -> list[int]
+    @go("Ndim") prop ndim -> int
+    @go("DeviceName") prop device -> str
+    @go("RequiresGrad") prop requires_grad -> bool
+    @go("IsLeaf") prop is_leaf -> bool
+    @go("Grad") prop grad -> Tensor?
+    @go("GradFn") prop grad_fn -> str
+    @go("T") prop T -> Tensor
+    @go("Numel") def numel(self) -> int
+    @go("Size") def size(self, dim: int) -> int
+    @go("Len") def __len__(self) -> int
+    @go("Item") def item(self) -> float
+    @go("ToList") def tolist(self) -> list[float]
+    @go("Rows") def rows(self) -> list[list[float]]
+
+    # ===== 自动求导 =====
+    @go("SetRequiresGrad") def requires_grad_(self, flag: bool = true) -> Tensor
+    @go("Backward") def backward(self, gradient: Tensor? = null)
+    @go("ZeroGrad") def zero_grad(self)
+    @go("Detach") def detach(self) -> Tensor
+    @go("Clone") def clone(self) -> Tensor
+    @go("CopyFrom") def copy_(self, src: Tensor) -> Tensor
+
+    # ===== 设备 =====
+    @go("To") def to(self, device: str) -> Tensor
+    @go("Cpu") def cpu(self) -> Tensor
+    @go("Gpu") def gpu(self) -> Tensor
+    @go("Gpu") def cuda(self) -> Tensor
+
+    # ===== 运算符：张量与张量（按形状广播），或张量与数 =====
+    @go("Add") def __add__(self, other: Tensor) -> Tensor
+    @go("AddScalar") def __add__(self, other: float) -> Tensor
+    @go("AddScalar") def __radd__(self, other: float) -> Tensor
+    @go("Sub") def __sub__(self, other: Tensor) -> Tensor
+    @go("SubScalar") def __sub__(self, other: float) -> Tensor
+    @go("RSubScalar") def __rsub__(self, other: float) -> Tensor
+    @go("Mul") def __mul__(self, other: Tensor) -> Tensor
+    @go("MulScalar") def __mul__(self, other: float) -> Tensor
+    @go("MulScalar") def __rmul__(self, other: float) -> Tensor
+    @go("Div") def __truediv__(self, other: Tensor) -> Tensor
+    @go("DivScalar") def __truediv__(self, other: float) -> Tensor
+    @go("RDivScalar") def __rtruediv__(self, other: float) -> Tensor
+    @go("Pow") def __pow__(self, other: Tensor) -> Tensor
+    @go("PowScalar") def __pow__(self, other: float) -> Tensor
+    @go("RPowScalar") def __rpow__(self, other: float) -> Tensor
+    @go("Matmul") def __matmul__(self, other: Tensor) -> Tensor
+    @go("Neg") def __neg__(self) -> Tensor
+    @go("Index") def __getitem__(self, i: int) -> Tensor
+
+    # ===== 逐元素函数 =====
+    @go("Matmul") def matmul(self, other: Tensor) -> Tensor
+    @go("Exp") def exp(self) -> Tensor
+    @go("Log") def log(self) -> Tensor
+    @go("Sqrt") def sqrt(self) -> Tensor
+    @go("Abs") def abs(self) -> Tensor
+    @go("Square") def square(self) -> Tensor
+    @go("PowScalar") def pow(self, exponent: float) -> Tensor
+    @go("Sin") def sin(self) -> Tensor
+    @go("Cos") def cos(self) -> Tensor
+    @go("Relu") def relu(self) -> Tensor
+    @go("LeakyRelu") def leaky_relu(self, negative_slope: float = 0.01) -> Tensor
+    @go("Sigmoid") def sigmoid(self) -> Tensor
+    @go("Tanh") def tanh(self) -> Tensor
+    @go("Gelu") def gelu(self) -> Tensor
+    @go("Clamp") def clamp(self, min: float, max: float) -> Tensor
+    @go("Maximum") def maximum(self, other: Tensor) -> Tensor
+    @go("Minimum") def minimum(self, other: Tensor) -> Tensor
+    @go("Softmax") def softmax(self, dim: int = -1) -> Tensor
+    @go("LogSoftmax") def log_softmax(self, dim: int = -1) -> Tensor
+
+    # ===== 比较：结果是 0/1 张量（不参与求导） =====
+    @go("Eq") def eq(self, other: Tensor) -> Tensor
+    @go("Gt") def gt(self, other: Tensor) -> Tensor
+    @go("Lt") def lt(self, other: Tensor) -> Tensor
+    @go("Ge") def ge(self, other: Tensor) -> Tensor
+    @go("Le") def le(self, other: Tensor) -> Tensor
+    @go("GtScalar") def gt_scalar(self, value: float) -> Tensor
+    @go("LtScalar") def lt_scalar(self, value: float) -> Tensor
+    @go("Allclose") def allclose(self, other: Tensor, rtol: float = 1e-5, atol: float = 1e-8) -> bool
+
+    # ===== 归约：不给 dim 时对所有元素 =====
+    @go("Sum") def sum(self, dim: int? = null, keepdim: bool = false) -> Tensor
+    @go("Mean") def mean(self, dim: int? = null, keepdim: bool = false) -> Tensor
+    @go("Var") def var(self, dim: int? = null, keepdim: bool = false, unbiased: bool = true) -> Tensor
+    @go("Std") def std(self, dim: int? = null, keepdim: bool = false, unbiased: bool = true) -> Tensor
+    @go("Max") def max(self, dim: int? = null, keepdim: bool = false) -> Tensor
+    @go("Min") def min(self, dim: int? = null, keepdim: bool = false) -> Tensor
+    @go("Argmax") def argmax(self, dim: int? = null, keepdim: bool = false) -> Tensor
+    @go("Argmin") def argmin(self, dim: int? = null, keepdim: bool = false) -> Tensor
+
+    # ===== 形状 =====
+    @go("Reshape") def reshape(self, *shape: int) -> Tensor
+    @go("Reshape") def view(self, *shape: int) -> Tensor
+    @go("Flatten") def flatten(self, start_dim: int = 0, end_dim: int = -1) -> Tensor
+    @go("Unsqueeze") def unsqueeze(self, dim: int) -> Tensor
+    @go("Squeeze") def squeeze(self, dim: int? = null) -> Tensor
+    @go("Permute") def permute(self, *dims: int) -> Tensor
+    @go("Transpose") def transpose(self, dim0: int, dim1: int) -> Tensor
+    @go("Expand") def expand(self, *shape: int) -> Tensor
+    @go("Narrow") def narrow(self, dim: int, start: int, length: int) -> Tensor
+    @go("Slice") def slice(self, dim: int, start: int, end: int? = null) -> Tensor
+    @go("IndexSelectDim") def index_select(self, dim: int, index: Tensor) -> Tensor
+
+# ===== 创建张量（放在默认设备上，见 set_default_device） =====
+
+@go("rttensor.FromList") def tensor(data: list[float], shape: list[int]? = null) -> Tensor
+@go("rttensor.FromInts") def from_ints(data: list[int], shape: list[int]? = null) -> Tensor
+@go("rttensor.FromRows") def from_rows(rows: list[list[float]]) -> Tensor
+@go("rttensor.Scalar") def scalar(value: float) -> Tensor
+@go("rttensor.Zeros") def zeros(*shape: int) -> Tensor
+@go("rttensor.Ones") def ones(*shape: int) -> Tensor
+@go("rttensor.Full") def full(shape: list[int], value: float) -> Tensor
+@go("rttensor.ZerosLike") def zeros_like(t: Tensor) -> Tensor
+@go("rttensor.OnesLike") def ones_like(t: Tensor) -> Tensor
+@go("rttensor.Linspace") def linspace(start: float, stop: float, steps: int) -> Tensor
+@go("rttensor.Eye") def eye(n: int) -> Tensor
+@go("rttensor.Arange") def _arange(start: float, stop: float, step: float) -> Tensor
+
+# arange(5) 是 0 到 4；arange(1, 3, 0.5) 是 1, 1.5, 2, 2.5
+def arange(start: float, stop: float? = null, step: float = 1.0) -> Tensor:
+    if stop == null:
+        return _arange(0.0, start, step)
+    return _arange(start, stop, step)
+
+# ===== 随机数（manual_seed 之后可以重现，CPU 与 GPU 上的结果相同） =====
+
+@go("rttensor.ManualSeed") def manual_seed(seed: int)
+@go("rttensor.Randn") def randn(*shape: int) -> Tensor
+@go("rttensor.Rand") def rand(*shape: int) -> Tensor
+@go("rttensor.Uniform") def uniform(shape: list[int], low: float, high: float) -> Tensor
+@go("rttensor.Randint") def randint(low: int, high: int, shape: list[int]) -> Tensor
+@go("rttensor.Randperm") def randperm(n: int) -> Tensor
+
+# ===== 组合与选择 =====
+
+@go("rttensor.Cat") def cat(tensors: list[Tensor], dim: int = 0) -> Tensor
+@go("rttensor.Stack") def stack(tensors: list[Tensor], dim: int = 0) -> Tensor
+@go("rttensor.Where") def where(cond: Tensor, a: Tensor, b: Tensor) -> Tensor
+@go("rttensor.OneHot") def one_hot(index: Tensor, num_classes: int) -> Tensor
+
+# 把 0 到 n-1 分成若干批，返回每一批的下标（配合 x.index_select(0, idx) 取出一批样本）
+@go("rttensor.Batches") def batches(n: int, batch_size: int, shuffle: bool = true) -> list[Tensor]
+
+# ===== 函数形式的运算（与 torch.nn.functional 对应） =====
+
+def matmul(a: Tensor, b: Tensor) -> Tensor:
+    return a.matmul(b)
+
+def relu(x: Tensor) -> Tensor:
+    return x.relu()
+
+def sigmoid(x: Tensor) -> Tensor:
+    return x.sigmoid()
+
+def tanh(x: Tensor) -> Tensor:
+    return x.tanh()
+
+def gelu(x: Tensor) -> Tensor:
+    return x.gelu()
+
+def softmax(x: Tensor, dim: int = -1) -> Tensor:
+    return x.softmax(dim)
+
+def log_softmax(x: Tensor, dim: int = -1) -> Tensor:
+    return x.log_softmax(dim)
+
+@go("rttensor.LinearFn") def linear(x: Tensor, weight: Tensor, bias: Tensor? = null) -> Tensor
+@go("rttensor.Conv2d") def conv2d(x: Tensor, weight: Tensor, bias: Tensor? = null, stride: int = 1, padding: int = 0) -> Tensor
+@go("rttensor.MaxPool2d") def max_pool2d(x: Tensor, kernel_size: int, stride: int = 0, padding: int = 0) -> Tensor
+@go("rttensor.AvgPool2d") def avg_pool2d(x: Tensor, kernel_size: int, stride: int = 0) -> Tensor
+@go("rttensor.Dropout") def dropout(x: Tensor, p: float = 0.5, training: bool = true) -> Tensor
+@go("rttensor.LayerNorm") def layer_norm(x: Tensor, weight: Tensor, bias: Tensor, eps: float = 1e-5) -> Tensor
+@go("rttensor.BatchNorm") def batch_norm(x: Tensor, weight: Tensor, bias: Tensor, running_mean: Tensor, running_var: Tensor, training: bool, momentum: float = 0.1, eps: float = 1e-5) -> Tensor
+@go("rttensor.Embedding") def embedding(weight: Tensor, index: Tensor) -> Tensor
+
+# 损失函数：reduction 可以是 "mean"、"sum" 或 "none"
+@go("rttensor.CrossEntropy") def cross_entropy(logits: Tensor, target: Tensor, reduction: str = "mean") -> Tensor
+@go("rttensor.NLLLoss") def nll_loss(log_probs: Tensor, target: Tensor, reduction: str = "mean") -> Tensor
+@go("rttensor.MSELoss") def mse_loss(pred: Tensor, target: Tensor, reduction: str = "mean") -> Tensor
+@go("rttensor.L1Loss") def l1_loss(pred: Tensor, target: Tensor, reduction: str = "mean") -> Tensor
+@go("rttensor.BCE") def binary_cross_entropy(pred: Tensor, target: Tensor, reduction: str = "mean") -> Tensor
+@go("rttensor.BCEWithLogits") def binary_cross_entropy_with_logits(logits: Tensor, target: Tensor, reduction: str = "mean") -> Tensor
+
+# ===== 自动求导 =====
+
+# with tensor.no_grad(): 中的计算不记录计算图（推理、手动更新参数时使用）
+@go("rttensor.NoGrad") def no_grad() -> NoGrad
+@go("rttensor.IsGradEnabled") def is_grad_enabled() -> bool
+
+# ===== 设备 =====
+
+# 之后创建的张量放在哪个设备上："cpu" 或 "gpu"
+@go("rttensor.SetDefaultDevice") def set_default_device(device: str)
+@go("rttensor.DefaultDevice") def default_device() -> str
+@go("rttensor.GpuAvailable") def gpu_available() -> bool
+@go("rttensor.DeviceInfo") def device_info() -> str
+@go("rttensor.GpuDevices") def gpu_devices() -> list[str]
+# 等待 GPU 上已提交的计算完成（GPU 异步执行，计时前需要同步）
+@go("rttensor.Synchronize") def synchronize()
+@go("rttensor.EmptyCache") def empty_cache()
+@go("rttensor.GpuMemoryAllocated") def gpu_memory_allocated() -> int
+
+# ===== 保存与读取（例如 model.state_dict()） =====
+
+@go("rttensor.Save") def save(state: dict[str, Tensor], path: str)
+@go("rttensor.Load") def load(path: str) -> dict[str, Tensor]

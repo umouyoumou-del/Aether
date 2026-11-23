@@ -1,0 +1,361 @@
+# tensor.nn 模块：神经网络的模块、常用的层与损失函数
+#
+# 自定义模型继承 Module，把层和参数放在字段中，并实现 forward：
+#
+#     class MLP(nn.Module):
+#         fc1: nn.Linear
+#         fc2: nn.Linear
+#
+#         def __init__(self):
+#             self.fc1 = nn.Linear(2, 64)
+#             self.fc2 = nn.Linear(64, 3)
+#
+#         def forward(self, x: Tensor) -> Tensor:
+#             return self.fc2(self.fc1(x).relu())
+#
+# 模型的参数（parameters()）是字段中需要梯度的张量，也包括子模块、列表、字典中的；
+# 以 _ 开头的字段不算。不需要梯度的张量字段（例如 BatchNorm 的滑动平均）是“缓冲区”：
+# 不参与训练，但会随模型移动设备、保存与读取。
+
+import math
+import tensor
+from tensor import Tensor
+
+@go("rttensor.Parameters") def _parameters(m: any) -> list[Tensor]
+@go("rttensor.NamedParameters") def _named_parameters(m: any) -> list[(str, Tensor)]
+@go("rttensor.NamedTensors") def _named_tensors(m: any) -> list[(str, Tensor)]
+@go("rttensor.Objects") def _objects(m: any) -> list[any]
+@go("rttensor.StateDict") def _state_dict(m: any) -> dict[str, Tensor]
+@go("rttensor.LoadStateDict") def _load_state_dict(m: any, state: dict[str, Tensor], strict: bool)
+@go("rttensor.ModuleTo") def _module_to(m: any, device: str)
+@go("rttensor.ZeroGrads") def _zero_grads(m: any)
+@go("rttensor.NumParameters") def _num_parameters(m: any) -> int
+@go("rttensor.ModuleRepr") def _module_repr(m: any) -> str
+
+# 所有模块的基类
+class Module:
+    training: bool = true
+
+    def __init__(self):
+        pass
+
+    def forward(self, x: Tensor) -> Tensor:
+        raise NotImplementedError("这个模块没有实现 forward")
+
+    # model(x) 即 model.forward(x)
+    def __call__(self, x: Tensor) -> Tensor:
+        return self.forward(x)
+
+    # 可训练的参数（传给优化器）
+    def parameters(self) -> list[Tensor]:
+        return _parameters(self)
+
+    def named_parameters(self) -> list[(str, Tensor)]:
+        return _named_parameters(self)
+
+    # 参数与缓冲区
+    def named_tensors(self) -> list[(str, Tensor)]:
+        return _named_tensors(self)
+
+    # 自己以及所有子模块
+    def modules(self) -> list[Module]:
+        out: list[Module] = []
+        for o in _objects(self):
+            if o is Module:
+                out.append(o)
+        return out
+
+    # 训练模式与推理模式（影响 Dropout、BatchNorm）
+    def train(self, mode: bool = true):
+        for m in self.modules():
+            m.training = mode
+
+    def eval(self):
+        self.train(false)
+
+    # 把所有参数与缓冲区原地移到 "cpu" 或 "gpu"（请在创建优化器之前调用）
+    def to(self, device: str):
+        _module_to(self, device)
+
+    def cpu(self):
+        _module_to(self, "cpu")
+
+    def gpu(self):
+        _module_to(self, "gpu")
+
+    def zero_grad(self):
+        _zero_grads(self)
+
+    def num_parameters(self) -> int:
+        return _num_parameters(self)
+
+    def state_dict(self) -> dict[str, Tensor]:
+        return _state_dict(self)
+
+    def load_state_dict(self, state: dict[str, Tensor], strict: bool = true):
+        _load_state_dict(self, state, strict)
+
+    def save(self, path: str):
+        tensor.save(self.state_dict(), path)
+
+    def load(self, path: str):
+        self.load_state_dict(tensor.load(path))
+
+    def __repr__(self) -> str:
+        return _module_repr(self)
+
+# ===== 常用的层 =====
+
+# 全连接层：y = x @ weightᵀ + bias，weight 的形状为 [out_features, in_features]
+class Linear(Module):
+    in_features: int
+    out_features: int
+    weight: Tensor
+    bias: Tensor?
+
+    def __init__(self, in_features: int, out_features: int, bias: bool = true):
+        self.in_features = in_features
+        self.out_features = out_features
+        # 与 PyTorch 相同的初始化：均匀分布 U(-1/√in, 1/√in)
+        bound = 1.0 / math.sqrt(max(in_features, 1))
+        self.weight = tensor.uniform([out_features, in_features], -bound, bound).requires_grad_()
+        self.bias = tensor.uniform([out_features], -bound, bound).requires_grad_() if bias else null
+
+    def forward(self, x: Tensor) -> Tensor:
+        return tensor.linear(x, self.weight, self.bias)
+
+# 二维卷积：输入 [N, C, H, W]
+class Conv2d(Module):
+    in_channels: int
+    out_channels: int
+    kernel_size: int
+    stride: int
+    padding: int
+    weight: Tensor
+    bias: Tensor?
+
+    def __init__(self, in_channels: int, out_channels: int, kernel_size: int, stride: int = 1, padding: int = 0, bias: bool = true):
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.padding = padding
+        bound = 1.0 / math.sqrt(max(in_channels * kernel_size * kernel_size, 1))
+        self.weight = tensor.uniform([out_channels, in_channels, kernel_size, kernel_size], -bound, bound).requires_grad_()
+        self.bias = tensor.uniform([out_channels], -bound, bound).requires_grad_() if bias else null
+
+    def forward(self, x: Tensor) -> Tensor:
+        return tensor.conv2d(x, self.weight, self.bias, self.stride, self.padding)
+
+# 最大池化（stride 为 0 时等于 kernel_size）
+class MaxPool2d(Module):
+    kernel_size: int
+    stride: int
+    padding: int
+
+    def __init__(self, kernel_size: int, stride: int = 0, padding: int = 0):
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.padding = padding
+
+    def forward(self, x: Tensor) -> Tensor:
+        return tensor.max_pool2d(x, self.kernel_size, self.stride, self.padding)
+
+class AvgPool2d(Module):
+    kernel_size: int
+    stride: int
+
+    def __init__(self, kernel_size: int, stride: int = 0):
+        self.kernel_size = kernel_size
+        self.stride = stride
+
+    def forward(self, x: Tensor) -> Tensor:
+        return tensor.avg_pool2d(x, self.kernel_size, self.stride)
+
+class ReLU(Module):
+    def forward(self, x: Tensor) -> Tensor:
+        return x.relu()
+
+class LeakyReLU(Module):
+    negative_slope: float
+
+    def __init__(self, negative_slope: float = 0.01):
+        self.negative_slope = negative_slope
+
+    def forward(self, x: Tensor) -> Tensor:
+        return x.leaky_relu(self.negative_slope)
+
+class Sigmoid(Module):
+    def forward(self, x: Tensor) -> Tensor:
+        return x.sigmoid()
+
+class Tanh(Module):
+    def forward(self, x: Tensor) -> Tensor:
+        return x.tanh()
+
+class GELU(Module):
+    def forward(self, x: Tensor) -> Tensor:
+        return x.gelu()
+
+class Softmax(Module):
+    dim: int
+
+    def __init__(self, dim: int = -1):
+        self.dim = dim
+
+    def forward(self, x: Tensor) -> Tensor:
+        return x.softmax(self.dim)
+
+class LogSoftmax(Module):
+    dim: int
+
+    def __init__(self, dim: int = -1):
+        self.dim = dim
+
+    def forward(self, x: Tensor) -> Tensor:
+        return x.log_softmax(self.dim)
+
+class Identity(Module):
+    def forward(self, x: Tensor) -> Tensor:
+        return x
+
+# 把第 start_dim 到 end_dim 维合并（默认保留第 0 维，即批次维）
+class Flatten(Module):
+    start_dim: int
+    end_dim: int
+
+    def __init__(self, start_dim: int = 1, end_dim: int = -1):
+        self.start_dim = start_dim
+        self.end_dim = end_dim
+
+    def forward(self, x: Tensor) -> Tensor:
+        return x.flatten(self.start_dim, self.end_dim)
+
+# 训练时以概率 p 把元素置零（推理模式下不起作用）
+class Dropout(Module):
+    p: float
+
+    def __init__(self, p: float = 0.5):
+        self.p = p
+
+    def forward(self, x: Tensor) -> Tensor:
+        return tensor.dropout(x, self.p, self.training)
+
+# 词嵌入：按下标取出 weight 的行
+class Embedding(Module):
+    num_embeddings: int
+    embedding_dim: int
+    weight: Tensor
+
+    def __init__(self, num_embeddings: int, embedding_dim: int):
+        self.num_embeddings = num_embeddings
+        self.embedding_dim = embedding_dim
+        self.weight = tensor.randn(num_embeddings, embedding_dim).requires_grad_()
+
+    def forward(self, x: Tensor) -> Tensor:
+        return tensor.embedding(self.weight, x)
+
+# 对最后一维做层归一化
+class LayerNorm(Module):
+    normalized_shape: int
+    eps: float
+    weight: Tensor
+    bias: Tensor
+
+    def __init__(self, normalized_shape: int, eps: float = 1e-5):
+        self.normalized_shape = normalized_shape
+        self.eps = eps
+        self.weight = tensor.ones(normalized_shape).requires_grad_()
+        self.bias = tensor.zeros(normalized_shape).requires_grad_()
+
+    def forward(self, x: Tensor) -> Tensor:
+        return tensor.layer_norm(x, self.weight, self.bias, self.eps)
+
+# 批归一化：输入 [N, C] 或 [N, C, L]（BatchNorm1d）、[N, C, H, W]（BatchNorm2d）
+class BatchNorm1d(Module):
+    num_features: int
+    eps: float
+    momentum: float
+    weight: Tensor
+    bias: Tensor
+    running_mean: Tensor
+    running_var: Tensor
+
+    def __init__(self, num_features: int, eps: float = 1e-5, momentum: float = 0.1):
+        self.num_features = num_features
+        self.eps = eps
+        self.momentum = momentum
+        self.weight = tensor.ones(num_features).requires_grad_()
+        self.bias = tensor.zeros(num_features).requires_grad_()
+        self.running_mean = tensor.zeros(num_features)
+        self.running_var = tensor.ones(num_features)
+
+    def forward(self, x: Tensor) -> Tensor:
+        return tensor.batch_norm(x, self.weight, self.bias, self.running_mean, self.running_var, self.training, self.momentum, self.eps)
+
+class BatchNorm2d(BatchNorm1d):
+    pass
+
+# 依次执行各层
+class Sequential(Module):
+    layers: list[Module]
+
+    def __init__(self, *layers: Module):
+        self.layers = layers
+
+    def forward(self, x: Tensor) -> Tensor:
+        out = x
+        for layer in self.layers:
+            out = layer(out)
+        return out
+
+    def append(self, layer: Module):
+        self.layers.append(layer)
+
+    def __getitem__(self, i: int) -> Module:
+        return self.layers[i]
+
+    def __len__(self) -> int:
+        return len(self.layers)
+
+# ===== 损失函数（reduction 可以是 "mean"、"sum" 或 "none"） =====
+
+# 交叉熵：logits 为 [N, C]，target 为 N 个类别下标
+class CrossEntropyLoss:
+    reduction: str = "mean"
+
+    def __call__(self, logits: Tensor, target: Tensor) -> Tensor:
+        return tensor.cross_entropy(logits, target, self.reduction)
+
+class NLLLoss:
+    reduction: str = "mean"
+
+    def __call__(self, log_probs: Tensor, target: Tensor) -> Tensor:
+        return tensor.nll_loss(log_probs, target, self.reduction)
+
+class MSELoss:
+    reduction: str = "mean"
+
+    def __call__(self, pred: Tensor, target: Tensor) -> Tensor:
+        return tensor.mse_loss(pred, target, self.reduction)
+
+class L1Loss:
+    reduction: str = "mean"
+
+    def __call__(self, pred: Tensor, target: Tensor) -> Tensor:
+        return tensor.l1_loss(pred, target, self.reduction)
+
+class BCELoss:
+    reduction: str = "mean"
+
+    def __call__(self, pred: Tensor, target: Tensor) -> Tensor:
+        return tensor.binary_cross_entropy(pred, target, self.reduction)
+
+class BCEWithLogitsLoss:
+    reduction: str = "mean"
+
+    def __call__(self, logits: Tensor, target: Tensor) -> Tensor:
+        return tensor.binary_cross_entropy_with_logits(logits, target, self.reduction)
+
+# 把梯度的总范数限制在 max_norm 以内，返回限制之前的范数
+@go("rttensor.ClipGradNorm") def clip_grad_norm_(params: list[Tensor], max_norm: float) -> float
