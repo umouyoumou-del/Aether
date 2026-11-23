@@ -123,6 +123,28 @@ class Tensor:
     @go("Tril") def tril(self, diagonal: int = 0) -> Tensor
     @go("Triu") def triu(self, diagonal: int = 0) -> Tensor
 
+extend Tensor:
+    # 沿第 dim 维分成 chunks 份（最后一份可能较小）
+    def chunk(self, chunks: int, dim: int = 0) -> list[Tensor]:
+        n = self.size(dim)
+        return self.split((n + chunks - 1) // chunks, dim)
+
+    # 沿第 dim 维每 size 个分成一份
+    def split(self, size: int, dim: int = 0) -> list[Tensor]:
+        if size <= 0:
+            raise ValueError("split 的 size 必须是正数")
+        out: list[Tensor] = []
+        n = self.size(dim)
+        start = 0
+        while start < n:
+            out.append(self.narrow(dim, start, min(size, n - start)))
+            start += size
+        return out
+
+    # 所有元素的 L2 范数
+    def norm(self) -> Tensor:
+        return self.square().sum().sqrt()
+
 # ===== 创建张量（放在默认设备上，见 set_default_device） =====
 
 @go("rttensor.FromList") def tensor(data: list[float], shape: list[int]? = null) -> Tensor

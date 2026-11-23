@@ -3,6 +3,8 @@
 package rttensor
 
 import (
+	"os"
+	"path/filepath"
 	"runtime"
 	"syscall"
 	"unsafe"
@@ -10,8 +12,17 @@ import (
 
 // 通过 syscall 直接调用 OpenCL.dll（显卡驱动自带的 OpenCL 加载器），不需要 cgo 与 C 编译器。
 
+// openCLPath 返回系统目录中的 OpenCL.dll：使用完整路径，避免加载当前目录或程序目录中的同名文件。
+func openCLPath() string {
+	root := os.Getenv("SystemRoot")
+	if root == "" {
+		root = `C:\Windows`
+	}
+	return filepath.Join(root, "System32", "OpenCL.dll")
+}
+
 var (
-	clDLL                     = syscall.NewLazyDLL("OpenCL.dll")
+	clDLL                     = syscall.NewLazyDLL(openCLPath())
 	clGetPlatformIDs          = clDLL.NewProc("clGetPlatformIDs")
 	clGetDeviceIDs            = clDLL.NewProc("clGetDeviceIDs")
 	clGetDeviceInfo           = clDLL.NewProc("clGetDeviceInfo")
