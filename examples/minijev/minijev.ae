@@ -1,0 +1,605 @@
+# MiniJev：一个小巧的 System One 决策模型（用 Aether 的 tensor 框架实现）
+#
+# 接口仿照 TypeSafe AI 的 Jev（https://docs.typesafe.ai）：给出一个状态（state）和若干
+# 类型化的问题——Choice（从选项中选一个）、Score（在有序的等级上定位）、Noul（判断真假）——
+# 返回类型化的答案、每个选项的概率和置信度，而不是生成一段文字。
+#
+# 这是概念演示，不是 TypeSafe 的 Jev，也与 TypeSafe AI 无关。真正的 Jev 是大规模预训练的模型；
+# MiniJev 只有二十万左右个参数，在合成数据上从零训练，只懂训练数据中的三类场景
+# （客服工单、Agent 操作、内容审核）。
+#
+# 结构：状态由一个小 Transformer 编码一次；每个问题的每个选项（“问题｜选项”这段文字）单独编码，
+# 再通过交叉注意力读取状态，并与状态的摘要直接匹配，得到一个分数（见 JevNet.scores）。Choice、Score 对各选项的分数做 softmax，Noul 对
+# 分数做 sigmoid。所以同一个状态上多问几个问题几乎不增加开销，问题之间也互不影响。
+# 训练使用交叉熵（一种恰当评分规则，鼓励概率如实反映不确定性），训练后再用温度缩放校准概率。
+import math
+import tensor
+import tensor.nn as nn
+import tensor.optim as optim
+from tensor import Tensor
+
+# ===== 问题 =====
+
+enum Question:
+    Choice(instructions: str, criteria: dict[str, str])
+    Score(instructions: str, criteria: list[str])
+    Noul(instructions: str, criteria: str)
+
+# 从定义好的选项中选一个；criteria 是“选项 → 描述”
+def choice(instructions: str, criteria: dict[str, str]) -> Question:
+    if len(criteria) < 2:
+        raise ValueError("Choice 至少需要两个选项")
+    return Question.Choice(instructions, criteria)
+
+# 在有序的等级上定位；criteria 是从第 0 级开始的各级描述
+def score(instructions: str, criteria: list[str]) -> Question:
+    if len(criteria) < 2:
+        raise ValueError("Score 至少需要两个等级")
+    return Question.Score(instructions, criteria)
+
+# 判断一个是非问题；criteria 可以进一步说明“是”的含义
+def noul(instructions: str, criteria: str = "") -> Question:
+    return Question.Noul(instructions, criteria)
+
+# 一个问题展开为若干段“查询文字”：Choice、Score 每个选项一段，Noul 一段
+def query_texts(q: Question) -> list[str]:
+    match q:
+        case Choice(instr, criteria):
+            return [instr + "｜" + (criteria[key] if criteria[key] != "" else key) for key in criteria.keys()]
+        case Score(instr, levels):
+            return [instr + "｜" + level for level in levels]
+        case Noul(instr, crit):
+            return [instr if crit == "" else instr + "｜" + crit]
+
+# ===== 答案 =====
+
+class ChoiceAnswer:
+    choice: str
+    probabilities: dict[str, float]
+    confidence: float
+
+class ScoreAnswer:
+    score: float                  # 在等级上的位置（概率加权的平均等级，可以落在两级之间）
+    legend: list[str]
+    probabilities: list[float]
+    confidence: float
+
+    # 概率最大的等级
+    def level(self) -> int:
+        return argmax(self.probabilities)
+
+class NoulAnswer:
+    noul: float                   # 答案为“是”的概率
+
+    # 与 Choice 的置信度同一尺度：|2p - 1|
+    prop confidence -> float => noul_confidence(self.noul)
+
+class Response:
+    choices: dict[str, ChoiceAnswer] = {}
+    scores: dict[str, ScoreAnswer] = {}
+    nouls: dict[str, NoulAnswer] = {}
+
+# ===== 置信度与分流（公式与 Jev 文档相同） =====
+
+def argmax(xs: list[float]) -> int:
+    best = 0
+    for i in range(1, len(xs)):
+        if xs[i] > xs[best]:
+            best = i
+    return best
+
+# Choice：最大概率比均匀分布高出多少；均匀为 0，确定为 1
+def choice_confidence(probs: list[float]) -> float:
+    n = len(probs)
+    return (max(probs) - 1.0 / n) / (1.0 - 1.0 / n)
+
+# Score：概率离最可能等级的平均距离，与均匀分布的平均距离相比
+def score_confidence(probs: list[float]) -> float:
+    n = len(probs)
+    m = argmax(probs)
+    spread = sum(p * abs(i - m) for i, p in enumerate(probs))
+    even = sum(abs(i - (n - 1) / 2.0) for i in range(n)) / n
+    return max(0.0, 1.0 - spread / even)
+
+def noul_confidence(p: float) -> float:
+    return abs(2.0 * p - 1.0)
+
+# 按概率分流：不低于 act 时自动执行，介于 confirm 与 act 之间时请求确认，否则转交人工
+def route(p: float, act: float = 0.85, confirm: float = 0.5) -> str:
+    if p >= act:
+        return "act"
+    if p >= confirm:
+        return "confirm"
+    return "escalate"
+
+def softmax(xs: list[float], temperature: float) -> list[float]:
+    m = max(xs)
+    es = [math.exp((x - m) / temperature) for x in xs]
+    total = sum(es)
+    return [e / total for e in es]
+
+def sigmoid(x: float) -> float:
+    if x >= 0.0:
+        return 1.0 / (1.0 + math.exp(-x))
+    e = math.exp(x)
+    return e / (1.0 + e)
+
+# ===== 字符表 =====
+
+const PAD = 0
+const UNK = 1
+const CLS = 2
+const SEP = 3
+const SPECIAL = 4
+const BIGRAMS = 2048             # 相邻两个字（二元组）的嵌入表大小（按哈希值分桶）
+
+class Tokenizer:
+    chars: list[char]
+    index: dict[char, int]
+
+    def __init__(self, chars: list[char]):
+        self.chars = chars
+        self.index = {c: i + SPECIAL for i, c in enumerate(chars)}
+
+    static def build(texts: list[str]) -> Tokenizer:
+        seen: set[char] = set()
+        for t in texts:
+            for c in t:
+                seen.add(c)
+        return Tokenizer(sorted(list(seen)))
+
+    prop size -> int => len(self.chars) + SPECIAL
+
+    def encode(self, s: str) -> list[int]:
+        return [self.index.get(c, UNK) for c in s]
+
+# 每个位置上“这个字与下一个字”组成的二元组的编号（按哈希值分桶）。中文的词大多是两个字，
+# 二元组让模型直接看到“闪退”“扣款”“登录”这样的词，比只看单个字容易学得多
+def bigram_ids(text: str, length: int) -> list[int]:
+    out: list[int] = []
+    for i in range(length):
+        if i < len(text) - 1:
+            out.append((ord(text[i]) * 7919 + ord(text[i + 1])) % (BIGRAMS - 1) + 1)
+        else:
+            out.append(0)
+    return out
+
+# ===== 网络 =====
+
+# 问题的表示读取状态：交叉注意力 + 前馈网络，各带残差连接（先归一化）
+class CrossBlock(nn.Module):
+    norm1: nn.LayerNorm
+    attn: nn.CrossAttention
+    norm2: nn.LayerNorm
+    ff1: nn.Linear
+    ff2: nn.Linear
+    drop: nn.Dropout
+
+    def __init__(self, dim: int, heads: int, dropout: float):
+        self.norm1 = nn.LayerNorm(dim)
+        self.attn = nn.CrossAttention(dim, heads)
+        self.norm2 = nn.LayerNorm(dim)
+        self.ff1 = nn.Linear(dim, 2 * dim)
+        self.ff2 = nn.Linear(2 * dim, dim)
+        self.drop = nn.Dropout(dropout)
+
+    def read(self, x: Tensor, memory: Tensor, memory_mask: Tensor) -> Tensor:
+        h = x + self.drop(self.attn.attend(self.norm1(x), memory, memory_mask))
+        return h + self.drop(self.ff2(self.ff1(self.norm2(h)).gelu()))
+
+class JevNet(nn.Module):
+    dim: int
+    max_len: int
+    tok: nn.Embedding
+    bigram: nn.Embedding                       # 相邻两个字的嵌入（见 bigram_ids）
+    pos: nn.Embedding
+    kind: nn.Embedding                         # 0 = 状态，1 = 问题
+    state_layers: list[nn.TransformerEncoderLayer]
+    state_norm: nn.LayerNorm
+    query_layer: nn.TransformerEncoderLayer
+    cross: list[CrossBlock]
+    norm: nn.LayerNorm
+    head: nn.Linear
+    match: nn.Linear                           # 状态摘要与问题摘要的双线性匹配（见 scores）
+    config: Tensor                             # [维数, 层数, 头数, 最大长度]，与参数一起保存
+    vocab: Tensor                              # 字符表（Unicode 码点）
+    temperature: Tensor                        # [3]：Choice、Score、Noul 的温度（校准时得到）
+
+    def __init__(self, chars: list[char], dim: int = 64, depth: int = 2, heads: int = 4, max_len: int = 96):
+        self.dim = dim
+        self.max_len = max_len
+        self.tok = nn.Embedding(len(chars) + SPECIAL, dim)
+        self.bigram = nn.Embedding(BIGRAMS, dim)
+        self.pos = nn.Embedding(max_len, dim)
+        self.kind = nn.Embedding(2, dim)
+        self.state_layers = [nn.TransformerEncoderLayer(dim, heads, 2 * dim, dropout=0.1) for _ in range(depth)]
+        self.state_norm = nn.LayerNorm(dim)
+        self.query_layer = nn.TransformerEncoderLayer(dim, heads, 2 * dim, dropout=0.1)
+        self.cross = [CrossBlock(dim, heads, 0.1) for _ in range(depth)]
+        self.norm = nn.LayerNorm(dim)
+        self.head = nn.Linear(dim, 1)
+        self.match = nn.Linear(dim, dim, bias=false)
+        self.config = tensor.from_ints([dim, depth, heads, max_len])
+        self.vocab = tensor.from_ints([ord(c) for c in chars])
+        self.temperature = tensor.ones(3)
+        # 嵌入用较小的初始值（nn.Embedding 默认是标准正态分布）：否则每个位置自己的嵌入远大于
+        # 注意力汇集来的信息，模型很难学会区分不同的问题与选项
+        # 双线性匹配从“直接比较”开始（单位矩阵）：状态与选项中相同的字从一开始就会提高分数
+        with tensor.no_grad():
+            for e in [self.tok, self.bigram, self.pos, self.kind]:
+                e.weight.copy_(e.weight * 0.1)
+            self.match.weight.copy_(tensor.eye(dim).to(self.match.weight.device))
+
+    def embed(self, ids: Tensor, bigrams: Tensor, kind: int) -> Tensor:
+        return self.tok(ids) + self.bigram(bigrams) + self.pos(tensor.arange(ids.size(1))) + self.kind(tensor.full([1], kind))
+
+    # 状态：[S, Ls] 的字符下标、二元组下标与掩码 → [S, Ls, dim]
+    def encode_states(self, ids: Tensor, bigrams: Tensor, mask: Tensor) -> Tensor:
+        x = self.embed(ids, bigrams, 0)
+        for layer in self.state_layers:
+            x = layer.encode(x, mask)
+        return self.state_norm(x)
+
+    # 每段查询文字（[P, Lq]）读取它所属的状态（pair_state 是状态的下标），返回分数 [P]
+    #
+    # 分数由两部分相加：
+    # - 交叉注意力：查询的每个字符读取状态中相关的位置，再对查询的各个字符取平均后打分；
+    # - 双线性匹配：状态的摘要（各字符的平均）与查询的摘要直接比较。这一项从训练一开始就有
+    #   清楚的梯度，模型很快学会“哪些内容对应哪个选项”；只有交叉注意力时，要先“发现”应该
+    #   关注哪些字符，训练会在开始阶段停滞很久。
+    def scores(self, states: Tensor, state_mask: Tensor, pair_state: Tensor, ids: Tensor, bigrams: Tensor, mask: Tensor) -> Tensor:
+        p = ids.size(0)
+        memory = states.index_select(0, pair_state)
+        memory_mask = state_mask.index_select(0, pair_state)
+        x = self.query_layer.encode(self.embed(ids, bigrams, 1), mask)
+        query_summary = masked_mean(x, mask)
+        state_summary = masked_mean(states, state_mask).index_select(0, pair_state)
+        for block in self.cross:
+            x = block.read(x, memory, memory_mask)
+        attended = self.head(self.norm(masked_mean(x, mask))).reshape(p)
+        matched = (self.match(state_summary) * query_summary).sum(dim=1) * (1.0 / math.sqrt(self.dim))
+        return attended + matched
+
+# x：[N, L, d]，mask：[N, L]（1 为真实字符）→ 各字符的平均 [N, d]
+def masked_mean(x: Tensor, mask: Tensor) -> Tensor:
+    weights = (mask / mask.sum(dim=1, keepdim=true)).unsqueeze(2)
+    return (x * weights).sum(dim=1)
+
+# ===== 样本 =====
+
+# 一个问题及其答案的真实分布（生成数据时已知），以及按这个分布抽出的标签
+class Example:
+    question: Question
+    probs: list[float]                         # Choice/Score：各选项的真实概率；Noul：[P(是)]
+    label: int                                 # Choice/Score：选项下标；Noul：1 表示“是”
+    held_out: bool = false                     # 问题的说法在训练中没有出现过
+
+# 一个状态与关于它的若干问题
+class Scene:
+    state: str
+    examples: list[Example] = []
+
+const KIND_CHOICE = 0
+const KIND_SCORE = 1
+const KIND_NOUL = 2
+
+def kind_of(q: Question) -> int:
+    match q:
+        case Choice(_, _):
+            return KIND_CHOICE
+        case Score(_, _):
+            return KIND_SCORE
+        case Noul(_, _):
+            return KIND_NOUL
+
+# 一批场景展开后的结构：所有状态、所有查询文字（及其所属的状态）、每个问题对应哪几段查询文字
+class Batch:
+    states: list[str] = []
+    queries: list[str] = []
+    pair_state: list[int] = []
+    spans: list[(int, int)] = []               # 每个问题的查询文字在 queries 中的范围
+    examples: list[Example] = []
+
+def make_batch(scenes: list[Scene]) -> Batch:
+    b = Batch()
+    for si, scene in enumerate(scenes):
+        b.states.append(scene.state)
+        for ex in scene.examples:
+            start = len(b.queries)
+            for t in query_texts(ex.question):
+                b.queries.append(t)
+                b.pair_state.append(si)
+            b.spans.append((start, len(b.queries)))
+            b.examples.append(ex)
+    return b
+
+# ===== 模型 =====
+
+class MiniJev:
+    net: JevNet
+    tok: Tokenizer
+    device: str
+
+    def __init__(self, net: JevNet, tok: Tokenizer, device: str = "cpu"):
+        self.net = net
+        self.tok = tok
+        self.device = device
+        net.to(device)
+
+    # 编码一组文字：[CLS] 文字 [SEP]，补齐到其中最长的一段；返回字符下标、二元组下标与掩码（1 为真实字符）
+    def encode(self, texts: list[str]) -> (Tensor, Tensor, Tensor):
+        clipped = [t[:self.net.max_len - 2] for t in texts]
+        longest = max(len(t) for t in clipped) + 2
+        ids: list[int] = []
+        bigrams: list[int] = []
+        mask: list[float] = []
+        for t in clipped:
+            pad = longest - len(t) - 2
+            ids.extend([CLS] + self.tok.encode(t) + [SEP] + [PAD] * pad)
+            bigrams.extend([0] + bigram_ids(t, len(t)) + [0] * (pad + 1))
+            mask.extend([1.0] * (len(t) + 2) + [0.0] * pad)
+        n = len(texts)
+        return (tensor.from_ints(ids, [n, longest]).to(self.device), tensor.from_ints(bigrams, [n, longest]).to(self.device),
+                tensor.tensor(mask, [n, longest]).to(self.device))
+
+    # 一批的所有查询文字的原始分数（未除以温度），[P]
+    def batch_scores(self, b: Batch) -> Tensor:
+        s_ids, s_bigrams, s_mask = self.encode(b.states)
+        q_ids, q_bigrams, q_mask = self.encode(b.queries)
+        states = self.net.encode_states(s_ids, s_bigrams, s_mask)
+        return self.net.scores(states, s_mask, tensor.from_ints(b.pair_state), q_ids, q_bigrams, q_mask)
+
+    # 与 Jev 的 system_one 相同：状态只编码一次，所有问题一起计算，彼此独立
+    def system_one(self, state: str, questions: dict[str, Question]) -> Response:
+        if len(questions) == 0:
+            return Response()
+        scene = Scene(state, [Example(q, [], 0) for q in questions.values()])
+        self.net.eval()
+        with tensor.no_grad():
+            raw = self.batch_scores(make_batch([scene])).tolist()
+        temps = self.net.temperature.tolist()
+        resp = Response()
+        i = 0
+        for qid, q in questions.items():
+            match q:
+                case Choice(_, criteria):
+                    keys = criteria.keys()
+                    probs = softmax(raw[i:i + len(keys)], temps[0])
+                    i += len(keys)
+                    resp.choices[qid] = ChoiceAnswer(keys[argmax(probs)], {k: probs[j] for j, k in enumerate(keys)}, choice_confidence(probs))
+                case Score(_, levels):
+                    probs = softmax(raw[i:i + len(levels)], temps[1])
+                    i += len(levels)
+                    position = sum(j * p for j, p in enumerate(probs))
+                    resp.scores[qid] = ScoreAnswer(position, levels, probs, score_confidence(probs))
+                case Noul(_, _):
+                    resp.nouls[qid] = NoulAnswer(sigmoid(raw[i] / temps[2]))
+                    i += 1
+        return resp
+
+    def save(self, path: str):
+        self.net.save(path)
+
+    static def load(path: str, device: str = "cpu") -> MiniJev:
+        state = tensor.load(path)
+        cfg = [int(v) for v in state["config"].tolist()]
+        chars = [chr(int(v))[0] for v in state["vocab"].tolist()]
+        net = JevNet(chars, cfg[0], cfg[1], cfg[2], cfg[3])
+        net.load_state_dict(state)
+        return MiniJev(net, Tokenizer(chars), device)
+
+    # 用训练数据中出现的字符建立字符表，创建一个新模型
+    static def create(scenes: list[Scene], device: str = "cpu", dim: int = 64, depth: int = 2) -> MiniJev:
+        texts: list[str] = []
+        for scene in scenes:
+            texts.append(scene.state)
+            for ex in scene.examples:
+                texts.extend(query_texts(ex.question))
+        tok = Tokenizer.build(texts)
+        return MiniJev(JevNet(tok.chars, dim, depth), tok, device)
+
+# ===== 训练 =====
+
+# 一批的损失：每个 Choice/Score 对它的各个选项做 softmax 交叉熵，每个 Noul 做二元交叉熵
+def batch_loss(m: MiniJev, b: Batch) -> Tensor:
+    raw = m.batch_scores(b)
+    kmax = 0
+    for i, ex in enumerate(b.examples):
+        if kind_of(ex.question) != KIND_NOUL:
+            kmax = max(kmax, b.spans[i][1] - b.spans[i][0])
+    gidx: list[int] = []
+    gmask: list[float] = []
+    gtarget: list[int] = []
+    nidx: list[int] = []
+    ntarget: list[float] = []
+    for i, ex in enumerate(b.examples):
+        start, end = b.spans[i]
+        if kind_of(ex.question) == KIND_NOUL:
+            nidx.append(start)
+            ntarget.append(float(ex.label))
+            continue
+        for j in range(kmax):
+            gidx.append(min(start + j, end - 1))
+            gmask.append(0.0 if start + j < end else -1e9)
+        gtarget.append(ex.label)
+    g, k = len(gtarget), len(ntarget)
+    loss = tensor.scalar(0.0).to(m.device)
+    if g > 0:
+        grouped = raw.index_select(0, tensor.from_ints(gidx)).reshape(g, kmax) + tensor.tensor(gmask, [g, kmax]).to(m.device)
+        loss = loss + tensor.cross_entropy(grouped, tensor.from_ints(gtarget)) * (g / (g + k))
+    if k > 0:
+        nl = raw.index_select(0, tensor.from_ints(nidx))
+        loss = loss + tensor.binary_cross_entropy_with_logits(nl, tensor.tensor(ntarget).to(m.device)) * (k / (g + k))
+    return loss
+
+def train(m: MiniJev, scenes: list[Scene], epochs: int = 4, batch: int = 48, lr: float = 0.002):
+    params = m.net.parameters()
+    opt = optim.AdamW(params, lr=lr, weight_decay=0.01)
+    steps = epochs * ((len(scenes) + batch - 1) // batch)
+    sched = optim.CosineAnnealingLR(opt, t_max=steps)
+    every = max(steps // 8, 1)
+    step = 0
+    running = 0.0
+    m.net.train()
+    for epoch in range(epochs):
+        for idx in tensor.batches(len(scenes), batch):
+            loss = batch_loss(m, make_batch([scenes[int(i)] for i in idx.tolist()]))
+            opt.zero_grad()
+            loss.backward()
+            nn.clip_grad_norm_(params, 1.0)
+            opt.step()
+            sched.step()
+            step += 1
+            running += loss.item()
+            if step % every == 0:
+                print(f"  第 {step}/{steps} 步：损失 {running / every:.4f}")
+                running = 0.0
+
+# 每个问题的原始分数：Choice/Score 为各选项的分数，Noul 为一个分数
+def raw_by_example(m: MiniJev, scenes: list[Scene], batch: int = 128) -> list[list[float]]:
+    out: list[list[float]] = []
+    m.net.eval()
+    with tensor.no_grad():
+        for start in range(0, len(scenes), batch):
+            b = make_batch(scenes[start:start + batch])
+            flat = m.batch_scores(b).tolist()
+            for a, e in b.spans:
+                out.append(flat[a:e])
+    return out
+
+def all_examples(scenes: list[Scene]) -> list[Example]:
+    out: list[Example] = []
+    for scene in scenes:
+        out.extend(scene.examples)
+    return out
+
+# 温度缩放：在验证集上为三类问题各找一个温度 T，使 softmax(分数 / T) 的负对数似然最小
+def calibrate(m: MiniJev, val: list[Scene]) -> list[float]:
+    raw = raw_by_example(m, val)
+    exs = all_examples(val)
+    groups: list[(Tensor, Tensor)] = []
+    for kind in [KIND_CHOICE, KIND_SCORE]:
+        kmax = 0
+        for i, ex in enumerate(exs):
+            if kind_of(ex.question) == kind:
+                kmax = max(kmax, len(raw[i]))
+        vals: list[float] = []
+        targets: list[int] = []
+        for i, ex in enumerate(exs):
+            if kind_of(ex.question) == kind:
+                for j in range(kmax):
+                    vals.append(raw[i][j] if j < len(raw[i]) else -1e9)
+                targets.append(ex.label)
+        groups.append((tensor.tensor(vals, [len(targets), kmax]).cpu(), tensor.from_ints(targets).cpu()))
+    nvals: list[float] = []
+    ntargets: list[float] = []
+    for i, ex in enumerate(exs):
+        if kind_of(ex.question) == KIND_NOUL:
+            nvals.append(raw[i][0])
+            ntargets.append(float(ex.label))
+    nl, nt = tensor.tensor(nvals).cpu(), tensor.tensor(ntargets).cpu()
+    log_t = tensor.zeros(3).cpu().requires_grad_()
+    opt = optim.Adam([log_t], lr=0.05)
+    for _ in range(300):
+        t = log_t.exp()
+        loss = tensor.cross_entropy(groups[0][0] / t[0], groups[0][1]) + tensor.cross_entropy(groups[1][0] / t[1], groups[1][1])
+        loss = loss + tensor.binary_cross_entropy_with_logits(nl / t[2], nt)
+        opt.zero_grad()
+        loss.backward()
+        opt.step()
+    temps = log_t.exp().detach()
+    with tensor.no_grad():
+        m.net.temperature.copy_(temps)
+    return temps.tolist()
+
+# ===== 评估 =====
+
+# 预测每个问题的概率：Choice/Score 为各选项的概率，Noul 为 [P(是)]
+def predict(m: MiniJev, scenes: list[Scene]) -> list[list[float]]:
+    raw = raw_by_example(m, scenes)
+    temps = m.net.temperature.tolist()
+    out: list[list[float]] = []
+    for i, ex in enumerate(all_examples(scenes)):
+        kind = kind_of(ex.question)
+        if kind == KIND_NOUL:
+            out.append([sigmoid(raw[i][0] / temps[2])])
+        else:
+            out.append(softmax(raw[i], temps[kind]))
+    return out
+
+# 期望校准误差：按预测的概率分成 10 段，比较每段的平均概率与实际发生的频率（按样本数加权）
+def expected_calibration_error(conf: list[float], hit: list[float]) -> float:
+    total = 0.0
+    for b in range(10):
+        lo, hi = b / 10.0, (b + 1) / 10.0
+        cs: list[float] = []
+        hs: list[float] = []
+        for i, c in enumerate(conf):
+            if (c >= lo and c < hi) or (b == 9 and c >= 1.0):
+                cs.append(c)
+                hs.append(hit[i])
+        if len(cs) > 0:
+            total += len(cs) * abs(sum(cs) / len(cs) - sum(hs) / len(hs))
+    return total / max(len(conf), 1)
+
+class Metrics:
+    count: int
+    decision: float                            # 与最优决策（真实分布中概率最大的答案）一致的比例
+    prob_error: float                          # 预测概率与真实概率的平均绝对误差
+    ece: float                                 # 期望校准误差
+
+def measure(exs: list[Example], preds: list[list[float]]) -> Metrics:
+    right = 0.0
+    err = 0.0
+    conf: list[float] = []
+    hit: list[float] = []
+    for i, ex in enumerate(exs):
+        p = preds[i]
+        if kind_of(ex.question) == KIND_NOUL:
+            right += 1.0 if (p[0] >= 0.5) == (ex.probs[0] >= 0.5) else 0.0
+            err += abs(p[0] - ex.probs[0])
+            conf.append(p[0])
+            hit.append(float(ex.label))
+        else:
+            best = argmax(p)
+            right += 1.0 if ex.probs[best] >= max(ex.probs) - 1e-9 else 0.0
+            err += sum(abs(p[j] - ex.probs[j]) for j in range(len(p))) / len(p)
+            conf.append(p[best])
+            hit.append(1.0 if best == ex.label else 0.0)
+    n = max(len(exs), 1)
+    return Metrics(len(exs), right / n, err / n, expected_calibration_error(conf, hit))
+
+# 文字的显示宽度（汉字等宽字符占两格），用于对齐表格
+def display_width(s: str) -> int:
+    w = 0
+    for c in s:
+        w += 2 if ord(c) >= 0x2E80 else 1
+    return w
+
+def cell(s: str, width: int, left: bool = false) -> str:
+    pad = " " * max(0, width - display_width(s))
+    return s + pad if left else pad + s
+
+def metrics_row(name: str, r: Metrics) -> str:
+    return "  " + cell(name, 14, true) + cell(str(r.count), 8) + cell(f"{r.decision:.1%}", 10) + cell(f"{r.prob_error:.3f}", 10) + cell(f"{r.ece:.3f}", 10)
+
+# 按问题类型（以及“没见过的说法”）分别统计
+def report(scenes: list[Scene], preds: list[list[float]]):
+    exs = all_examples(scenes)
+    print("  " + cell("", 14, true) + cell("问题数", 8) + cell("决策正确", 10) + cell("概率误差", 10) + cell("校准误差", 10))
+    names = ["Choice", "Score", "Noul"]
+    for kind in [KIND_CHOICE, KIND_SCORE, KIND_NOUL]:
+        sel = [i for i, ex in enumerate(exs) if kind_of(ex.question) == kind]
+        print(metrics_row(names[kind], measure([exs[i] for i in sel], [preds[i] for i in sel])))
+    held = [i for i, ex in enumerate(exs) if ex.held_out]
+    if len(held) > 0:
+        print(metrics_row("没见过的说法", measure([exs[i] for i in held], [preds[i] for i in held])))
+
+test "置信度公式与 Jev 文档中的例子一致":
+    assert abs(choice_confidence([0.6, 0.3, 0.1]) - 0.4) < 1e-9
+    assert abs(choice_confidence([0.75, 0.25]) - 0.5) < 1e-9
+    assert abs(score_confidence([0.0, 0.5, 0.5]) - 0.25) < 1e-9
+    assert score_confidence([0.5, 0.0, 0.5]) == 0.0
+    assert abs(score_confidence([0.0, 0.57, 0.43]) - 0.355) < 1e-9
+    assert noul_confidence(0.5) == 0.0
+    assert route(0.9) == "act" and route(0.6) == "confirm" and route(0.2) == "escalate"

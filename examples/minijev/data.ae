@@ -1,0 +1,321 @@
+# MiniJev 的合成数据：客服工单、Agent 操作、内容审核三个场景
+#
+# 每个状态由几个“潜在属性”（主题、紧急程度、情绪……）按模板生成文字，问题的答案由这些属性决定。
+# 有一部分答案是故意不确定的：消息里同时出现两个主题时，两个主题各占一半；“是否需要人工处理”
+# 按一定的概率决定。生成器知道每个答案的真实概率，所以可以检验模型给出的概率是否校准。
+#
+# 每类问题都有几种说法：train 中的说法用于训练，test 中的说法只出现在测试集里，
+# 用来检验模型能否理解没见过的问法。
+import random
+import time
+import tensor
+from minijev import Example, MiniJev, Scene, all_examples, calibrate, choice, noul, predict, report, score, train
+
+class Phrasing:
+    train: list[str]
+    test: list[str]
+
+    def pick(self, held_out: bool) -> str:
+        return random.choice(self.test if held_out else self.train)
+
+def weighted(ps: list[float]) -> int:
+    r = random.random()
+    acc = 0.0
+    for i, p in enumerate(ps):
+        acc += p
+        if r < acc:
+            return i
+    return len(ps) - 1
+
+def one_hot(n: int, k: int) -> list[float]:
+    out = [0.0] * n
+    out[k] = 1.0
+    return out
+
+# 生成一个 Choice：从 keys 中选出包含 must 的 2 到 n 个选项（顺序随机），class_probs 是各类的真实概率
+def add_choice(sc: Scene, instr: str, held: bool, keys: list[str], descs: list[list[str]], must: list[int], class_probs: list[float]):
+    chosen = list(must)
+    others = [i for i in range(len(keys)) if i not in must]
+    random.shuffle(others)
+    k = random.randrange(max(2, len(must)), len(keys) + 1)
+    chosen.extend(others[:k - len(chosen)])
+    random.shuffle(chosen)
+    criteria: dict[str, str] = {}
+    probs: list[float] = []
+    for c in chosen:
+        criteria[keys[c]] = random.choice(descs[c])
+        probs.append(class_probs[c])
+    sc.examples.append(Example(choice(instr, criteria), probs, weighted(probs), held))
+
+# 生成一个 Score；四分之一的问题把等级倒过来排列（模型必须读懂每一级的描述）
+def add_score(sc: Scene, instr: str, held: bool, levels: list[str], probs: list[float]):
+    lv = list(levels)
+    ps = list(probs)
+    if random.random() < 0.25:
+        lv.reverse()
+        ps.reverse()
+    sc.examples.append(Example(score(instr, lv), ps, weighted(ps), held))
+
+def add_noul(sc: Scene, instr: str, held: bool, p: float):
+    sc.examples.append(Example(noul(instr), [p], 1 if random.random() < p else 0, held))
+
+# ===== 客服工单 =====
+
+TOPIC_KEYS = ["billing", "account", "technical", "shipping"]
+TOPIC_DESCS = [["账单或扣费问题", "付款、扣款或发票"], ["账号或登录问题", "账户安全与登录"],
+               ["产品故障或技术问题", "软件出错或无法使用"], ["物流或快递问题", "配送与收货"]]
+TOPIC_CUES = [
+    ["信用卡被扣了两次钱", "这个月的账单多收了30元", "发票金额和实际付款不一致", "续费的时候扣款失败", "优惠券没有抵扣成功", "退订以后还在继续扣费"],
+    ["账号登录不上去", "收不到重置密码的邮件", "账号莫名其妙被冻结了", "想修改绑定的手机号", "两步验证一直提示失败", "登录时总说密码错误"],
+    ["App一打开就闪退", "接口一直返回500错误", "页面加载特别慢", "上传文件总是失败", "数据同步功能不工作了", "点击保存按钮没有反应"],
+    ["快递三天没有更新物流", "收到的包裹破损了", "收货地址填错了想修改", "说好今天送到还没到", "少发了一件商品", "快递员没打电话就走了"],
+]
+GREETINGS = ["", "你好，", "客服你好，", "您好，", "请问一下，"]
+REFUND_CUES = ["请把钱退给我", "我要申请退款", "麻烦尽快退款", "希望退还这笔费用"]
+RELAXED_CUES = ["不着急，有空帮忙看看", "不急，慢慢处理就行", "有时间的时候看一下吧"]
+URGENT_CUES = ["急需处理", "今天之内必须解决", "马上就要用，请尽快", "非常紧急"]
+FRUSTRATED_CUES = ["已经是第二次遇到了", "等了很久都没人回复", "有点失望"]
+ANGRY_CUES = ["太离谱了", "再不处理我就投诉", "你们到底怎么回事", "简直不能忍"]
+POLITE_ENDINGS = ["谢谢。", "麻烦了。", "辛苦了。", ""]
+
+Q_TOPIC = Phrasing(["这条消息属于哪个主题？", "应该由哪个团队处理？", "客户遇到的是哪一类问题？"], ["这个工单该分给哪个部门？"])
+Q_URGENCY = Phrasing(["紧急程度如何？", "这件事有多急？"], ["需要多快处理？"])
+URGENCY_LEVELS = [["不急", "一般", "非常紧急"], ["可以慢慢处理", "正常处理", "需要马上处理"]]
+Q_EMOTION = Phrasing(["客户的情绪如何？", "客户有多不满？"], ["客户的语气怎么样？"])
+EMOTION_LEVELS = [["平静", "有些不满", "非常愤怒"], ["心平气和", "有点生气", "怒不可遏"]]
+Q_REFUND = Phrasing(["客户是否要求退款？", "消息里有没有提出退款？"], ["客户想把钱要回来吗？"])
+Q_URGENT = Phrasing(["这条消息是否表达了紧急？", "客户是否要求尽快处理？"], ["客户是不是很着急？"])
+Q_HUMAN = Phrasing(["是否需要人工处理？", "要不要转给人工客服？"], ["需要人工介入吗？"])
+
+def ticket(out: list[Scene], held_prob: float):
+    t = random.randrange(0, 4)
+    t2 = -1
+    if random.random() < 0.3:
+        t2 = (t + random.randrange(1, 4)) % 4
+    urgency = weighted([0.25, 0.45, 0.3])
+    emotion = weighted([0.4, 0.35, 0.25])
+    refund = random.random() < (0.4 if t == 0 or t == 3 else 0.1)
+    text = random.choice(TOPIC_CUES[t])
+    if t2 >= 0:
+        other = random.choice(TOPIC_CUES[t2])
+        text = text + "，而且" + other if random.random() < 0.5 else other + "，而且" + text
+    parts = [text + "。"]
+    if refund:
+        parts.append(random.choice(REFUND_CUES) + "。")
+    if urgency == 0:
+        parts.append(random.choice(RELAXED_CUES) + "。")
+    elif urgency == 2:
+        parts.append(random.choice(URGENT_CUES) + "！")
+    if emotion == 1:
+        parts.append(random.choice(FRUSTRATED_CUES) + "。")
+    elif emotion == 2:
+        parts.append(random.choice(ANGRY_CUES) + "！")
+    tail = parts[1:]
+    random.shuffle(tail)
+    state = random.choice(GREETINGS) + parts[0] + "".join(tail) + (random.choice(POLITE_ENDINGS) if emotion == 0 else "")
+    sc = Scene(state)
+    out.append(sc)
+
+    probs = [0.0, 0.0, 0.0, 0.0]
+    must = [t]
+    if t2 >= 0:
+        probs[t], probs[t2] = 0.5, 0.5
+        must.append(t2)
+    else:
+        probs[t] = 1.0
+    billing = t == 0 or t2 == 0
+    p_human = 0.92 if emotion == 2 else (0.75 if refund and billing else (0.6 if urgency == 2 else 0.08))
+    if random.random() < 0.7:
+        h = random.random() < held_prob
+        add_choice(sc, Q_TOPIC.pick(h), h, TOPIC_KEYS, TOPIC_DESCS, must, probs)
+    if random.random() < 0.5:
+        h = random.random() < held_prob
+        add_score(sc, Q_URGENCY.pick(h), h, random.choice(URGENCY_LEVELS), one_hot(3, urgency))
+    if random.random() < 0.5:
+        h = random.random() < held_prob
+        if random.random() < 0.25:
+            add_score(sc, Q_EMOTION.pick(h), h, ["平静", "不满或愤怒"], one_hot(2, min(emotion, 1)))
+        else:
+            add_score(sc, Q_EMOTION.pick(h), h, random.choice(EMOTION_LEVELS), one_hot(3, emotion))
+    if random.random() < 0.4:
+        h = random.random() < held_prob
+        add_noul(sc, Q_REFUND.pick(h), h, 1.0 if refund else 0.0)
+    if random.random() < 0.4:
+        h = random.random() < held_prob
+        add_noul(sc, Q_URGENT.pick(h), h, 1.0 if urgency == 2 else 0.0)
+    if random.random() < 0.5:
+        h = random.random() < held_prob
+        add_noul(sc, Q_HUMAN.pick(h), h, p_human)
+    if random.random() < 0.15:
+        h = random.random() < held_prob
+        add_noul(sc, random.choice([Q_IRREVERSIBLE, Q_PRIVACY, Q_ABUSE]).pick(h), h, 0.0)
+
+# ===== Agent 操作 =====
+
+OP_KEYS = ["read", "modify", "delete", "send"]
+OP_DESCS = [["读取数据", "只读的查询"], ["修改数据", "更改已有的数据"], ["删除数据", "删除或清空数据"], ["对外发送信息", "向外部发送或发布"]]
+OP_CUES = [
+    ["读取配置文件config.yaml", "查询今天的订单列表", "列出/home/data目录下的文件", "查看用户1024的资料", "统计上个月的销售额", "搜索包含退款的工单"],
+    ["把订单A-104的状态改为已发货", "更新用户的邮箱地址", "把商品价格改成99元", "重命名文件report.docx", "给用户1024开通VIP权限", "修改数据库里的库存数量"],
+    ["执行rm -rf /var/data", "删除用户1024的账号", "清空回收站", "执行DROP TABLE orders", "删除所有历史日志", "移除整个项目目录"],
+    ["给全体客户群发促销邮件", "把财务报表发送到外部邮箱", "发布一条公开微博", "调用支付接口向商户转账5000元", "把用户名单上传到第三方网站", "在官网首页发布公告"],
+]
+SMALL_SCOPE = ["（只影响1条记录）", "（仅在测试环境）", "（只涉及一个文件）"]
+LARGE_SCOPE = ["（影响全部3万条记录）", "（在生产环境执行）", "（涉及所有用户）"]
+AGENT_PREFIX = ["Agent准备执行：", "下一步操作：", "工具调用：", "Agent计划："]
+# 风险等级：RISK[操作][范围]，范围 0 = 小，1 = 大，2 = 没有说明
+RISK = [[0, 0, 0], [1, 2, 1], [1, 2, 2], [1, 2, 2]]
+P_IRREVERSIBLE = [0.0, 0.2, 1.0, 0.9]
+P_CONFIRM = [0.03, 0.4, 0.95]
+
+Q_OP = Phrasing(["这个操作属于哪一类？", "Agent要做的是什么类型的操作？"], ["这一步是什么操作？"])
+Q_RISK = Phrasing(["这个操作的风险有多高？", "执行它的危险程度如何？"], ["出错的后果有多严重？"])
+RISK_LEVELS = [["低风险", "中风险", "高风险"], ["几乎没有风险", "有一定风险", "风险很大"]]
+Q_IRREVERSIBLE = Phrasing(["这个操作是否不可撤销？", "执行后是否无法恢复？"], ["这个操作一旦执行就无法挽回吗？"])
+Q_CONFIRM = Phrasing(["执行前是否需要人工确认？", "要不要先让人审批？"], ["需要人类批准才能执行吗？"])
+
+def agent(out: list[Scene], held_prob: float):
+    op = random.randrange(0, 4)
+    op2 = -1
+    if random.random() < 0.1:
+        op2 = (op + random.randrange(1, 4)) % 4
+    scope = weighted([0.3, 0.3, 0.4])
+    text = random.choice(OP_CUES[op])
+    if op2 >= 0:
+        other = random.choice(OP_CUES[op2])
+        text = "先" + text + "，然后" + other if random.random() < 0.5 else "先" + other + "，然后" + text
+    if scope == 0:
+        text += random.choice(SMALL_SCOPE)
+    elif scope == 1:
+        text += random.choice(LARGE_SCOPE)
+    state = random.choice(AGENT_PREFIX) + text
+    sc = Scene(state)
+    out.append(sc)
+
+    probs = [0.0, 0.0, 0.0, 0.0]
+    must = [op]
+    risk = RISK[op][scope]
+    p_irrev = P_IRREVERSIBLE[op]
+    if op2 >= 0:
+        probs[op], probs[op2] = 0.5, 0.5
+        must.append(op2)
+        risk = max(risk, RISK[op2][scope])
+        p_irrev = max(p_irrev, P_IRREVERSIBLE[op2])
+    else:
+        probs[op] = 1.0
+    if random.random() < 0.7:
+        h = random.random() < held_prob
+        add_choice(sc, Q_OP.pick(h), h, OP_KEYS, OP_DESCS, must, probs)
+    if random.random() < 0.6:
+        h = random.random() < held_prob
+        add_score(sc, Q_RISK.pick(h), h, random.choice(RISK_LEVELS), one_hot(3, risk))
+    if random.random() < 0.5:
+        h = random.random() < held_prob
+        add_noul(sc, Q_IRREVERSIBLE.pick(h), h, p_irrev)
+    if random.random() < 0.5:
+        h = random.random() < held_prob
+        add_noul(sc, Q_CONFIRM.pick(h), h, P_CONFIRM[risk])
+    if random.random() < 0.15:
+        h = random.random() < held_prob
+        add_noul(sc, random.choice([Q_REFUND, Q_ABUSE]).pick(h), h, 0.0)
+
+# ===== 内容审核 =====
+
+CAT_KEYS = ["normal", "spam", "abuse", "privacy"]
+CAT_DESCS = [["正常内容", "普通的正常评论"], ["垃圾广告", "广告或引流"], ["辱骂攻击", "骂人或人身攻击"], ["泄露个人信息", "暴露他人隐私"]]
+NORMAL_CUES = ["这家店的拉面很好吃，推荐", "周末一起去爬山吧", "谢谢分享，学到了很多", "今天的天气真不错", "这个教程写得很清楚", "期待下一期视频"]
+SPAM_CUES = ["加微信abc123领取优惠券", "点击链接免费领手机", "代开发票，联系我", "兼职刷单日赚三百", "低价出售各类账号", "关注主页领取福利"]
+MILD_ABUSE = ["你是不是傻", "说的什么废话", "真是没脑子", "笨得要命"]
+STRONG_ABUSE = ["你就是个白痴，滚出去", "垃圾东西，去死吧", "全家都是废物", "恶心的人渣"]
+PRIVACY_CUES = ["他的手机号是13800138000", "我知道她家住在幸福路12号", "这是他的身份证号110101199001011234", "她的银行卡号是6222000011112222", "他公司的地址是科技园3栋502"]
+COMMENT_PREFIX = ["", "评论：", "网友留言：", "用户发帖："]
+
+Q_CATEGORY = Phrasing(["这条评论属于哪一类？", "这条内容是什么类型？"], ["应该把评论归到哪一类？"])
+Q_TOXICITY = Phrasing(["评论的攻击性有多强？", "这条内容有多冒犯人？"], ["评论的措辞有多恶劣？"])
+TOXICITY_LEVELS = [["没有攻击性", "略有冒犯", "严重辱骂"], ["友善", "有点难听", "极其恶毒"]]
+Q_ABUSE = Phrasing(["评论是否包含辱骂？", "这条内容有没有骂人？"], ["评论里有人身攻击吗？"])
+Q_PRIVACY = Phrasing(["是否包含他人的个人信息？", "有没有泄露隐私？"], ["评论暴露了别人的联系方式或住址吗？"])
+Q_PUBLISH = Phrasing(["这条评论能直接发布吗？", "可以直接展示这条内容吗？"], ["可以不经审核就展示吗？"])
+
+def comment(out: list[Scene], held_prob: float):
+    cat = weighted([0.4, 0.2, 0.25, 0.15])
+    mixed = cat == 2 and random.random() < 0.3      # 辱骂的同时泄露隐私
+    strong = random.random() < 0.5
+    if cat == 0:
+        text = random.choice(NORMAL_CUES)
+    elif cat == 1:
+        text = random.choice(SPAM_CUES)
+    elif cat == 3:
+        text = random.choice(PRIVACY_CUES)
+    else:
+        text = random.choice(STRONG_ABUSE if strong else MILD_ABUSE)
+        if mixed:
+            text = text + "，" + random.choice(PRIVACY_CUES)
+    state = random.choice(COMMENT_PREFIX) + text
+    sc = Scene(state)
+    out.append(sc)
+
+    probs = one_hot(4, cat)
+    must = [cat]
+    if mixed:
+        probs = [0.0, 0.0, 0.5, 0.5]
+        must.append(3)
+    toxicity = (2 if strong else 1) if cat == 2 else 0
+    abusive = cat == 2
+    private = cat == 3 or mixed
+    p_publish = [0.97, 0.05, 0.15 if not strong else 0.01, 0.02][cat]
+    if mixed:
+        p_publish = 0.01
+    if random.random() < 0.7:
+        h = random.random() < held_prob
+        add_choice(sc, Q_CATEGORY.pick(h), h, CAT_KEYS, CAT_DESCS, must, probs)
+    if random.random() < 0.5:
+        h = random.random() < held_prob
+        add_score(sc, Q_TOXICITY.pick(h), h, random.choice(TOXICITY_LEVELS), one_hot(3, toxicity))
+    if random.random() < 0.5:
+        h = random.random() < held_prob
+        add_noul(sc, Q_ABUSE.pick(h), h, 1.0 if abusive else 0.0)
+    if random.random() < 0.5:
+        h = random.random() < held_prob
+        add_noul(sc, Q_PRIVACY.pick(h), h, 1.0 if private else 0.0)
+    if random.random() < 0.4:
+        h = random.random() < held_prob
+        add_noul(sc, Q_PUBLISH.pick(h), h, p_publish)
+    if random.random() < 0.15:
+        h = random.random() < held_prob
+        add_noul(sc, random.choice([Q_REFUND, Q_URGENT, Q_IRREVERSIBLE]).pick(h), h, 0.0)
+
+# 生成 n 个状态（三个场景轮流）上的样本；held_prob 是每个问题使用“测试用说法”的概率
+def generate(n: int, seed: int, held_prob: float = 0.0) -> list[Scene]:
+    random.seed(seed)
+    out: list[Scene] = []
+    for i in range(n):
+        if i % 3 == 0:
+            ticket(out, held_prob)
+        elif i % 3 == 1:
+            agent(out, held_prob)
+        else:
+            comment(out, held_prob)
+    return out
+
+# ===== 训练配方（train.ae 与 demo.ae 使用） =====
+
+# 生成数据、训练、校准并在测试集上评估，返回训练好的模型
+def build(device: str, states: int = 9000, epochs: int = 8, lr: float = 0.002, dim: int = 96) -> MiniJev:
+    tensor.manual_seed(0)
+    train_set = generate(states, 1)
+    val_set = generate(states // 6, 2)
+    test_set = generate(states // 3, 3, held_prob=0.3)
+    model = MiniJev.create(train_set, device, dim)
+    print(f"训练集 {len(train_set)} 个场景、{len(all_examples(train_set))} 个问题，字符表 {model.tok.size} 个字符，参数 {model.net.num_parameters()} 个，设备 {device}")
+    start = time.time()
+    train(model, train_set, epochs, lr=lr)
+    tensor.synchronize()
+    print(f"训练用时 {time.time() - start:.1f} 秒")
+    print("测试集，校准前：")
+    report(test_set, predict(model, test_set))
+    temps = calibrate(model, val_set)
+    print(f"温度缩放（Choice、Score、Noul）：{temps[0]:.2f}、{temps[1]:.2f}、{temps[2]:.2f}")
+    print("测试集，校准后：")
+    report(test_set, predict(model, test_set))
+    return model

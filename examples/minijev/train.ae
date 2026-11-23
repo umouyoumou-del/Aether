@@ -1,0 +1,23 @@
+# 训练 MiniJev：生成合成数据、训练、校准、评估，然后保存模型
+#
+#     aether run examples/minijev/train.ae                       有 GPU 时使用 GPU；保存到临时目录的 minijev.bin
+#     aether run examples/minijev/train.ae cpu my.bin            指定设备与保存的路径
+#     aether run examples/minijev/train.ae gpu my.bin 3000 4     以及场景数、训练轮数（还可以再给学习率、维数）
+#
+# 默认的配置（9000 个场景、8 轮、96 维）在 RTX 3050 上训练约 2 分钟，在 CPU 上约 10 分钟。
+import os
+import sys
+import tensor
+import data
+
+device = sys.argv[1] if len(sys.argv) > 1 else ("gpu" if tensor.gpu_available() else "cpu")
+path = sys.argv[2] if len(sys.argv) > 2 else os.path.join(os.tempdir(), "minijev.bin")
+states = int(sys.argv[3]) if len(sys.argv) > 3 else 9000
+epochs = int(sys.argv[4]) if len(sys.argv) > 4 else 8
+lr = float(sys.argv[5]) if len(sys.argv) > 5 else 0.002
+dim = int(sys.argv[6]) if len(sys.argv) > 6 else 96
+model = data.build(device, states, epochs, lr, dim)
+model.save(path)
+print(f"模型已保存到 {path}")
+if os.getenv("AETHER_GPU_PROFILE") == "1":
+    print(tensor.gpu_profile())

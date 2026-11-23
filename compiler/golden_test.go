@@ -159,6 +159,27 @@ func init() {
 	_ = runtime.GOOS
 }
 
+// TestExampleProjects 检查 examples 的子目录（由几个模块组成的示例，例如 minijev）中的每个程序都能编译。
+// 这些示例运行时间较长（要训练模型），所以只编译、不运行。
+func TestExampleProjects(t *testing.T) {
+	files, _ := filepath.Glob("../examples/*/*.ae")
+	sort.Strings(files)
+	if len(files) == 0 {
+		t.Skip("没有子目录中的示例")
+	}
+	for _, f := range files {
+		f := f
+		t.Run(filepath.Base(filepath.Dir(f))+"/"+strings.TrimSuffix(filepath.Base(f), ".ae"), func(t *testing.T) {
+			t.Parallel()
+			diag := &Diagnostics{}
+			prog := Load(f, assets.Lib(), diag)
+			if _, err := Compile(prog, false, GenOptions{}); err != nil {
+				t.Fatalf("编译失败：%v\n%s", err, diag.Format(false))
+			}
+		})
+	}
+}
+
 // TestExamples 确保 examples 目录下的每个示例都能编译并正常运行。
 func TestExamples(t *testing.T) {
 	files, _ := filepath.Glob("../examples/*.ae")

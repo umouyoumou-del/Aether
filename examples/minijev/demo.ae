@@ -1,0 +1,101 @@
+# MiniJev 演示：状态 + 类型化的问题 → 类型化的决策与校准的概率，再由代码按概率分流
+#
+#     aether run examples/minijev/demo.ae
+#
+# 模型保存在临时目录的 minijev.bin（由 train.ae 训练）；不存在时先训练一个
+# （RTX 3050 上约 2 分钟，CPU 上约 10 分钟）。
+import os
+import sys
+import time
+import tensor
+import data
+from minijev import MiniJev, Question, Response, cell, choice, noul, route, score
+
+device = "gpu" if tensor.gpu_available() else "cpu"
+path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.tempdir(), "minijev.bin")
+model: MiniJev = if_missing_train(path)
+
+def if_missing_train(path: str) -> MiniJev:
+    if os.exists(path):
+        return MiniJev.load(path, device)
+    print(f"没有找到 {path}，先训练一个 MiniJev：")
+    m = data.build(device)
+    m.save(path)
+    return m
+
+# 运行一组问题并显示类型化的答案
+def ask(title: str, state: str, questions: dict[str, Question]) -> Response:
+    start = time.time()
+    resp = model.system_one(state, questions)
+    ms = (time.time() - start) * 1000
+    print(f"\n【{title}】{state}    （{len(questions)} 个问题，{ms:.0f} 毫秒）")
+    for qid, a in resp.choices.items():
+        print(f"  {cell(qid, 14, true)}choice  {cell(a.choice, 10, true)} 概率 {a.probabilities[a.choice]:.2f}，置信度 {a.confidence:.2f}")
+    for qid, a in resp.scores.items():
+        print(f"  {cell(qid, 14, true)}score   {a.score:.2f}（{a.legend[a.level()]}），置信度 {a.confidence:.2f}")
+    for qid, a in resp.nouls.items():
+        print(f"  {cell(qid, 14, true)}noul    {a.noul:.2f}")
+    return resp
+
+TOPICS = {"billing": "账单或扣费问题", "account": "账号或登录问题", "technical": "产品故障或技术问题", "shipping": "物流或快递问题"}
+TEAM = {"billing": "账单团队", "account": "账户安全团队", "technical": "技术支持", "shipping": "物流组"}
+
+def support_ticket(state: str, topic_question: str = "这条消息属于哪个主题？"):
+    r = ask("客服分流", state, {
+        "topic": choice(topic_question, TOPICS),
+        "priority": score("紧急程度如何？", ["不急", "一般", "非常紧急"]),
+        "needs_human": noul("是否需要人工处理？"),
+    })
+    topic = r.choices["topic"]
+    p = topic.probabilities[topic.choice]
+    team = TEAM[topic.choice]
+    priority = "加急" if r.scores["priority"].level() == 2 else "普通"
+    # 代码决定怎么用这些答案：按概率分流（不同的动作可以有不同的阈值）
+    if r.nouls["needs_human"].noul >= 0.7:
+        print(f"  → 转人工：{team}，{priority}")
+    elif route(p) == "act":
+        print(f"  → 自动分派给{team}（{priority}）")
+    elif route(p) == "confirm":
+        print(f"  → 主题不确定（{topic.choice} 的概率只有 {p:.2f}）：请客服确认后再分派")
+    else:
+        print("  → 无法判断主题：转人工")
+
+support_ticket("我的信用卡被扣了两次钱，急需处理。")
+support_ticket("你好，收不到重置密码的邮件。不急，有空帮忙看看。谢谢。")
+# 两个主题同时出现：概率应当分散，代码据此请求确认
+support_ticket("App一打开就闪退，而且信用卡被扣了两次钱。")
+# 训练时没有见过的问法
+support_ticket("快递三天没有更新物流，你们到底怎么回事！", "这个工单该分给哪个部门？")
+
+r = ask("Agent 风险", "Agent准备执行：删除所有历史日志（在生产环境执行）", {
+    "op": choice("这个操作属于哪一类？", {"read": "读取数据", "modify": "修改数据", "delete": "删除数据", "send": "对外发送信息"}),
+    "risk": score("这个操作的风险有多高？", ["低风险", "中风险", "高风险"]),
+    "irreversible": noul("这个操作是否不可撤销？"),
+    "confirm": noul("执行前是否需要人工确认？"),
+})
+if r.nouls["irreversible"].noul >= 0.7 and r.scores["risk"].level() == 2:
+    print("  → 拦截：不可撤销的高风险操作，必须经过人工批准")
+elif r.nouls["confirm"].noul >= 0.5:
+    print("  → 执行前请求确认")
+else:
+    print("  → 直接执行")
+
+r = ask("Agent 风险", "Agent准备执行：查询今天的订单列表", {
+    "risk": score("这个操作的风险有多高？", ["低风险", "中风险", "高风险"]),
+    "confirm": noul("执行前是否需要人工确认？"),
+})
+print("  → 直接执行" if r.nouls["confirm"].noul < 0.5 else "  → 执行前请求确认")
+
+r = ask("内容审核", "评论：你就是个白痴，他的手机号是13800138000", {
+    "category": choice("这条评论属于哪一类？", {"normal": "正常内容", "spam": "垃圾广告", "abuse": "辱骂攻击", "privacy": "泄露个人信息"}),
+    "abuse": noul("评论是否包含辱骂？"),
+    "privacy": noul("是否包含他人的个人信息？"),
+    "publish": noul("这条评论能直接发布吗？"),
+})
+why = "、".join([name for name in ["abuse", "privacy"] if r.nouls[name].noul >= 0.7])
+print("  → 直接发布" if r.nouls["publish"].noul >= 0.7 else f"  → 不发布，原因：{why}")
+
+# 训练数据之外的内容：Choice 总会选一个选项，MiniJev 也不懂训练数据之外的场景
+ask("超出范围", "今天天气真好，适合出去玩。", {"topic": choice("这条消息属于哪个主题？", TOPICS)})
+print("  （MiniJev 只认识三类训练场景；对这样的输入，它给出的概率没有意义。真正的 Jev 建议配一个\n"
+      "   “是否有选项符合”的 Noul 来识别这种情况。）")
