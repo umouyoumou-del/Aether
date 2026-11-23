@@ -44,6 +44,13 @@
           }
         },
         {
+          "match": "^(type)\\s+([\\p{L}_][\\p{L}\\p{N}_]*)(?=\\s*[\\[=])",
+          "captures": {
+            "1": { "name": "storage.type.alias.aether" },
+            "2": { "name": "entity.name.type.alias.aether" }
+          }
+        },
+        {
           "match": "^\\s*(test)\\s+(?=\")",
           "captures": { "1": { "name": "keyword.other.test.aether" } }
         }
@@ -89,7 +96,7 @@
           "name": "support.type.builtin.aether"
         },
         {
-          "match": "\\b(print|input|len|range|enumerate|zip|sorted|reversed|sum|min|max|any|all|abs|round|divmod|repr|ord|chr|hex|bin|oct|open|type_name|isinstance|exit|gather|counter|count_from|repeat)\\b(?=\\s*\\()",
+          "match": "\\b(print|input|len|range|enumerate|zip|sorted|reversed|sum|min|max|any|all|abs|round|divmod|repr|ord|chr|hex|bin|oct|open|type_name|isinstance|exit|gather|counter|count_from|repeat|map|filter)\\b(?=\\s*\\()",
           "name": "support.function.builtin.aether"
         },
         {
@@ -101,7 +108,7 @@
           "name": "entity.name.type.aether"
         },
         {
-          "match": "=>|->|\\?\\.|\\?\\?|\\*\\*=?|//=?|[-+*/%&|^]=?|<<=?|>>=?|==|!=|<=|>=|<|>|=|~|!",
+          "match": ":=|=>|->|\\?\\.|\\?\\?|\\*\\*=?|//=?|[-+*/%&|^]=?|<<=?|>>=?|==|!=|<=|>=|<|>|=|~|!",
           "name": "keyword.operator.aether"
         },
         {

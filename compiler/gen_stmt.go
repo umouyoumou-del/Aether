@@ -72,6 +72,11 @@ func (g *Gen) stmt(s Stmt) {
 		g.assertStmt(s)
 	case *DelStmt:
 		for _, t := range s.Targets {
+			if sl, ok := t.(*SliceExpr); ok {
+				lo, hi, step := g.sliceArgs(sl)
+				g.line("%s.DelSlice(%s, %s, %s)", g.expr(sl.X), lo, hi, step)
+				continue
+			}
 			idx := t.(*Index)
 			switch idx.X.Typ().(type) {
 			case *ListT:
@@ -184,21 +189,96 @@ func (g *Gen) store(target Expr, value string) {
 		tmp := g.tmp()
 		g.line("%s := %s", tmp, value)
 		g.destructure(t, tmp, t.T)
+	case *SliceExpr:
+		lo, hi, step := g.sliceArgs(t)
+		g.line("%s.SetSlice(%s, %s, %s, %s)", g.expr(t.X), lo, hi, step, value)
 	}
+}
+
+// sliceArgs 返回切片的起点、终点和步长的 Go 代码（省略的部分为 rt.NoIdx 或 1）。
+func (g *Gen) sliceArgs(x *SliceExpr) (string, string, string) {
+	lo, hi, step := g.rt()+".NoIdx", g.rt()+".NoIdx", "1"
+	if x.Lo != nil {
+		lo = g.expr(x.Lo)
+	}
+	if x.Hi != nil {
+		hi = g.expr(x.Hi)
+	}
+	if x.Step != nil {
+		step = g.expr(x.Step)
+	}
+	return lo, hi, step
+}
+
+// unpackItem 是解构时一个目标对应的值（Go 代码与类型）。
+type unpackItem struct {
+	code string
+	t    Type
+}
+
+// unpackItems 返回把临时变量 tmp（类型为元组或列表）解构到 tl 的各个目标时，每个目标的值；
+// 列表会先生成长度检查。*rest 目标得到由剩余元素组成的新列表。
+func (g *Gen) unpackItems(tl *TupleLit, tmp string, vt Type) []unpackItem {
+	n := len(tl.Elems)
+	si := starIndex(tl)
+	var out []unpackItem
+	switch x := vt.(type) {
+	case *TupleT:
+		if si < 0 {
+			for i := range tl.Elems {
+				out = append(out, unpackItem{fmt.Sprintf("%s.V%d", tmp, i), x.Elems[i]})
+			}
+			return out
+		}
+		m := len(x.Elems) - (n - 1)
+		for i := 0; i < si; i++ {
+			out = append(out, unpackItem{fmt.Sprintf("%s.V%d", tmp, i), x.Elems[i]})
+		}
+		lt, _ := tl.Elems[si].Typ().(*ListT)
+		if lt == nil {
+			return nil
+		}
+		var parts []string
+		for j := 0; j < m; j++ {
+			parts = append(parts, g.coerce(fmt.Sprintf("%s.V%d", tmp, si+j), x.Elems[si+j], lt.Elem))
+		}
+		out = append(out, unpackItem{fmt.Sprintf("%s.ListOf[%s](%s)", g.rt(), g.typ(lt.Elem), strings.Join(parts, ", ")), lt})
+		for i := si + 1; i < n; i++ {
+			out = append(out, unpackItem{fmt.Sprintf("%s.V%d", tmp, i-1+m), x.Elems[i-1+m]})
+		}
+	case *ListT:
+		if si < 0 {
+			g.line("%s.CheckLen(%s, %d)", g.rt(), tmp, n)
+			for i := range tl.Elems {
+				out = append(out, unpackItem{fmt.Sprintf("%s.S[%d]", tmp, i), x.Elem})
+			}
+			return out
+		}
+		g.line("%s.CheckLenMin(%s, %d)", g.rt(), tmp, n-1)
+		for i := 0; i < si; i++ {
+			out = append(out, unpackItem{fmt.Sprintf("%s.S[%d]", tmp, i), x.Elem})
+		}
+		out = append(out, unpackItem{fmt.Sprintf("%s.ListRest(%s, %d, %d)", g.rt(), tmp, si, n-1-si), x})
+		for i := si + 1; i < n; i++ {
+			out = append(out, unpackItem{fmt.Sprintf("%s.S[len(%s.S)-%d]", tmp, tmp, n-i), x.Elem})
+		}
+	}
+	return out
+}
+
+// unstar 返回解构目标本身（*rest 的 rest）。
+func unstar(e Expr) Expr {
+	if st, ok := e.(*StarExpr); ok {
+		return st.X
+	}
+	return e
 }
 
 // destructure 把元组/列表值（已在临时变量中）解构到多个目标。
 func (g *Gen) destructure(t *TupleLit, tmp string, vt Type) {
-	switch x := vt.(type) {
-	case *TupleT:
-		for i, el := range t.Elems {
-			g.store(el, g.coerce(fmt.Sprintf("%s.V%d", tmp, i), x.Elems[i], el.Typ()))
-		}
-	case *ListT:
-		g.line("%s.CheckLen(%s, %d)", g.rt(), tmp, len(t.Elems))
-		for i, el := range t.Elems {
-			g.store(el, g.coerce(fmt.Sprintf("%s.S[%d]", tmp, i), x.Elem, el.Typ()))
-		}
+	for i, it := range g.unpackItems(t, tmp, vt) {
+		el := unstar(t.Elems[i])
+		g.store(el, g.coerce(it.code, it.t, el.Typ()))
 	}
 }
 
@@ -235,8 +315,23 @@ func (g *Gen) assign(s *AssignStmt) {
 			return
 		}
 		tmp := g.tmp()
-		g.line("%s := %s", tmp, g.expr(s.Value))
-		g.destructure(tl, tmp, s.Value.Typ())
+		vt := s.Value.Typ()
+		if it, ok := vt.(*IterT); ok {
+			// 其它可迭代对象先收集为列表
+			g.line("%s := %s.ListFrom(%s)", tmp, g.rt(), g.expr(s.Value))
+			vt = &ListT{it.Elem}
+		} else {
+			g.line("%s := %s", tmp, g.expr(s.Value))
+		}
+		g.destructure(tl, tmp, vt)
+		return
+	}
+	if sl, ok := target.(*SliceExpr); ok {
+		v := g.expr(s.Value)
+		if it, ok := s.Value.Typ().(*IterT); ok {
+			v = fmt.Sprintf("%s.ListFrom[%s](%s)", g.rt(), g.typ(it.Elem), v)
+		}
+		g.store(sl, v)
 		return
 	}
 	g.store(target, g.expr(s.Value))
@@ -477,14 +572,11 @@ func (g *Gen) bindTarget(target Expr, val string, t Type) {
 		g.line("%s := %s", name, val)
 		g.line("_ = %s", name)
 	case *TupleLit:
-		tt, ok := t.(*TupleT)
-		if !ok {
-			return
-		}
 		tmp := g.tmp()
 		g.line("%s := %s", tmp, val)
-		for i, el := range x.Elems {
-			g.bindTarget(el, fmt.Sprintf("%s.V%d", tmp, i), tt.Elems[i])
+		for i, it := range g.unpackItems(x, tmp, t) {
+			el := unstar(x.Elems[i])
+			g.bindTarget(el, g.coerce(it.code, it.t, el.Typ()), el.Typ())
 		}
 	}
 }

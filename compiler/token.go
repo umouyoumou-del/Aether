@@ -118,6 +118,7 @@ const (
 	TRBrace    // }
 	TComma     // ,
 	TColon     // :
+	TWalrus    // :=
 	TDot       // .
 	TSemi      // ;
 	TArrow     // ->
@@ -199,7 +200,7 @@ var tokNames = map[TokKind]string{
 	TEq: "==", TNe: "!=", TLt: "<", TGt: ">", TLe: "<=", TGe: ">=",
 	TAmp: "&", TPipe: "|", TCaret: "^", TTilde: "~", TShl: "<<", TShr: ">>",
 	TLParen: "(", TRParen: ")", TLBrack: "[", TRBrack: "]", TLBrace: "{", TRBrace: "}",
-	TComma: ",", TColon: ":", TDot: ".", TSemi: ";", TArrow: "->", TFatArrow: "=>",
+	TComma: ",", TColon: ":", TWalrus: ":=", TDot: ".", TSemi: ";", TArrow: "->", TFatArrow: "=>",
 	TQuestion: "?", TQDot: "?.", TQQ: "??", TBang: "!", TAndAnd: "&&", TOrOr: "||", TAt: "@",
 	KNotIn: "not in", KIsNot: "is not",
 }

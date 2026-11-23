@@ -339,9 +339,30 @@ func (p *parser) stmt(top bool) []Stmt {
 				p.advance()
 				return []Stmt{p.classDecl(nil, true)}
 			}
+		case "type":
+			if p.peek(1).Kind == TIdent && (p.peek(2).Kind == TAssign || p.peek(2).Kind == TLBrack) {
+				if !top {
+					p.fail("类型别名只能出现在模块顶层")
+				}
+				return []Stmt{p.typeAlias()}
+			}
 		}
 	}
 	return p.simpleStmts()
+}
+
+// typeAlias 解析 type 名字[类型参数] = 类型。
+func (p *parser) typeAlias() *TypeAliasDecl {
+	p.advance()
+	nt := p.expectIdent("类型别名")
+	ta := &TypeAliasDecl{Pos: nt.Pos, Name: nt.Text}
+	if p.at(TLBrack) {
+		ta.TypeParams = p.typeParams()
+	}
+	p.expect(TAssign, "类型别名")
+	ta.Type = p.typeExpr()
+	p.endLine()
+	return ta
 }
 
 func (p *parser) endLine() {
@@ -1076,6 +1097,11 @@ func (p *parser) forTarget() Expr {
 		p.expect(TRParen, "循环变量")
 		return &TupleLit{exprBase: exprBase{Pos: pos}, Elems: items}
 	}
+	if p.at(TStar) {
+		pos := p.advance().Pos
+		nt := p.expectIdent("循环变量")
+		return &StarExpr{exprBase: exprBase{Pos: pos}, X: &Ident{exprBase: exprBase{Pos: nt.Pos}, Name: nt.Text}}
+	}
 	nt := p.expectIdent("循环变量")
 	return &Ident{exprBase: exprBase{Pos: nt.Pos}, Name: nt.Text}
 }
@@ -1416,14 +1442,15 @@ func (p *parser) exprOrAssign() Stmt {
 		v := p.expr()
 		return &AssignStmt{Pos: pos, Targets: []Expr{x}, Value: v, Op: op}
 	}
+	if ne, ok := x.(*NamedExpr); ok {
+		p.errorf(ne.Pos, "赋值语句请写 %s = ...；:= 只能用在表达式中，例如 if (n := len(xs)) > 0:", ne.Target.Name)
+	}
 	return &ExprStmt{Pos: pos, X: x}
 }
 
 func (p *parser) checkTarget(e Expr) {
 	switch t := e.(type) {
-	case *Ident, *Attr, *Index:
-	case *SliceExpr:
-		p.errorf(e.P(), "不支持给切片赋值")
+	case *Ident, *Attr, *Index, *SliceExpr:
 	case *TupleLit:
 		for _, x := range t.Elems {
 			p.checkTarget(x)
@@ -1432,6 +1459,8 @@ func (p *parser) checkTarget(e Expr) {
 		for _, x := range t.Elems {
 			p.checkTarget(x)
 		}
+	case *StarExpr:
+		p.checkTarget(t.X)
 	default:
 		p.errorf(e.P(), "不能给这个表达式赋值")
 	}
@@ -1442,7 +1471,7 @@ func (p *parser) checkTarget(e Expr) {
 // exprList 解析可能是元组的表达式列表：a, b, c
 func (p *parser) exprList() Expr {
 	pos := p.tok().Pos
-	x := p.expr()
+	x := p.starOrExpr()
 	if !p.at(TComma) {
 		return x
 	}
@@ -1451,9 +1480,18 @@ func (p *parser) exprList() Expr {
 		if p.exprEnds() {
 			break
 		}
-		items = append(items, p.expr())
+		items = append(items, p.starOrExpr())
 	}
 	return &TupleLit{exprBase: exprBase{Pos: pos}, Elems: items}
+}
+
+// starOrExpr 解析表达式，或者 *表达式（解构目标中的 *rest、列表/集合字面量中的展开）。
+func (p *parser) starOrExpr() Expr {
+	if p.at(TStar) {
+		pos := p.advance().Pos
+		return &StarExpr{exprBase: exprBase{Pos: pos}, X: p.bitOr()}
+	}
+	return p.expr()
 }
 
 func (p *parser) exprEnds() bool {
@@ -1491,6 +1529,12 @@ func (p *parser) isLambdaStart() bool {
 }
 
 func (p *parser) expr() Expr {
+	if p.at(TIdent) && p.peek(1).Kind == TWalrus {
+		nt := p.advance()
+		pos := p.advance().Pos
+		target := &Ident{exprBase: exprBase{Pos: nt.Pos}, Name: nt.Text}
+		return &NamedExpr{exprBase: exprBase{Pos: pos}, Target: target, Value: p.expr()}
+	}
 	if p.isLambdaStart() {
 		return p.lambda()
 	}
@@ -1959,8 +2003,8 @@ func (p *parser) atom() Expr {
 		if p.got(TRBrack) {
 			return ll
 		}
-		x := p.expr()
-		if p.at(KFor) {
+		x := p.starOrExpr()
+		if _, star := x.(*StarExpr); p.at(KFor) && !star {
 			c := p.comprehension(CompList, x, nil, t.Pos)
 			p.expect(TRBrack, "列表推导式")
 			return c
@@ -1970,7 +2014,7 @@ func (p *parser) atom() Expr {
 			if p.at(TRBrack) {
 				break
 			}
-			ll.Elems = append(ll.Elems, p.expr())
+			ll.Elems = append(ll.Elems, p.starOrExpr())
 		}
 		p.expect(TRBrack, "列表")
 		return ll
@@ -1979,8 +2023,31 @@ func (p *parser) atom() Expr {
 		if p.got(TRBrace) {
 			return &DictLit{exprBase: exprBase{Pos: t.Pos}}
 		}
-		k := p.expr()
-		if p.got(TColon) {
+		dictItem := func() (Expr, Expr) {
+			if p.at(TDStar) {
+				pos := p.advance().Pos
+				return &StarExpr{exprBase: exprBase{Pos: pos}, X: p.bitOr(), Double: true}, nil
+			}
+			kk := p.expr()
+			p.expect(TColon, "字典")
+			return kk, p.expr()
+		}
+		if p.at(TDStar) {
+			k, v := dictItem()
+			dl := &DictLit{exprBase: exprBase{Pos: t.Pos}, Keys: []Expr{k}, Vals: []Expr{v}}
+			for p.got(TComma) {
+				if p.at(TRBrace) {
+					break
+				}
+				kk, vv := dictItem()
+				dl.Keys = append(dl.Keys, kk)
+				dl.Vals = append(dl.Vals, vv)
+			}
+			p.expect(TRBrace, "字典")
+			return dl
+		}
+		k := p.starOrExpr()
+		if _, star := k.(*StarExpr); !star && p.got(TColon) {
 			v := p.expr()
 			if p.at(KFor) {
 				c := p.comprehension(CompDict, k, v, t.Pos)
@@ -1992,15 +2059,14 @@ func (p *parser) atom() Expr {
 				if p.at(TRBrace) {
 					break
 				}
-				kk := p.expr()
-				p.expect(TColon, "字典")
+				kk, vv := dictItem()
 				dl.Keys = append(dl.Keys, kk)
-				dl.Vals = append(dl.Vals, p.expr())
+				dl.Vals = append(dl.Vals, vv)
 			}
 			p.expect(TRBrace, "字典")
 			return dl
 		}
-		if p.at(KFor) {
+		if _, star := k.(*StarExpr); p.at(KFor) && !star {
 			c := p.comprehension(CompSet, k, nil, t.Pos)
 			p.expect(TRBrace, "集合推导式")
 			return c
@@ -2010,7 +2076,7 @@ func (p *parser) atom() Expr {
 			if p.at(TRBrace) {
 				break
 			}
-			sl.Elems = append(sl.Elems, p.expr())
+			sl.Elems = append(sl.Elems, p.starOrExpr())
 		}
 		p.expect(TRBrace, "集合")
 		return sl

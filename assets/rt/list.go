@@ -289,6 +289,78 @@ func CheckLen[T any](l *List[T], n int) *List[T] {
 	return l
 }
 
+// CheckLenMin 用于带 *rest 的解构：列表至少要有 n 个元素。
+func CheckLenMin[T any](l *List[T], n int) *List[T] {
+	if len(l.S) < n {
+		Raise("ValueError", "解构需要至少 %d 个元素，但列表只有 %d 个", n, len(l.S))
+	}
+	return l
+}
+
+// ListRest 返回解构时 *rest 收集的元素：去掉开头 before 个和末尾 after 个之后剩下的部分。
+func ListRest[T any](l *List[T], before, after int) *List[T] {
+	return &List[T]{S: slices.Clone(l.S[before : len(l.S)-after])}
+}
+
+// sliceIndexes 返回扩展切片（步长不为 1）选中的下标。
+func sliceIndexes(lo, hi, step int) []int {
+	var idx []int
+	if step > 0 {
+		for i := lo; i < hi; i += step {
+			idx = append(idx, i)
+		}
+	} else {
+		for i := lo; i > hi; i += step {
+			idx = append(idx, i)
+		}
+	}
+	return idx
+}
+
+// SetSlice 实现 xs[lo:hi:step] = src：步长为 1 时用 src 的元素替换这一段（长度可以不同）；
+// 否则 src 的长度必须与切片选中的元素个数相同。
+func (l *List[T]) SetSlice(lo, hi, step int, src *List[T]) {
+	vals := slices.Clone(src.S)
+	lo, hi, step = sliceBounds(len(l.S), lo, hi, step)
+	if step == 1 {
+		if hi < lo {
+			hi = lo
+		}
+		l.S = slices.Concat(l.S[:lo:lo], vals, l.S[hi:])
+		return
+	}
+	idx := sliceIndexes(lo, hi, step)
+	if len(idx) != len(vals) {
+		Raise("ValueError", "不能把 %d 个元素赋给长度为 %d 的扩展切片", len(vals), len(idx))
+	}
+	for k, i := range idx {
+		l.S[i] = vals[k]
+	}
+}
+
+// DelSlice 实现 del xs[lo:hi:step]。
+func (l *List[T]) DelSlice(lo, hi, step int) {
+	lo, hi, step = sliceBounds(len(l.S), lo, hi, step)
+	if step == 1 {
+		if hi > lo {
+			l.S = slices.Delete(l.S, lo, hi)
+		}
+		return
+	}
+	drop := make([]bool, len(l.S))
+	for _, i := range sliceIndexes(lo, hi, step) {
+		drop[i] = true
+	}
+	out := l.S[:0]
+	for i, x := range l.S {
+		if !drop[i] {
+			out = append(out, x)
+		}
+	}
+	clear(l.S[len(out):])
+	l.S = out
+}
+
 // ===== 列表的扩展方法（由 prelude 声明） =====
 
 func ListContains[T any](l *List[T], v T) bool {

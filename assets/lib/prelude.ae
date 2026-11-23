@@ -103,6 +103,8 @@ interface Comparable[T]:
 @go("rt.Counter") def counter[T: Hashable](items: iter[T]) -> dict[T, int]
 @go("rt.Count") def count_from(start: int = 0, step: int = 1) -> iter[int]
 @go("rt.ListFill") def repeat[T](n: int, value: T) -> list[T]
+@go("rt.IterMap($2, $1)") def map[T, U](f: fn(T) -> U, items: iter[T]) -> iter[U]
+@go("rt.IterFilter($2, $1)") def filter[T](f: fn(T) -> bool, items: iter[T]) -> iter[T]
 
 # ===== str =====
 

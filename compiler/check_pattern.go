@@ -371,7 +371,17 @@ func (c *Checker) namePattern(x *NamePat, t Type) {
 			switch sym.Kind {
 			case SType:
 				var to Type
-				if sym.Alias != nil {
+				if sym.AliasDecl != nil {
+					c.resolveAlias(sym)
+					if len(sym.AliasTPs) > 0 {
+						c.errorf(x.Pos, "泛型类型别名 %s 的类型模式需要类型实参", name)
+						return
+					}
+					if isInvalid(sym.Alias) {
+						return
+					}
+					to = sym.Alias
+				} else if sym.Alias != nil {
 					to = sym.Alias
 				} else if sym.TD != nil {
 					if len(sym.TD.TParams) > 0 {
@@ -522,6 +532,13 @@ func (c *Checker) callPattern(x *CallPat, t Type) {
 	}
 	// 类/结构体模式：Point(x, y)
 	sym := c.scope.lookup(x.Names[0])
+	if sym != nil && sym.AliasDecl != nil {
+		c.resolveAlias(sym)
+		if nt, ok := sym.Alias.(*NamedT); ok && len(sym.AliasTPs) == 0 {
+			c.classPattern(x, t, nt)
+			return
+		}
+	}
 	if sym == nil || sym.Kind != SType || sym.TD == nil {
 		if sym == nil {
 			c.errorf(x.Pos, "未定义的名字 %s", x.Names[0])

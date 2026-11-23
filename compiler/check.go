@@ -47,6 +47,29 @@ type Symbol struct {
 	DeclStmt  Stmt
 	Used      bool
 	GoConst   bool
+	// 类型别名（type 名字 = 类型）：Alias 在第一次使用时解析
+	AliasDecl  *TypeAliasDecl
+	AliasTPs   []*TypeParam
+	aliasState int // 0 未解析，1 解析中，2 完成
+	mark       *Symbol // 见 assignMark
+	markOf     *Symbol
+}
+
+// assignMark 返回窄化信息中表示“sym 在这个分支中一定已被赋值”的键。
+// := 出现在 and/or 的右侧时，只有在确实求值了右侧的分支中才能确定变量被赋值了，
+// 这一信息与窄化一起沿着条件传递（见 applyNarrow）。
+func assignMark(sym *Symbol) *Symbol {
+	if sym.mark == nil {
+		sym.mark = &Symbol{Kind: SVar, Name: sym.Name, markOf: sym}
+	}
+	return sym.mark
+}
+
+// walrusEntry 记录一次 := 赋值（见 partialAssigns）。
+type walrusEntry struct {
+	sym         *Symbol
+	wasAssigned bool
+	handled     bool
 }
 
 type Scope struct {
@@ -96,6 +119,7 @@ type Module struct {
 	Funcs     []*FuncDecl
 	Types     []*TypeDecl
 	Exts      []*ExtBlock
+	Aliases   []*Symbol
 	Globals   []*Symbol
 	Consts    []*ConstDecl
 	TopStmts  []Stmt
@@ -236,6 +260,7 @@ type Checker struct {
 	Lambdas   []*Lambda
 	constBusy map[*ConstDecl]bool
 	UsesTraceback bool
+	walrusLog []walrusEntry
 }
 
 type structCall struct {
@@ -459,6 +484,12 @@ func (c *Checker) collect(m *Module) {
 			x := &ExtBlock{Mod: m, Decl: s, Methods: map[string][]*Method{}, Props: map[string]*Prop{}}
 			s.Ext = x
 			m.Exts = append(m.Exts, x)
+		case *TypeAliasDecl:
+			sym := &Symbol{Kind: SType, Name: s.Name, AliasDecl: s}
+			s.Sym = sym
+			if declare(sym, s.Pos) {
+				m.Aliases = append(m.Aliases, sym)
+			}
 		case *ImportStmt:
 			c.collectImport(m, s, declare)
 		case *TestDecl:
@@ -490,6 +521,7 @@ func (c *Checker) collect(m *Module) {
 
 // collectAssignedNames 收集顶层语句中被赋值的名字（不深入函数）。
 func collectAssignedNames(st Stmt, out map[string]bool) {
+	walrusNames(st, out)
 	var target func(e Expr)
 	target = func(e Expr) {
 		switch t := e.(type) {

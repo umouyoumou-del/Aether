@@ -831,7 +831,7 @@ func (lx *lexer) op(p Pos) {
 	case ',':
 		k = TComma
 	case ':':
-		k = TColon
+		k = two('=', TWalrus, TColon)
 	case ';':
 		k = TSemi
 	case '@':

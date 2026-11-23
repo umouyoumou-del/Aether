@@ -31,7 +31,8 @@ type Ident struct {
 	Name   string
 	Sym    *Symbol
 	Narrow NarrowKind
-	From   Type // 窄化前的类型
+	From   Type    // 窄化前的类型
+	Lam    *Lambda // 内置函数、类型名或泛型函数被当作函数值使用时，等价的 lambda
 }
 
 type IntLit struct {
@@ -276,11 +277,27 @@ type Attr struct {
 	Variant *Variant
 	Owner   *NamedT // 成员所属类型（已实例化）
 	RecvT   Type    // 接收者类型（?. 时为解包后的类型）
+	Lam     *Lambda // 类型.方法 被当作函数值使用时（例如 key=str.lower），等价的 lambda
 }
 
 type Unwrap struct {
 	exprBase
 	X Expr
+}
+
+// StarExpr 是 *x：解构赋值中收集其余元素的目标（a, *rest = xs），或列表/集合字面量中的展开
+// （[*a, *b]）。Double 表示字典字面量中的 **d（此时它出现在 DictLit.Keys 中，对应的值为 nil）。
+type StarExpr struct {
+	exprBase
+	X      Expr
+	Double bool
+}
+
+// NamedExpr 是赋值表达式（海象运算符）：(名字 := 值)，值同时也是整个表达式的值。
+type NamedExpr struct {
+	exprBase
+	Target *Ident
+	Value  Expr
 }
 
 type Await struct {
@@ -812,6 +829,15 @@ type ExtendDecl struct {
 	Ext        *ExtBlock
 }
 
+// TypeAliasDecl：type 名字[类型参数] = 类型
+type TypeAliasDecl struct {
+	Pos        Pos
+	Name       string
+	TypeParams []*TypeParamX
+	Type       TypeExpr
+	Sym        *Symbol
+}
+
 type ImportName struct {
 	Pos   Pos
 	Name  string
@@ -866,6 +892,7 @@ func (s *FuncDecl) P() Pos     { return s.Pos }
 func (s *ClassDecl) P() Pos    { return s.Pos }
 func (s *EnumDecl) P() Pos     { return s.Pos }
 func (s *ExtendDecl) P() Pos   { return s.Pos }
+func (s *TypeAliasDecl) P() Pos { return s.Pos }
 func (s *ImportStmt) P() Pos   { return s.Pos }
 func (s *TestDecl) P() Pos     { return s.Pos }
 func (s *FuncDeclStmt) P() Pos { return s.Pos }
@@ -896,6 +923,7 @@ func (*FuncDecl) stmtNode()     {}
 func (*ClassDecl) stmtNode()    {}
 func (*EnumDecl) stmtNode()     {}
 func (*ExtendDecl) stmtNode()   {}
+func (*TypeAliasDecl) stmtNode() {}
 func (*ImportStmt) stmtNode()   {}
 func (*TestDecl) stmtNode()     {}
 func (*FuncDeclStmt) stmtNode() {}

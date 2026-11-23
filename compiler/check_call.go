@@ -360,6 +360,11 @@ func isLambdaLike(e Expr) bool {
 	return false
 }
 
+func isFuncTypeParam(t Type) bool {
+	_, ok := optElem(t).(*FuncT)
+	return ok
+}
+
 // partialType 代入已知的类型参数；未知部分为 nil。
 func partialType(t Type, m Subst, free map[*TypeParam]bool) Type {
 	if t == nil {
@@ -438,7 +443,7 @@ func (c *Checker) checkCall(e *Call, sig *FuncSig, pre Subst, infer []*TypeParam
 	argT := map[*Expr]Type{}
 	visit := func(slot *Expr, pt Type) {
 		if len(free) > 0 && containsTParam(pt, free) {
-			if isLambdaLike(*slot) {
+			if isLambdaLike(*slot) || (isFuncTypeParam(pt) && c.isFuncName(*slot)) {
 				lambdas = append(lambdas, deferred{slot, pt})
 				return
 			}
@@ -928,6 +933,11 @@ func (c *Checker) collectionFrom(e *Call, t Type) {
 
 // genericTypeCall 处理未给出类型实参的泛型类型调用：list(xs)、Stack()、Box(5)。
 func (c *Checker) genericTypeCall(e *Call, sym *Symbol, want Type) Type {
+	if sym.AliasDecl != nil {
+		c.errorf(e.Pos, "泛型类型别名 %s 需要类型实参，例如 %s[int](...)", sym.Name, sym.Name)
+		c.checkArgsQuiet(e)
+		return tInvalid
+	}
 	switch sym.Builtin {
 	case "list", "set":
 		if len(e.Args) == 0 {
@@ -1109,10 +1119,17 @@ func (c *Checker) convCall(e *Call, to *Basic, want Type) Type {
 			ok = false
 		}
 	case BBool:
-		ok = isNumeric(from) || isBool(from) || isStr(from) || isOpt(from)
+		ok = isNumeric(from) || isBool(from) || isStr(from) || isOpt(from) || isAny(from)
 		switch from.(type) {
 		case *ListT, *DictT, *SetT:
 			ok = true
+		case *NamedT:
+			// 与条件中的真值判断相同：定义了 __bool__ 或 __len__ 的对象
+			if m, _ := c.operatorMethod(from, "__bool__"); m != nil {
+				ok = true
+			} else if m, _ := c.operatorMethod(from, "__len__"); m != nil {
+				ok = true
+			}
 		}
 	case BChar:
 		ok = isInteger(from) || basicKind(from) == BChar || isStr(from)
@@ -1139,7 +1156,7 @@ func (c *Checker) builtinCall(e *Call, name string, want Type) Type {
 	kw := map[string]*Arg{}
 	var pos []*Arg
 	for _, a := range args {
-		if a.Star {
+		if a.Star && name != "print" {
 			c.errorf(a.Pos, "内置函数 %s 不支持 *展开", name)
 			continue
 		}
@@ -1179,6 +1196,15 @@ func (c *Checker) builtinCall(e *Call, name string, want Type) Type {
 	case "print":
 		allowKw("sep", "end")
 		for _, a := range pos {
+			if a.Star {
+				// print(*xs)：逐个打印可迭代对象的元素
+				at := c.expr(a.X, nil)
+				if et := c.elemOf(at, a.X.P(), nil); !isInvalid(et) {
+					c.convert(&a.X, at, &IterT{et}, "print 的 * 参数")
+				}
+				e.Final = append(e.Final, &StarExpr{exprBase: exprBase{Pos: a.Pos, T: a.X.Typ()}, X: a.X})
+				continue
+			}
 			t := c.expr(a.X, nil)
 			c.validElem(t, a.X.P(), "print 的参数")
 			e.Final = append(e.Final, a.X)

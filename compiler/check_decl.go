@@ -121,6 +121,9 @@ func (c *Checker) resolveNamedType(t *NamedTypeX, scope *Scope) Type {
 	}
 	switch sym.Kind {
 	case SType:
+		if sym.AliasDecl != nil {
+			return c.instAlias(sym, args, t.Pos)
+		}
 		if sym.Alias != nil {
 			if len(args) > 0 {
 				c.errorf(t.Pos, "类型 %s 不接受类型实参", t.Name)
@@ -194,6 +197,61 @@ func (c *Checker) resolveNamedType(t *NamedTypeX, scope *Scope) Type {
 	}
 	c.errorf(t.Pos, "'%s' 不是类型", t.Name)
 	return tInvalid
+}
+
+// resolveAlias 解析类型别名的定义（只做一次）。
+func (c *Checker) resolveAlias(sym *Symbol) {
+	ad := sym.AliasDecl
+	switch sym.aliasState {
+	case 2:
+		return
+	case 1:
+		d := c.errorf(ad.Pos, "类型别名 %s 的定义（直接或间接地）引用了它自己", ad.Name)
+		d.Notes = append(d.Notes, "递归的数据结构请用 class 定义")
+		sym.Alias = tInvalid
+		sym.aliasState = 2
+		return
+	}
+	sym.aliasState = 1
+	saveMod := c.mod
+	c.mod = sym.Mod
+	tps, sc := c.makeTParams(ad.TypeParams, sym.Mod.Scope)
+	c.resolveConstraints(tps, ad.TypeParams, sc)
+	t := c.resolveType(ad.Type, sc)
+	c.mod = saveMod
+	if sym.aliasState == 2 {
+		// 解析过程中发现了自引用
+		return
+	}
+	if isVoid(t) {
+		c.errorf(ad.Type.P(), "类型别名不能是 void")
+		t = tInvalid
+	}
+	sym.AliasTPs = tps
+	sym.Alias = t
+	sym.aliasState = 2
+}
+
+// instAlias 返回类型别名在给定类型实参下展开的类型。
+func (c *Checker) instAlias(sym *Symbol, args []Type, pos Pos) Type {
+	c.resolveAlias(sym)
+	if isInvalid(sym.Alias) {
+		return tInvalid
+	}
+	tps := sym.AliasTPs
+	if len(args) != len(tps) {
+		if len(tps) == 0 {
+			c.errorf(pos, "类型别名 %s 不接受类型实参", sym.Name)
+		} else {
+			c.errorf(pos, "类型别名 %s 需要 %d 个类型实参，但给了 %d 个", sym.Name, len(tps), len(args))
+		}
+		return tInvalid
+	}
+	if len(tps) == 0 {
+		return sym.Alias
+	}
+	c.checkTArgs(tps, args, pos)
+	return subst(sym.Alias, makeSubst(tps, args))
 }
 
 func (c *Checker) noVoid(t Type, pos Pos) {
@@ -545,6 +603,12 @@ func (c *Checker) resolveAll() {
 		c.mod = m
 		for _, x := range m.Exts {
 			c.resolveExt(x)
+		}
+	}
+	// 类型别名在使用处按需解析；这里保证没有被使用的别名也得到检查
+	for _, m := range c.Mods {
+		for _, sym := range m.Aliases {
+			c.resolveAlias(sym)
 		}
 	}
 	// 6. 常量与注解的全局变量

@@ -1,0 +1,46 @@
+# 类型别名
+type Loop = list[Loop]           # 错误: 引用了它自己
+type Pair[T] = (T, T)
+type Keyed[K: Hashable] = dict[K, int]
+x1: Pair[int, str] = (1, 2)      # 错误: 需要 1 个类型实参
+x2: Keyed[list[int]] = {}        # 错误: 不满足约束
+x3 = Pair(1, 2)                  # 错误: 需要类型实参
+Graph = dict[str, int]           # 错误: type Graph = dict[str, int]
+
+# 函数值
+def apply(f: fn(int) -> int, x: int) -> int:
+    return f(x)
+print(apply(len, 3))             # 错误: int 没有长度
+g = len                          # 错误: 只能在需要函数值
+
+# :=
+def walrus(ok: bool):
+    if ok or (y := 5) > 0:
+        print(y)                 # 错误: 可能还没有被赋值
+    if not ok and (z := 3) > 1:
+        print(z)
+    print(z)                     # 错误: 可能还没有被赋值
+    q = [w := 1 for _ in range(3)]
+    print(w)                     # 错误: 可能还没有被赋值
+    v: str? = "a"
+    if v != null:
+        if ok or (v := null) == null:
+            pass
+        print(v.upper())         # 错误: 值可能为 null
+    h = (a: int) => (b := a)     # 错误: lambda 中不能使用 :=
+
+# 解构
+a, *b, *c = [1, 2, 3]            # 错误: 只能有一个 *
+d1, d2, d3 = (1, 2)              # 错误: 元组有 2 个元素
+e1, *e2 = (1, "x", 2.5)          # 错误: 类型不一致
+*f1 = [1, 2]                     # 错误: 只能出现在解构的多个目标中
+t = (1, 2)
+t[0:1] = [3]                     # 错误: 元组是不可变的
+s = "abc"
+s[0:1] = "x"                     # 错误: 字符串是不可变的
+xs = [1, 2]
+xs[0:1] = ["a"]                  # 错误: 类型不匹配
+print(*xs, *3)                   # 错误: 不能被遍历
+m = [*3]                         # 错误: 不能被遍历
+n = {**xs}                       # 错误: 展开的必须是字典
+k = *xs                          # 错误: 只能用在解构赋值的目标

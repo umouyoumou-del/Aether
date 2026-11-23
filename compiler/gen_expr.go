@@ -39,6 +39,9 @@ func (g *Gen) expr(e Expr) string {
 		return g.listLit(x)
 	case *SetLit:
 		et := x.T.(*SetT).Elem
+		if hasStar(x.Elems) {
+			return g.starLit(x.T, et, x.Elems, "Add", "UpdateIter")
+		}
 		var parts []string
 		for _, el := range x.Elems {
 			parts = append(parts, g.expr(el))
@@ -130,6 +133,10 @@ func (g *Gen) expr(e Expr) string {
 		return g.convCode(g.expr(x.X), x.Kind, x.From, x.T)
 	case *TypeApp:
 		return g.expr(x.X)
+	case *NamedExpr:
+		// 变量已提升到函数开头声明，闭包给它赋值后返回它
+		name := g.symName(x.Target.Sym)
+		return fmt.Sprintf("func() %s { %s = %s; return %s }()", g.typ(x.T), name, g.expr(x.Value), name)
 	}
 	return "nil /* ? */"
 }
@@ -181,6 +188,9 @@ func (g *Gen) intLit(x *IntLit, neg bool) string {
 }
 
 func (g *Gen) ident(x *Ident) string {
+	if x.Lam != nil {
+		return g.lambda(x.Lam)
+	}
 	sym := x.Sym
 	if sym == nil {
 		return x.Name
@@ -272,6 +282,9 @@ func (g *Gen) listLit(x *ListLit) string {
 	if len(x.Elems) == 0 {
 		return fmt.Sprintf("%s.NewList[%s](0)", g.rt(), g.typ(lt.Elem))
 	}
+	if hasStar(x.Elems) {
+		return g.starLit(lt, lt.Elem, x.Elems, "Append", "Extend")
+	}
 	var parts []string
 	for _, el := range x.Elems {
 		parts = append(parts, g.expr(el))
@@ -289,6 +302,21 @@ func (g *Gen) dictLit(x *DictLit) string {
 		if len(x.Keys) == 0 {
 			return fmt.Sprintf("%s.NewDict[%s, %s](0)", rt, kt, vt)
 		}
+		if hasStar(x.Keys) {
+			// {**a, k: v, **b}：按顺序写入，后面的覆盖前面的
+			r := g.tmp()
+			var b strings.Builder
+			fmt.Fprintf(&b, "func() %s { %s := %s.NewDict[%s, %s](0)", g.typ(t), r, rt, kt, vt)
+			for i, k := range x.Keys {
+				if st, ok := k.(*StarExpr); ok {
+					fmt.Fprintf(&b, "; %s.Update(%s)", r, g.expr(st.X))
+				} else {
+					fmt.Fprintf(&b, "; %s.Set(%s, %s)", r, g.expr(k), g.expr(x.Vals[i]))
+				}
+			}
+			fmt.Fprintf(&b, "; return %s }()", r)
+			return b.String()
+		}
 		var ks, vs []string
 		for i := range x.Keys {
 			ks = append(ks, g.expr(x.Keys[i]))
@@ -297,6 +325,26 @@ func (g *Gen) dictLit(x *DictLit) string {
 		return fmt.Sprintf("%s.DictLit[%s, %s]([]%s{%s}, []%s{%s})", rt, kt, vt, kt, strings.Join(ks, ", "), vt, strings.Join(vs, ", "))
 	}
 	return "nil"
+}
+
+// starLit 生成含有 *展开 的列表/集合字面量：逐个加入元素，展开的部分整体加入。
+func (g *Gen) starLit(t Type, et Type, elems []Expr, add, addAll string) string {
+	r := g.tmp()
+	ctor := "NewList"
+	if _, ok := t.(*SetT); ok {
+		ctor = "NewSet"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "func() %s { %s := %s.%s[%s](0)", g.typ(t), r, g.rt(), ctor, g.typ(et))
+	for _, el := range elems {
+		if st, ok := el.(*StarExpr); ok {
+			fmt.Fprintf(&b, "; %s.%s(%s)", r, addAll, g.expr(st.X))
+		} else {
+			fmt.Fprintf(&b, "; %s.%s(%s)", r, add, g.expr(el))
+		}
+	}
+	fmt.Fprintf(&b, "; return %s }()", r)
+	return b.String()
 }
 
 // inline 把生成语句的函数捕获为单行代码。
@@ -478,6 +526,12 @@ func (g *Gen) binCode(op TokKind, x string, xt Type, y string, yt Type, rt Type)
 		}
 		if isStr(yt) {
 			return r + ".StrRepeat(" + y + ", " + x + ")"
+		}
+		if basicKind(xt) == BChar && isInteger(yt) {
+			return r + ".StrRepeat(" + r + ".CharStr(" + x + "), " + y + ")"
+		}
+		if basicKind(yt) == BChar && isInteger(xt) {
+			return r + ".StrRepeat(" + r + ".CharStr(" + y + "), " + x + ")"
 		}
 		if _, ok := xt.(*ListT); ok {
 			return x + ".Repeat(" + y + ")"
@@ -890,6 +944,9 @@ func (g *Gen) safeWrap(recvExpr Expr, memberT Type, resT Type, inner func(recv s
 }
 
 func (g *Gen) attr(a *Attr) string {
+	if a.Lam != nil {
+		return g.lambda(a.Lam)
+	}
 	if a.Safe {
 		ot := a.T
 		memberT := optElem(ot)
@@ -1279,7 +1336,7 @@ func (g *Gen) convCall(e *Call) string {
 		case isOpt(from):
 			return x + ".Ok"
 		}
-		return "(" + x + ".Len() > 0)"
+		return g.convCode(x, ConvTruthy, from, tBool)
 	case BChar:
 		switch {
 		case isStr(from):
@@ -1340,14 +1397,14 @@ func (g *Gen) builtin(e *Call) string {
 	case "print":
 		kw, _ := e.Extra.(map[string]*Arg)
 		var args []string
+		spread := false
 		for _, a := range e.Final {
-			args = append(args, g.expr(a))
-		}
-		if len(kw) == 0 {
-			if len(e.Final) == 1 && isStr(e.Final[0].Typ()) {
-				return rt + ".PrintStr(" + args[0] + ")"
+			if st, ok := a.(*StarExpr); ok {
+				spread = true
+				args = append(args, g.expr(st.X))
+				continue
 			}
-			return rt + ".Print(" + strings.Join(args, ", ") + ")"
+			args = append(args, g.expr(a))
 		}
 		sep, end := `" "`, `"\n"`
 		if a := kw["sep"]; a != nil {
@@ -1355,6 +1412,27 @@ func (g *Gen) builtin(e *Call) string {
 		}
 		if a := kw["end"]; a != nil {
 			end = g.expr(a.X)
+		}
+		if spread {
+			// print(a, *xs)：先收集所有参数
+			r := g.tmp()
+			var b strings.Builder
+			fmt.Fprintf(&b, "func() { var %s []any", r)
+			for i, a := range e.Final {
+				if _, ok := a.(*StarExpr); ok {
+					fmt.Fprintf(&b, "; for v := range %s { %s = append(%s, v) }", args[i], r, r)
+				} else {
+					fmt.Fprintf(&b, "; %s = append(%s, %s)", r, r, args[i])
+				}
+			}
+			fmt.Fprintf(&b, "; %s.PrintSE(%s, %s, %s...) }()", rt, sep, end, r)
+			return b.String()
+		}
+		if len(kw) == 0 {
+			if len(e.Final) == 1 && isStr(e.Final[0].Typ()) {
+				return rt + ".PrintStr(" + args[0] + ")"
+			}
+			return rt + ".Print(" + strings.Join(args, ", ") + ")"
 		}
 		return rt + ".PrintSE(" + joinArgs(sep+", "+end, args) + ")"
 	case "len":
@@ -1531,6 +1609,8 @@ func (g *Gen) cast(x *Cast) string {
 	xc := g.expr(x.X)
 	to := x.To
 	switch x.Mode {
+	case castImplicit:
+		return xc
 	case castNoop:
 		if x.Safe {
 			return g.rt() + ".Some[" + g.typ(to) + "](" + g.convCode(xc, ConvIface, x.X.Typ(), to) + ")"

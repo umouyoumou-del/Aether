@@ -87,6 +87,19 @@ double = (x: int) => x * 2
 print(greet("世界", punct="~"), total(1, 2, 3, scale=10), double(21))
 ```
 
+### 熟悉的 Python 写法
+
+```python
+type Graph = dict[str, list[(str, int)]]       # 类型别名（也可以带类型参数）
+nums = list(map(int, input().split()))        # 内置函数、类型名可以直接当作函数传递
+longest = max(words, key=len)
+first, *rest = sorted(nums)                    # 星号解包
+xs[1:3] = [0, 0, 0]                            # 切片赋值；del xs[::2]
+config = {**defaults, **overrides}
+while (line := f.read_line()) != null:         # 赋值表达式，并且 line 被窄化为 str
+    print(line)
+```
+
 ### 集合、推导式与链式查询
 
 ```python

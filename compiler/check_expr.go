@@ -289,6 +289,16 @@ func (c *Checker) expr0(e Expr, want Type) Type {
 		return t
 	case *Await:
 		return c.await(x)
+	case *NamedExpr:
+		return c.namedExpr(x)
+	case *StarExpr:
+		if x.Double {
+			c.errorf(x.Pos, "**%s 只能用在字典字面量中，例如 {**a, **b}", exprName(x.X))
+		} else {
+			c.errorf(x.Pos, "*%s 只能用在解构赋值的目标、列表/集合字面量或函数调用的参数中", exprName(x.X))
+		}
+		c.expr(x.X, nil)
+		return tInvalid
 	case *Cast:
 		return c.cast(x)
 	case *IsExpr:
@@ -303,6 +313,65 @@ func (c *Checker) expr0(e Expr, want Type) Type {
 	}
 	c.errorf(e.P(), "无法识别的表达式")
 	return tInvalid
+}
+
+// namedExpr 检查赋值表达式 (x := 值)：与 x = 值 相同的规则（第一次赋值即声明函数级变量），
+// 整个表达式的值就是赋给 x 的值。
+func (c *Checker) namedExpr(e *NamedExpr) Type {
+	id := e.Target
+	if c.fn != nil && c.fn.IsLambda {
+		c.errorf(e.Pos, "lambda 中不能使用 :=；需要中间变量时请改用嵌套函数")
+		c.expr(e.Value, nil)
+		return tInvalid
+	}
+	if id.Name == "_" {
+		c.errorf(id.Pos, ":= 的左边需要一个变量名，不能是 _")
+		c.expr(e.Value, nil)
+		return tInvalid
+	}
+	old := c.scope.lookup(id.Name)
+	was := old != nil && c.flow.assigned[old]
+	c.assignTarget(id, nil, &e.Value, e.Pos)
+	if id.Sym == nil || id.Sym.Kind != SVar || isInvalid(id.T) {
+		return tInvalid
+	}
+	c.walrusLog = append(c.walrusLog, walrusEntry{sym: id.Sym, wasAssigned: was && id.Sym == old})
+	return id.T
+}
+
+// partialAssigns 撤销 c.walrusLog[from:] 中 := 的效果：它们只在部分求值路径上发生
+// （and/or 的右侧、条件表达式的分支、?? 的右侧、推导式中）。新赋值的变量不再算作一定已赋值，
+// 被赋值的变量取消窄化。返回表示这些赋值的窄化键（见 assignMark），调用者把它们放进
+// 确实求值了这部分表达式的分支。
+func (c *Checker) partialAssigns(from int) map[*Symbol]Type {
+	var marks map[*Symbol]Type
+	for i := from; i < len(c.walrusLog); i++ {
+		w := &c.walrusLog[i]
+		delete(c.flow.narrow, w.sym)
+		if w.handled {
+			continue
+		}
+		w.handled = true
+		if !w.wasAssigned {
+			delete(c.flow.assigned, w.sym)
+			if marks == nil {
+				marks = map[*Symbol]Type{}
+			}
+			marks[assignMark(w.sym)] = tVoid
+		}
+	}
+	return marks
+}
+
+// condTarget 返回条件中可以被窄化的变量：x 本身，或者 (x := 值) 中的 x。
+func condTarget(e Expr) *Ident {
+	switch x := unconv(e).(type) {
+	case *Ident:
+		return x
+	case *NamedExpr:
+		return x.Target
+	}
+	return nil
 }
 
 func optWant(want Type) Type {
@@ -391,10 +460,27 @@ func (c *Checker) ident(e *Ident, want Type) Type {
 			return tInvalid
 		}
 		if len(sym.Sig.TParams) > 0 {
+			if t, ok := c.funcValueIdent(e, want); ok {
+				return t
+			}
 			return &FuncRefT{Sig: sym.Sig, Name: sym.Name}
 		}
 		return c.sigFuncType(sym.Sig)
 	case SType:
+		if t, ok := c.funcValueIdent(e, want); ok {
+			// 类型名当作函数值：转换（map(int, xs)）或构造（map(Point, xs)）
+			return t
+		}
+		if sym.AliasDecl != nil {
+			c.resolveAlias(sym)
+			if len(sym.AliasTPs) > 0 {
+				return &GenericT{sym}
+			}
+			if isInvalid(sym.Alias) {
+				return tInvalid
+			}
+			return &MetaT{sym.Alias}
+		}
 		if sym.Alias != nil {
 			return &MetaT{sym.Alias}
 		}
@@ -410,13 +496,87 @@ func (c *Checker) ident(e *Ident, want Type) Type {
 	case SModule:
 		return &ModT{sym.ModRef}
 	case SBuiltin:
-		d := c.errorf(e.Pos, "内置函数 %s 不能作为值使用", sym.Name)
-		d.Notes = append(d.Notes, "可以用 lambda 包装，例如 x => "+sym.Name+"(x)")
+		if t, ok := c.funcValueIdent(e, want); ok {
+			return t
+		}
+		d := c.errorf(e.Pos, "内置函数 %s 只能在需要函数值、并且参数类型已知的地方当作值使用", sym.Name)
+		d.Notes = append(d.Notes, "例如 sorted(words, key=len)；其它情况可以用 lambda 包装，例如 x => "+sym.Name+"(x)")
 		return tInvalid
 	case STParam:
 		return &MetaT{&TParamT{sym.TP}}
 	}
 	return tInvalid
+}
+
+// funcWant 返回期望的函数类型（参数类型都已知时），否则返回 nil。
+func funcWant(want Type) *FuncT {
+	ft, ok := optElem(want).(*FuncT)
+	if !ok || ft.Variadic {
+		return nil
+	}
+	for _, p := range ft.Params {
+		if p == nil || isInvalid(p) {
+			return nil
+		}
+	}
+	return ft
+}
+
+// wrapFunc 构造并检查与期望的函数类型 ft 参数个数相同的 lambda：(ꞏa0, ꞏa1, ...) => body(参数)。
+// 用于把内置函数、类型名、泛型函数、类型.方法 当作函数值使用。
+func (c *Checker) wrapFunc(pos Pos, ft *FuncT, body func(args []Expr) Expr) (*Lambda, Type) {
+	lam := &Lambda{exprBase: exprBase{Pos: pos}}
+	var args []Expr
+	for i := range ft.Params {
+		name := fmt.Sprintf("ꞏa%d", i)
+		lam.Params = append(lam.Params, &Param{Pos: pos, Name: name})
+		args = append(args, &Ident{exprBase: exprBase{Pos: pos}, Name: name})
+	}
+	lam.Body = body(args)
+	t := c.expr(lam, ft)
+	return lam, t
+}
+
+// funcValueIdent 在需要函数值的地方使用内置函数、类型名或泛型函数时，把它包装为等价的 lambda。
+func (c *Checker) funcValueIdent(e *Ident, want Type) (Type, bool) {
+	ft := funcWant(want)
+	if ft == nil {
+		return nil, false
+	}
+	lam, t := c.wrapFunc(e.Pos, ft, func(args []Expr) Expr {
+		var as []*Arg
+		for _, a := range args {
+			as = append(as, &Arg{Pos: e.Pos, X: a})
+		}
+		return &Call{exprBase: exprBase{Pos: e.Pos}, Fn: &Ident{exprBase: exprBase{Pos: e.Pos}, Name: e.Name}, Args: as}
+	})
+	e.Lam = lam
+	return t, true
+}
+
+// isFuncName 判断表达式是否是可以被包装为函数值的名字（内置函数、类型、泛型函数、类型.方法）。
+// 泛型调用中，这样的实参与 lambda 一样推迟到其它实参之后检查，以便先推断出参数类型。
+func (c *Checker) isFuncName(e Expr) bool {
+	switch x := e.(type) {
+	case *Ident:
+		sym := c.scope.lookup(x.Name)
+		if sym == nil {
+			return false
+		}
+		switch sym.Kind {
+		case SBuiltin, SType:
+			return true
+		case SFunc:
+			return sym.Sig != nil && len(sym.Sig.TParams) > 0
+		}
+	case *Attr:
+		if id, ok := x.X.(*Ident); ok {
+			if sym := c.scope.lookup(id.Name); sym != nil && sym.Kind == SType {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // sigFuncType 返回签名作为函数值时的类型（async 函数返回 Task）。
@@ -577,6 +737,13 @@ func (c *Checker) listLit(e *ListLit, want Type) Type {
 		}
 		return &ListT{elemWant}
 	}
+	if hasStar(e.Elems) {
+		et := c.starElems(e.Elems, elemWant, "列表元素")
+		if isInvalid(et) {
+			return tInvalid
+		}
+		return &ListT{et}
+	}
 	if elemWant != nil && !containsTParamFree(elemWant) {
 		for i := range e.Elems {
 			c.exprTo(&e.Elems[i], elemWant, "列表元素")
@@ -595,6 +762,145 @@ func (c *Checker) listLit(e *ListLit, want Type) Type {
 		return tInvalid
 	}
 	return &ListT{et}
+}
+
+func hasStar(xs []Expr) bool {
+	for _, x := range xs {
+		if _, ok := x.(*StarExpr); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// starElems 检查含有 *展开 的列表/集合字面量的元素，返回元素类型。
+// 展开的部分可以是任何可迭代对象，贡献的是它的元素类型。
+func (c *Checker) starElems(elems []Expr, want Type, what string) Type {
+	types := make([]Type, len(elems))
+	for i, x := range elems {
+		if st, ok := x.(*StarExpr); ok {
+			if st.Double {
+				c.errorf(st.Pos, "** 只能用在字典字面量中")
+				return tInvalid
+			}
+			var w Type
+			if want != nil {
+				w = &IterT{want}
+			}
+			at := c.expr(st.X, w)
+			if isInvalid(at) {
+				return tInvalid
+			}
+			types[i] = c.elemOf(at, st.X.P(), nil)
+			continue
+		}
+		types[i] = c.validElem(c.expr(x, want), x.P(), what)
+	}
+	et := want
+	if et == nil {
+		for i, t := range types {
+			if isInvalid(t) {
+				return tInvalid
+			}
+			if et == nil {
+				et = t
+				continue
+			}
+			j := c.join(et, t)
+			if j == nil {
+				c.errorf(elems[i].P(), "%s的类型不一致：前面是 %s，这里是 %s", what, et, t)
+				return tInvalid
+			}
+			et = j
+		}
+	}
+	if isNull(et) {
+		c.errorf(elems[0].P(), "无法从 null 推断%s的类型，请写出类型注解", what)
+		return tInvalid
+	}
+	for i, x := range elems {
+		if st, ok := x.(*StarExpr); ok {
+			c.convert(&st.X, st.X.Typ(), &IterT{et}, "展开的"+what)
+			st.T = &IterT{et}
+			continue
+		}
+		c.convert(&elems[i], types[i], et, what)
+	}
+	return et
+}
+
+// spreadDict 检查含有 **展开 的字典字面量：{**defaults, "k": v, **overrides}，后面的键覆盖前面的。
+func (c *Checker) spreadDict(e *DictLit, w Type) Type {
+	want, _ := w.(*DictT)
+	var kts, vts []Type
+	for i, k := range e.Keys {
+		if st, ok := k.(*StarExpr); ok {
+			if !st.Double {
+				c.errorf(st.Pos, "字典字面量中的展开要写成 **%s", exprName(st.X))
+				return tInvalid
+			}
+			var dw Type
+			if want != nil {
+				dw = want
+			}
+			at := c.expr(st.X, dw)
+			if isInvalid(at) {
+				return tInvalid
+			}
+			dt, ok := at.(*DictT)
+			if !ok {
+				c.errorf(st.X.P(), "** 展开的必须是字典，得到 %s", at)
+				return tInvalid
+			}
+			kts = append(kts, dt.Key)
+			vts = append(vts, dt.Val)
+			continue
+		}
+		var kw, vw Type
+		if want != nil {
+			kw, vw = want.Key, want.Val
+		}
+		kts = append(kts, c.validElem(c.expr(e.Keys[i], kw), e.Keys[i].P(), "字典的键"))
+		vts = append(vts, c.validElem(c.expr(e.Vals[i], vw), e.Vals[i].P(), "字典的值"))
+	}
+	var kt, vt Type
+	if want != nil {
+		kt, vt = want.Key, want.Val
+	} else {
+		join := func(ts []Type, what string) Type {
+			var r Type
+			for _, t := range ts {
+				if isInvalid(t) {
+					return tInvalid
+				}
+				if r == nil {
+					r = t
+				} else if j := c.join(r, t); j != nil {
+					r = j
+				} else {
+					c.errorf(e.Pos, "%s的类型不一致：%s 和 %s", what, r, t)
+					return tInvalid
+				}
+			}
+			return r
+		}
+		kt, vt = join(kts, "字典的键"), join(vts, "字典的值")
+		if isInvalid(kt) || isInvalid(vt) {
+			return tInvalid
+		}
+	}
+	dt := &DictT{kt, vt}
+	for i, k := range e.Keys {
+		if st, ok := k.(*StarExpr); ok {
+			c.convert(&st.X, st.X.Typ(), dt, "** 展开的字典")
+			st.T = dt
+			continue
+		}
+		c.convert(&e.Keys[i], kts[i], kt, "字典的键")
+		c.convert(&e.Vals[i], vts[i], vt, "字典的值")
+	}
+	c.requireHashable(kt, e.Pos, "字典的键")
+	return dt
 }
 
 // isEmptyContainer 判断是否为空的列表/字典/集合字面量。
@@ -617,7 +923,9 @@ func (c *Checker) setLit(e *SetLit, want Type) Type {
 		elemWant = st.Elem
 	}
 	var et Type
-	if elemWant != nil {
+	if hasStar(e.Elems) {
+		et = c.starElems(e.Elems, elemWant, "集合元素")
+	} else if elemWant != nil {
 		for i := range e.Elems {
 			c.exprTo(&e.Elems[i], elemWant, "集合元素")
 		}
@@ -644,6 +952,9 @@ func (c *Checker) dictLit(e *DictLit, want Type) Type {
 		d := c.errorf(e.Pos, "无法推断空字典的类型")
 		d.Notes = append(d.Notes, "请写出类型，例如 d: dict[str, int] = {}")
 		return tInvalid
+	}
+	if hasStar(e.Keys) {
+		return c.spreadDict(e, w)
 	}
 	var kt, vt Type
 	if dt, ok := w.(*DictT); ok {
@@ -702,6 +1013,7 @@ func (c *Checker) tupleLit(e *TupleLit, want Type) Type {
 func (c *Checker) comp(e *Comp, want Type) Type {
 	c.pushScope()
 	saveNarrow := c.saveNarrow()
+	walrusFrom := len(c.walrusLog)
 	for _, cl := range e.Clauses {
 		if cl.IsIf {
 			thenN, _ := c.cond(&cl.Cond)
@@ -763,6 +1075,8 @@ func (c *Checker) comp(e *Comp, want Type) Type {
 		result = &DictT{kt, vt}
 	}
 	c.restoreNarrow(saveNarrow)
+	// 推导式的主体可能一次也不执行，其中 := 赋值的变量之后不算一定已赋值
+	c.partialAssigns(walrusFrom)
 	c.popScope()
 	return result
 }
@@ -996,11 +1310,12 @@ func (c *Checker) binary(e *Binary, want Type) Type {
 			return st
 		}
 	case TStar:
-		if isStr(xt) && isInteger(yt) {
+		// 字符串（或字符，例如 '-' * 20）重复若干次，结果是字符串
+		if (isStr(xt) || basicKind(xt) == BChar) && isInteger(yt) {
 			c.convert(&e.Y, yt, tInt, "重复次数")
 			return tStr
 		}
-		if isInteger(xt) && isStr(yt) {
+		if isInteger(xt) && (isStr(yt) || basicKind(yt) == BChar) {
 			c.convert(&e.X, xt, tInt, "重复次数")
 			return tStr
 		}
@@ -1363,14 +1678,17 @@ func (c *Checker) condExpr(slot *Expr) (thenN, elseN map[*Symbol]Type) {
 		} else {
 			c.applyNarrow(eA)
 		}
+		from := len(c.walrusLog)
 		tB, eB := c.condExpr(&x.Y)
 		c.truthy(&x.Y)
 		c.restoreNarrow(save)
+		// 右侧中的 := 只在求值了右侧时发生：and 为真、or 为假时一定求值了右侧
+		marks := c.partialAssigns(from)
 		x.T = tBool
 		if x.Op == KAnd {
-			return union(tA, tB), intersect(eA, eB)
+			return union(tA, union(tB, marks)), intersect(eA, eB)
 		}
-		return intersect(tA, tB), union(eA, eB)
+		return intersect(tA, tB), union(eA, union(eB, marks))
 	case *Unary:
 		if x.Op == KNot {
 			t, el := c.condExpr(&x.X)
@@ -1383,9 +1701,9 @@ func (c *Checker) condExpr(slot *Expr) (thenN, elseN map[*Symbol]Type) {
 		if len(x.Ops) == 1 && (x.Ops[0] == TEq || x.Ops[0] == TNe) {
 			var id *Ident
 			if _, ok := x.Xs[1].(*NullLit); ok {
-				id, _ = unconv(x.Xs[0]).(*Ident)
+				id = condTarget(x.Xs[0])
 			} else if _, ok := x.Xs[0].(*NullLit); ok {
-				id, _ = unconv(x.Xs[1]).(*Ident)
+				id = condTarget(x.Xs[1])
 			}
 			if id != nil && c.narrowable(id.Sym) {
 				if o, ok := id.Sym.T.(*OptT); ok {
@@ -1400,8 +1718,8 @@ func (c *Checker) condExpr(slot *Expr) (thenN, elseN map[*Symbol]Type) {
 		return nil, nil
 	case *IsExpr:
 		c.expr(e, nil)
-		id, ok := x.X.(*Ident)
-		if !ok || !c.narrowable(id.Sym) || isInvalid(x.T) {
+		id := condTarget(x.X)
+		if id == nil || !c.narrowable(id.Sym) || isInvalid(x.T) {
 			return nil, nil
 		}
 		var n map[*Symbol]Type
@@ -1426,6 +1744,13 @@ func (c *Checker) condExpr(slot *Expr) (thenN, elseN map[*Symbol]Type) {
 		t := c.expr(e, nil)
 		if o, ok := t.(*OptT); ok && c.narrowable(x.Sym) {
 			return map[*Symbol]Type{x.Sym: o.Elem}, nil
+		}
+		return nil, nil
+	case *NamedExpr:
+		// if m := re.search(...):  非 null 时 m 被窄化
+		t := c.expr(e, nil)
+		if o, ok := t.(*OptT); ok && c.narrowable(x.Target.Sym) {
+			return map[*Symbol]Type{x.Target.Sym: o.Elem}, nil
 		}
 		return nil, nil
 	}
@@ -1482,12 +1807,18 @@ func (c *Checker) ternary(e *Ternary, want Type) Type {
 	thenN, elseN := c.cond(&e.Cond)
 	save := c.saveNarrow()
 	c.applyNarrow(thenN)
+	from := len(c.walrusLog)
 	tt := c.expr(e.Then, want)
 	c.restoreNarrow(save)
+	m1 := c.partialAssigns(from)
 	save = c.saveNarrow()
 	c.applyNarrow(elseN)
+	from = len(c.walrusLog)
 	et := c.expr(e.Else, want)
 	c.restoreNarrow(save)
+	m2 := c.partialAssigns(from)
+	// 两个分支都赋值了的变量在条件表达式之后一定已赋值
+	c.applyNarrow(intersect(m1, m2))
 	if isInvalid(tt) || isInvalid(et) {
 		return tInvalid
 	}
@@ -1536,7 +1867,9 @@ func (c *Checker) nullCo(e *NullCo, want Type) Type {
 	if want != nil && isOpt(want) {
 		yw = want
 	}
+	from := len(c.walrusLog)
 	yt := c.expr(e.Y, yw)
+	c.partialAssigns(from)
 	if isInvalid(yt) {
 		return tInvalid
 	}
@@ -1709,8 +2042,13 @@ func (c *Checker) instantiate(base Type, args []TypeExpr, pos Pos) (Type, []Type
 	switch b := base.(type) {
 	case *GenericT:
 		sym := b.Sym
-		nx := &NamedTypeX{Pos: pos, Name: sym.Name}
-		_ = nx
+		if sym.AliasDecl != nil {
+			t := c.instAlias(sym, types, pos)
+			if isInvalid(t) {
+				return tInvalid, nil
+			}
+			return &MetaT{t}, types
+		}
 		switch sym.Builtin {
 		case "list":
 			if len(types) != 1 {
@@ -1903,6 +2241,7 @@ const (
 	castIntToEnum
 	castOptUnwrapAssert
 	castCharInt
+	castImplicit // 值已经由隐式转换（ConvExpr）转换为目标类型
 )
 
 func (c *Checker) cast(e *Cast) Type {
@@ -1985,6 +2324,12 @@ func (c *Checker) cast(e *Cast) Type {
 		e.Mode = castAssert
 		return result
 	}
+	if _, ok := c.assignable(xt, to); ok && !e.Safe {
+		// 能隐式完成的转换（null as str?、x as any、xs as iter[int]……）也可以用 as 写出来
+		c.convert(&e.X, xt, to, "as 转换")
+		e.Mode = castImplicit
+		return to
+	}
 	d := c.errorf(e.Pos, "不能把 %s 转换为 %s", xt, to)
 	if isStr(from) && isNumeric(to) {
 		d.Notes = append(d.Notes, "解析字符串请用 int(s) 或 float(s)")
@@ -2059,6 +2404,9 @@ func (c *Checker) attr(e *Attr, want Type) Type {
 	case *ModT:
 		return c.moduleMember(e, x.M)
 	case *MetaT:
+		if t, ok := c.unboundMethod(e, x.T, want); ok {
+			return t
+		}
 		return c.staticMember(e, x.T)
 	case *GenericT:
 		c.errorf(e.Pos, "访问 %s 的成员需要先给出类型实参", x.Sym.Name)
@@ -2088,6 +2436,38 @@ func (c *Checker) attr(e *Attr, want Type) Type {
 	}
 	e.RecvT = xt
 	return c.member(e, xt)
+}
+
+// unboundMethod 处理在需要函数值的地方写的 类型.实例方法（例如 key=str.lower、map(Point.norm, ps)）：
+// 包装为 lambda，第一个参数是接收者。
+func (c *Checker) unboundMethod(e *Attr, t Type, want Type) (Type, bool) {
+	ft := funcWant(want)
+	if ft == nil || len(ft.Params) == 0 {
+		return nil, false
+	}
+	if nt, ok := t.(*NamedT); ok {
+		if nt.D.Kind == DEnum && nt.D.VariantMap[e.Name] != nil {
+			return nil, false
+		}
+		if mem, _, _ := c.findMember(nt, e.Name); mem != nil {
+			if m, ok := mem.(*Method); !ok || m.Static {
+				return nil, false
+			}
+		}
+	}
+	if _, ok := c.assignable(ft.Params[0], t); !ok {
+		return nil, false
+	}
+	lam, lt := c.wrapFunc(e.Pos, ft, func(args []Expr) Expr {
+		var as []*Arg
+		for _, a := range args[1:] {
+			as = append(as, &Arg{Pos: e.Pos, X: a})
+		}
+		fn := &Attr{exprBase: exprBase{Pos: e.Pos}, X: args[0], Name: e.Name, NamePos: e.NamePos}
+		return &Call{exprBase: exprBase{Pos: e.Pos}, Fn: fn, Args: as}
+	})
+	e.Lam = lam
+	return lt, true
 }
 
 func (c *Checker) moduleMember(e *Attr, m *Module) Type {

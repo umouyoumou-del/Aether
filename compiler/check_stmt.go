@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 )
@@ -117,7 +118,7 @@ func (c *Checker) stmt(s Stmt) {
 				c.errorf(s.Pos, "模块中没有全局变量 %s", n)
 			}
 		}
-	case *FuncDecl, *ClassDecl, *EnumDecl, *ExtendDecl, *ImportStmt, *TestDecl:
+	case *FuncDecl, *ClassDecl, *EnumDecl, *ExtendDecl, *ImportStmt, *TestDecl, *TypeAliasDecl:
 		// 顶层声明已在收集阶段处理
 	default:
 		c.errorf(s.P(), "未知的语句")
@@ -341,15 +342,43 @@ func (c *Checker) assignTarget(target Expr, vt Type, valueSlot *Expr, pos Pos) {
 			c.assignTuple(t, valueSlot, pos)
 			return
 		}
-		tt, ok := vt.(*TupleT)
-		if !ok || len(tt.Elems) != len(t.Elems) {
-			c.errorf(t.Pos, "不能把 %s 解构为 %d 个变量", vt, len(t.Elems))
+		var types []Type
+		if !isInvalid(vt) {
+			types = c.unpackTypes(t, vt, pos)
+		}
+		if types == nil {
+			c.declareInvalidTargets(t)
 			return
 		}
 		for i, e := range t.Elems {
-			c.assignTarget(e, tt.Elems[i], nil, pos)
+			c.assignTarget(e, types[i], nil, pos)
 		}
 		t.T = vt
+	case *StarExpr:
+		if valueSlot != nil {
+			c.errorf(t.Pos, "*%s 只能出现在解构的多个目标中，例如 first, *rest = xs", exprName(t.X))
+			c.expr(*valueSlot, nil)
+			return
+		}
+		t.T = vt
+		c.assignTarget(t.X, vt, nil, pos)
+	case *SliceExpr:
+		lt := c.sliceTarget(t)
+		if lt == nil {
+			if valueSlot != nil {
+				c.expr(*valueSlot, nil)
+			}
+			return
+		}
+		if valueSlot != nil {
+			// 右边可以是任何可迭代对象；不是同类型的列表时先收集为列表
+			at := c.expr(*valueSlot, lt)
+			if !isInvalid(at) && !identical(at, lt) {
+				c.convert(valueSlot, at, &IterT{lt.Elem}, "切片赋值")
+			}
+		} else if vt != nil && !identical(vt, lt) && !isInvalid(vt) {
+			c.errorf(t.Pos, "不能把 %s 赋给 %s 的切片", vt, lt)
+		}
 	default:
 		c.errorf(target.P(), "不能给这个表达式赋值")
 	}
@@ -370,7 +399,10 @@ func (c *Checker) declType(vt Type, pos Pos, name string) Type {
 	}
 	switch x := vt.(type) {
 	case *MetaT:
-		c.errorf(pos, "%s 是类型，不能作为值赋给变量", x.T)
+		d := c.errorf(pos, "%s 是类型，不能作为值赋给变量", x.T)
+		if c.fn == nil || c.fn.IsModInit {
+			d.Notes = append(d.Notes, fmt.Sprintf("定义类型别名请写 type %s = %s", name, x.T))
+		}
 		return tInvalid
 	case *ModT:
 		c.errorf(pos, "模块不能赋值给变量")
@@ -384,7 +416,7 @@ func (c *Checker) declType(vt Type, pos Pos, name string) Type {
 
 // assignTuple 处理 a, b = ... 形式的解构赋值。
 func (c *Checker) assignTuple(tl *TupleLit, valueSlot *Expr, pos Pos) {
-	if vl, ok := (*valueSlot).(*TupleLit); ok && len(vl.Elems) == len(tl.Elems) {
+	if vl, ok := (*valueSlot).(*TupleLit); ok && len(vl.Elems) == len(tl.Elems) && starIndex(tl) < 0 && starIndex(vl) < 0 {
 		// 并行赋值 a, b = b, a：右侧先全部求值
 		var wants []Type
 		for _, e := range tl.Elems {
@@ -413,34 +445,144 @@ func (c *Checker) assignTuple(tl *TupleLit, valueSlot *Expr, pos Pos) {
 		return
 	}
 	vt := c.expr(*valueSlot, nil)
-	if isInvalid(vt) {
-		for _, e := range tl.Elems {
-			if id, ok := e.(*Ident); ok && id.Name != "_" && c.targetSym(id) == nil {
-				sym := c.declareLocal(id.Name, tInvalid, id.Pos, false)
-				id.Sym = sym
-				c.flow.assigned[sym] = true
+	if !isInvalid(vt) {
+		switch vt.(type) {
+		case *TupleT, *ListT:
+		default:
+			// 其它可迭代对象（字符串、range、集合……）先收集为列表再解构
+			if et := c.elemOf(vt, (*valueSlot).P(), nil); !isInvalid(et) {
+				c.convert(valueSlot, vt, &IterT{et}, "解构")
+				vt = &ListT{et}
+			} else {
+				vt = tInvalid
 			}
 		}
+	}
+	var types []Type
+	if !isInvalid(vt) {
+		types = c.unpackTypes(tl, vt, pos)
+	}
+	if types == nil {
+		c.declareInvalidTargets(tl)
 		return
 	}
-	switch x := vt.(type) {
-	case *TupleT:
-		if len(x.Elems) != len(tl.Elems) {
-			c.errorf(pos, "元组有 %d 个元素，但要解构为 %d 个变量", len(x.Elems), len(tl.Elems))
-			return
-		}
-		for i, e := range tl.Elems {
-			c.assignTarget(e, x.Elems[i], nil, pos)
-		}
-	case *ListT:
-		for _, e := range tl.Elems {
-			c.assignTarget(e, x.Elem, nil, pos)
-		}
-	default:
-		c.errorf(pos, "不能把 %s 解构为多个变量", vt)
-		return
+	for i, e := range tl.Elems {
+		c.assignTarget(e, types[i], nil, pos)
 	}
 	tl.T = vt
+}
+
+// declareInvalidTargets 在解构出错时声明目标中的新变量（类型无效），避免后续的连锁错误。
+func (c *Checker) declareInvalidTargets(tl *TupleLit) {
+	for _, e := range tl.Elems {
+		if st, ok := e.(*StarExpr); ok {
+			e = st.X
+		}
+		switch x := e.(type) {
+		case *Ident:
+			if x.Name != "_" && c.targetSym(x) == nil {
+				sym := c.declareLocal(x.Name, tInvalid, x.Pos, false)
+				x.Sym = sym
+				c.flow.assigned[sym] = true
+			}
+		case *TupleLit:
+			c.declareInvalidTargets(x)
+		}
+	}
+}
+
+// starIndex 返回 *rest 目标（或展开）在元组中的位置，没有时返回 -1。
+func starIndex(tl *TupleLit) int {
+	for i, e := range tl.Elems {
+		if _, ok := e.(*StarExpr); ok {
+			return i
+		}
+	}
+	return -1
+}
+
+// unpackTypes 计算把 vt 类型的值解构到 tl 的各个目标时每个目标的类型（*rest 目标是列表）。
+// 元组的元素个数必须与目标一致（有 *rest 时不少于其它目标的个数）；列表在运行时检查长度。
+// 出错时返回 nil。
+func (c *Checker) unpackTypes(tl *TupleLit, vt Type, pos Pos) []Type {
+	si := -1
+	for i, e := range tl.Elems {
+		if _, ok := e.(*StarExpr); ok {
+			if si >= 0 {
+				c.errorf(e.P(), "解构的目标中只能有一个 *")
+				return nil
+			}
+			si = i
+		}
+	}
+	n := len(tl.Elems)
+	out := make([]Type, n)
+	switch x := vt.(type) {
+	case *TupleT:
+		if si < 0 {
+			if len(x.Elems) != n {
+				c.errorf(pos, "元组有 %d 个元素，但要解构为 %d 个变量", len(x.Elems), n)
+				return nil
+			}
+			copy(out, x.Elems)
+			return out
+		}
+		m := len(x.Elems) - (n - 1) // *rest 收集的元素个数
+		if m < 0 {
+			c.errorf(pos, "元组只有 %d 个元素，不够解构为 %d 个变量", len(x.Elems), n-1)
+			return nil
+		}
+		for i := 0; i < si; i++ {
+			out[i] = x.Elems[i]
+		}
+		for i := si + 1; i < n; i++ {
+			out[i] = x.Elems[i-1+m]
+		}
+		star := tl.Elems[si].(*StarExpr)
+		var et Type
+		for _, t := range x.Elems[si : si+m] {
+			if et == nil {
+				et = t
+			} else if j := c.join(et, t); j != nil {
+				et = j
+			} else {
+				c.errorf(star.Pos, "*%s 收集的元组元素类型不一致：%s 和 %s", exprName(star.X), et, t)
+				return nil
+			}
+		}
+		if et == nil {
+			// 没有剩余元素：只能使用已声明的列表变量的类型
+			if id, ok := star.X.(*Ident); ok {
+				if sym := c.targetSym(id); sym != nil && sym.Kind == SVar && !sym.Pending {
+					if lt, ok := sym.T.(*ListT); ok {
+						out[si] = lt
+						return out
+					}
+				}
+			}
+			c.errorf(star.Pos, "无法推断 *%s 的类型：元组中没有剩余的元素", exprName(star.X))
+			return nil
+		}
+		out[si] = &ListT{et}
+		return out
+	case *ListT:
+		for i := range out {
+			out[i] = x.Elem
+		}
+		if si >= 0 {
+			out[si] = x
+		}
+		return out
+	}
+	c.errorf(pos, "不能把 %s 解构为多个变量", vt)
+	return nil
+}
+
+func exprName(e Expr) string {
+	if id, ok := e.(*Ident); ok {
+		return id.Name
+	}
+	return "rest"
 }
 
 // attrTarget 检查 obj.name 作为赋值目标，返回成员类型。
@@ -815,6 +957,10 @@ func (c *Checker) constDecl(s *ConstDecl) {
 
 func (c *Checker) applyNarrow(n map[*Symbol]Type) {
 	for k, v := range n {
+		if k.markOf != nil {
+			c.flow.assigned[k.markOf] = true
+			continue
+		}
 		c.flow.narrow[k] = v
 	}
 }
@@ -894,6 +1040,19 @@ func assignedNames(list []Stmt, out map[string]bool) {
 			// 嵌套函数可能修改外层变量
 			assignedNames(s.Fn.Body, out)
 		}
+		walrusNames(st, out)
+	}
+}
+
+// walrusNames 收集语句自身的表达式中 := 赋值的名字。
+func walrusNames(st Stmt, out map[string]bool) {
+	for _, e := range stmtExprs(st) {
+		walkExpr(e, func(x Expr) bool {
+			if ne, ok := x.(*NamedExpr); ok {
+				out[ne.Target.Name] = true
+			}
+			return true
+		})
 	}
 }
 
@@ -935,6 +1094,10 @@ func (c *Checker) whileStmt(s *WhileStmt) {
 	}
 	after := entry.copy()
 	for k, v := range elseN {
+		if k.markOf != nil {
+			after.assigned[k.markOf] = true
+			continue
+		}
 		after.narrow[k] = v
 	}
 	c.flow = mergeFlows(append([]*flowState{after}, lc.breaks...)...)
@@ -973,26 +1136,27 @@ func (c *Checker) bindLoopTarget(target Expr, t Type, info *LoopInfo) {
 		}
 	case *TupleLit:
 		x.T = t
-		tt, ok := t.(*TupleT)
-		if !ok {
-			if !isInvalid(t) {
+		var types []Type
+		if tt, ok := t.(*TupleT); ok && starIndex(x) < 0 && len(tt.Elems) != len(x.Elems) {
+			c.errorf(x.Pos, "元素是 %d 元组，但给了 %d 个循环变量", len(tt.Elems), len(x.Elems))
+		} else if !isInvalid(t) {
+			switch t.(type) {
+			case *TupleT, *ListT:
+				types = c.unpackTypes(x, t, x.Pos)
+			default:
 				c.errorf(x.Pos, "不能把 %s 解构为 %d 个循环变量", t, len(x.Elems))
 			}
-			for _, e := range x.Elems {
-				c.bindLoopTarget(e, tInvalid, info)
-			}
-			return
-		}
-		if len(tt.Elems) != len(x.Elems) {
-			c.errorf(x.Pos, "元素是 %d 元组，但给了 %d 个循环变量", len(tt.Elems), len(x.Elems))
-			for _, e := range x.Elems {
-				c.bindLoopTarget(e, tInvalid, info)
-			}
-			return
 		}
 		for i, e := range x.Elems {
-			c.bindLoopTarget(e, tt.Elems[i], info)
+			var et Type = tInvalid
+			if types != nil {
+				et = types[i]
+			}
+			c.bindLoopTarget(e, et, info)
 		}
+	case *StarExpr:
+		x.T = t
+		c.bindLoopTarget(x.X, t, info)
 	default:
 		c.errorf(target.P(), "循环变量必须是名字")
 	}
@@ -1435,8 +1599,39 @@ func (c *Checker) goStmt(s *GoStmt) {
 	c.expr(s.X, nil)
 }
 
+// sliceTarget 检查 xs[a:b:c] 作为赋值或 del 的目标（只能是列表），返回列表类型。
+func (c *Checker) sliceTarget(t *SliceExpr) *ListT {
+	xt := c.expr(t.X, nil)
+	for _, b := range []*Expr{&t.Lo, &t.Hi, &t.Step} {
+		if *b != nil {
+			c.exprTo(b, tInt, "切片下标")
+		}
+	}
+	switch x := xt.(type) {
+	case *ListT:
+		t.T = x
+		return x
+	case *Basic:
+		if x.Kind == BStr {
+			c.errorf(t.Pos, "字符串是不可变的，不能给切片赋值；可以拼接出新的字符串")
+			return nil
+		}
+	case *TupleT:
+		c.errorf(t.Pos, "元组是不可变的")
+		return nil
+	}
+	if !isInvalid(xt) {
+		c.errorf(t.Pos, "只能给列表的切片赋值，不能用于 %s", xt)
+	}
+	return nil
+}
+
 func (c *Checker) delStmt(s *DelStmt) {
 	for _, t := range s.Targets {
+		if sl, ok := t.(*SliceExpr); ok {
+			c.sliceTarget(sl)
+			continue
+		}
 		idx, ok := t.(*Index)
 		if !ok {
 			c.errorf(t.P(), "del 只能删除列表元素或字典的键，例如 del d[key]")
@@ -1802,33 +1997,25 @@ func (c *Checker) analyzeMutating() {
 	}
 }
 
+// callsMutatingOnSelf 判断语句中（任何表达式里，包括条件、return 和 lambda）是否在 self 上调用了可变方法。
 func callsMutatingOnSelf(list []Stmt) bool {
 	found := false
-	var visitExpr func(e Expr)
-	visitExpr = func(e Expr) {
-		if found || e == nil {
-			return
-		}
-		if call, ok := e.(*Call); ok {
-			if call.Kind == CallMethod && call.Method != nil && call.Method.Mutating {
-				if id, ok := call.Recv.(*Ident); ok && id.Sym != nil && id.Sym.IsSelf {
-					found = true
-					return
-				}
-			}
-			for _, a := range call.Final {
-				visitExpr(a)
-			}
-			visitExpr(call.Recv)
-		}
-	}
 	walkStmts(list, func(s Stmt) {
-		switch x := s.(type) {
-		case *ExprStmt:
-			visitExpr(x.X)
-		case *AssignStmt:
-			visitExpr(x.Value)
+		if fd, ok := s.(*FuncDeclStmt); ok && !found {
+			found = callsMutatingOnSelf(fd.Fn.Body)
 		}
+	})
+	walkStmtExprs(list, func(e Expr) bool {
+		if found {
+			return false
+		}
+		if call, ok := e.(*Call); ok && call.Kind == CallMethod && call.Method != nil && call.Method.Mutating {
+			if id, ok := unconv(call.Recv).(*Ident); ok && id.Sym != nil && id.Sym.IsSelf {
+				found = true
+				return false
+			}
+		}
+		return true
 	})
 	return found
 }

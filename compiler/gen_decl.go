@@ -274,7 +274,7 @@ func (g *Gen) genClassMethods(td *TypeDecl) {
 	seen := map[string]bool{}
 	g.work = nil
 	done := map[string]bool{}
-	hasStr := false
+	hasStr, hasRepr := false, false
 	var eqM *Method
 	for _, anc := range chain {
 		for _, m := range anc.D.MethodList {
@@ -287,6 +287,9 @@ func (g *Gen) genClassMethods(td *TypeDecl) {
 			seen[m.Name] = true
 			if m.Name == "__str__" {
 				hasStr = true
+			}
+			if m.Name == "__repr__" {
+				hasRepr = true
 			}
 			if m.Name == "__eq__" {
 				eqM = m
@@ -324,9 +327,9 @@ func (g *Gen) genClassMethods(td *TypeDecl) {
 		g.genMethodCopy(w)
 	}
 	st := td.GoName + tparamUse(g, td.TParams)
-	if !hasStr {
+	g.genStrRepr("*"+st, hasStr, hasRepr, "self.__repr__()", func() {
 		g.genDefaultStr("*"+st, td.Name, g.allFields(td), "self.")
-	}
+	})
 	g.line("func (self *%s) TypeNameꞏ() string { return %q }", st, td.Name)
 	g.genFields("*"+st, g.allFields(td), "", "")
 	if td.IsExc {
@@ -406,6 +409,23 @@ func (g *Gen) genFields(recv string, fields []*Field, extraName, extraVal string
 		vals = append(vals, "self."+f.GoName)
 	}
 	g.line("func (self %s) Fieldsꞏ() ([]string, []any) { return []string{%s}, []any{%s} }", recv, strings.Join(names, ", "), strings.Join(vals, ", "))
+}
+
+// genStrRepr 为类型生成 String()（str）与 Reprꞏ()（repr）：定义了 __repr__ 的类型，
+// repr() 与容器中的显示使用它；没有 __str__ 时 str()、print 也使用它（与 Python 相同）。
+// 两者都没有时调用 dflt 生成默认的字符串形式。
+func (g *Gen) genStrRepr(recv string, hasStr, hasRepr bool, reprCall string, dflt func()) {
+	if hasRepr {
+		g.line("func (self %s) Reprꞏ() string { return %s }", recv, reprCall)
+	}
+	if hasStr {
+		return
+	}
+	if hasRepr {
+		g.line("func (self %s) String() string { return %s }", recv, reprCall)
+		return
+	}
+	dflt()
 }
 
 func (g *Gen) genDefaultStr(recv, name string, fields []*Field, prefix string) {
@@ -599,7 +619,7 @@ func (g *Gen) genStruct(td *TypeDecl) {
 	g.line("")
 	saveSelf := g.self
 	g.self = nil
-	hasStr := false
+	hasStr, hasRepr := false, td.Methods["__repr__"] != nil
 	var eqM *Method
 	for _, m := range td.MethodList {
 		if m.Name == "__str__" {
@@ -651,9 +671,9 @@ func (g *Gen) genStruct(td *TypeDecl) {
 		}
 	}
 	g.fn = nil
-	if !hasStr {
+	g.genStrRepr(st, hasStr, hasRepr, "self.__repr__()", func() {
 		g.genDefaultStr(st, td.Name, td.Fields, "self.")
-	}
+	})
 	g.line("func (self %s) TypeNameꞏ() string { return %q }", st, td.Name)
 	g.genFields(st, td.Fields, "", "")
 	if pt, ok := lessParam(td.Methods["__lt__"]); ok {
@@ -708,10 +728,9 @@ func (g *Gen) genEnum(td *TypeDecl) {
 	g.line("\treturn %s.Itoa(int(self))", g.rt())
 	g.line("}")
 	g.line("")
-	hasStr := td.Methods["__str__"] != nil
-	if !hasStr {
+	g.genStrRepr(td.GoName, td.Methods["__str__"] != nil, td.Methods["__repr__"] != nil, "self.__repr__()", func() {
 		g.line("func (self %s) String() string { return %q + self.EnumNameꞏ() }", td.GoName, td.Name+".")
-	}
+	})
 	g.line("func (self %s) TypeNameꞏ() string { return %q }", td.GoName, td.Name)
 	g.line("")
 	var vals []string
@@ -788,7 +807,7 @@ func (g *Gen) genADT(td *TypeDecl) {
 	g.ind--
 	g.line("}")
 	g.line("")
-	strM := td.Methods["__str__"]
+	strM, reprM := td.Methods["__str__"], td.Methods["__repr__"]
 	for _, v := range td.Variants {
 		vt := v.GoName + tpu
 		g.line("type %s%s struct {", v.GoName, tpd)
@@ -798,13 +817,20 @@ func (g *Gen) genADT(td *TypeDecl) {
 		g.line("}")
 		g.line("")
 		g.line("func (%s) isꞏ%s() {}", vt, td.GoName)
+		reprCall := ""
+		if reprM != nil {
+			reprCall = reprM.GoName + tpu + "(self)"
+		}
 		if strM != nil {
 			g.line("func (self %s) String() string { return %s%s(self) }", vt, strM.GoName, tpu)
-		} else if len(v.Fields) == 0 {
-			g.line("func (self %s) String() string { return %q }", vt, td.Name+"."+v.Name)
-		} else {
-			g.genDefaultStr(vt, td.Name+"."+v.Name, v.Fields, "self.")
 		}
+		g.genStrRepr(vt, strM != nil, reprM != nil, reprCall, func() {
+			if len(v.Fields) == 0 {
+				g.line("func (self %s) String() string { return %q }", vt, td.Name+"."+v.Name)
+			} else {
+				g.genDefaultStr(vt, td.Name+"."+v.Name, v.Fields, "self.")
+			}
+		})
 		g.line("func (self %s) TypeNameꞏ() string { return %q }", vt, td.Name)
 		g.genFields(vt, v.Fields, "kind", fmt.Sprintf("%q", v.Name))
 		var conds []string
