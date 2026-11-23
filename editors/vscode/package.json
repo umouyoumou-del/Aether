@@ -1,11 +1,13 @@
 {
   "name": "aether",
   "displayName": "五行 (Aether)",
-  "description": "五行 (Aether) 编程语言的语法高亮",
-  "version": "0.1.0",
+  "description": "五行 (Aether) 编程语言：语法高亮、实时诊断、悬停显示类型、跳转到定义、补全与大纲",
+  "version": "0.2.0",
   "publisher": "aether-lang",
   "engines": { "vscode": "^1.60.0" },
   "categories": ["Programming Languages"],
+  "main": "./extension.js",
+  "activationEvents": ["onLanguage:aether"],
   "contributes": {
     "languages": [
       {
@@ -20,6 +22,22 @@
         "language": "aether",
         "scopeName": "source.aether",
         "path": "./syntaxes/aether.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "五行 (Aether)",
+      "properties": {
+        "aether.path": {
+          "type": "string",
+          "default": "",
+          "description": "aether 可执行文件的路径。留空时依次使用工作区中的 bin/aether(.exe) 和 PATH 中的 aether。"
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "aether.restartServer",
+        "title": "五行：重启语言服务器"
       }
     ]
   }

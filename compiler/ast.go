@@ -523,8 +523,9 @@ type VarDecl struct {
 }
 
 type ConstDecl struct {
-	Pos    Pos
-	Name   string
+	Pos     Pos
+	NamePos Pos
+	Name    string
 	Type   TypeExpr
 	Value  Expr
 	Sym    *Symbol
@@ -767,6 +768,7 @@ type FieldDecl struct {
 
 type PropDecl struct {
 	Pos      Pos
+	NamePos  Pos
 	Name     string
 	Type     TypeExpr
 	Getter   []Stmt
@@ -793,6 +795,7 @@ const (
 
 type ClassDecl struct {
 	Pos        Pos
+	NamePos    Pos
 	Name       string
 	Kind       ClassKind
 	TypeParams []*TypeParamX
@@ -815,6 +818,7 @@ type VariantDecl struct {
 
 type EnumDecl struct {
 	Pos        Pos
+	NamePos    Pos
 	Name       string
 	TypeParams []*TypeParamX
 	Bases      []TypeExpr

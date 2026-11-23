@@ -627,7 +627,8 @@ func (p *parser) classDecl(decs []*Decorator, abstract bool) *ClassDecl {
 	case KInterface:
 		cd.Kind = KindInterface
 	}
-	cd.Name = p.expectIdent("类型").Text
+	nameTok := p.expectIdent("类型")
+	cd.Name, cd.NamePos = nameTok.Text, nameTok.Pos
 	if p.at(TLBrack) {
 		cd.TypeParams = p.typeParams()
 	}
@@ -756,9 +757,9 @@ func (p *parser) classMember(cd *ClassDecl) {
 		}
 		cd.Props = append(cd.Props, pd)
 	case p.at(KConst):
-		pos := p.advance().Pos
+		p.advance()
 		nt := p.expectIdent("常量")
-		fdl := &FieldDecl{Pos: pos, Name: nt.Text, Static: true, Const: true}
+		fdl := &FieldDecl{Pos: nt.Pos, Name: nt.Text, Static: true, Const: true}
 		if p.got(TColon) {
 			fdl.Type = p.typeExpr()
 		}
@@ -805,7 +806,7 @@ func (p *parser) classMember(cd *ClassDecl) {
 func (p *parser) propDecl() *PropDecl {
 	pos := p.advance().Pos // prop
 	nt := p.expectIdent("属性")
-	pd := &PropDecl{Pos: pos, Name: nt.Text}
+	pd := &PropDecl{Pos: pos, NamePos: nt.Pos, Name: nt.Text}
 	p.expect(TArrow, "属性声明（写成 prop 名字 -> 类型）")
 	pd.Type = p.typeExpr()
 	if p.got(TFatArrow) {
@@ -860,7 +861,8 @@ func (p *parser) propDecl() *PropDecl {
 func (p *parser) enumDecl(decs []*Decorator) *EnumDecl {
 	pos := p.advance().Pos
 	ed := &EnumDecl{Pos: pos}
-	ed.Name = p.expectIdent("枚举").Text
+	nameTok := p.expectIdent("枚举")
+	ed.Name, ed.NamePos = nameTok.Text, nameTok.Pos
 	if p.at(TLBrack) {
 		ed.TypeParams = p.typeParams()
 	}
@@ -1286,7 +1288,7 @@ func (p *parser) selectStmt() *SelectStmt {
 func (p *parser) constStmt() Stmt {
 	pos := p.advance().Pos
 	nt := p.expectIdent("常量")
-	cd := &ConstDecl{Pos: pos, Name: nt.Text}
+	cd := &ConstDecl{Pos: pos, NamePos: nt.Pos, Name: nt.Text}
 	if p.got(TColon) {
 		cd.Type = p.typeExpr()
 	}

@@ -51,6 +51,7 @@ powershell -ExecutionPolicy Bypass -File install.ps1 -AddToPath  # 同时把 bin
 | `aether test 文件.ae` | 运行文件中的 `test "名字":` 测试块 |
 | `aether emit 文件.ae` | 查看生成的 Go 代码 |
 | `aether repl` | 交互模式：输入表达式立即看到结果 |
+| `aether lsp` | 语言服务器（供 VS Code 等编辑器使用） |
 
 ## 特性一览
 
@@ -331,14 +332,14 @@ examples/        示例程序（计算器、银行、并发、Web 服务、生�
 tests/run/       黄金测试（程序 + 期望输出）
 tests/errors/    编译错误测试
 docs/            语言参考、标准库、实现原理
-editors/vscode/  VS Code 语法高亮插件
+editors/vscode/  VS Code 插件（语法高亮，以及语言服务器的客户端）
 ```
 
 运行全部测试：`cd compiler && go test .`
 
 ## 编辑器支持
 
-`editors/vscode` 是一个 VS Code 语法高亮插件，把该目录复制到 `%USERPROFILE%\.vscode\extensions\aether-0.1.0` 后重启 VS Code 即可。
+`editors/vscode` 是 VS Code 插件：语法高亮，以及通过语言服务器 `aether lsp` 提供的**实时中文诊断、悬停显示类型、跳转到定义、成员补全和大纲**。把该目录复制到 `%USERPROFILE%\.vscode\extensions\aether-0.2.0` 后重启 VS Code 即可（需要 `aether` 在 PATH 中，或在设置中指定 `aether.path`），详见 [editors/vscode/README.md](editors/vscode/README.md)。其它支持 LSP 的编辑器也可以直接使用 `aether lsp`。
 
 ## 当前限制
 
