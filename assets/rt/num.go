@@ -2,6 +2,7 @@ package rt
 
 import (
 	"math"
+	"math/bits"
 	"strconv"
 )
 
@@ -51,19 +52,95 @@ func FFloorDiv32(a, b float32) float32 { return float32(FFloorDiv(float64(a), fl
 func FMod32(a, b float32) float32      { return float32(FMod(float64(a), float64(b))) }
 
 // IPow 实现整数的 **。
+// IPow 实现整数的乘方（除 int 以外的整数类型）；结果超出类型的范围时抛出 OverflowError。
 func IPow[T Integer](a, b T) T {
 	if b < 0 {
 		Raise("ValueError", "整数的负数次幂请使用浮点数，例如 2.0 ** -1")
 	}
+	a0, b0 := a, b
+	mul := func(x, y T) T {
+		p := x * y
+		if x != 0 && (p/x != y || (x == ^T(0) && y < 0 && p < 0)) {
+			base := Str(a0)
+			if a0 < 0 {
+				base = "(" + base + ")"
+			}
+			Raise("OverflowError", "%s ** %v 超出了 %s 的范围", base, b0, TypeName(a0))
+		}
+		return p
+	}
 	var r T = 1
 	for b > 0 {
 		if b&1 == 1 {
-			r *= a
+			r = mul(r, a)
 		}
-		a *= a
 		b >>= 1
+		if b > 0 {
+			a = mul(a, a)
+		}
 	}
 	return r
+}
+
+// IPowInt 实现 int ** int；结果超出 int 的范围时抛出 OverflowError（而不是回绕）。
+// 平方是最常见的情形，单独处理（可以被内联）。
+func IPowInt(a, b int) int {
+	if b == 2 {
+		m := uint64(a)
+		if a < 0 {
+			m = -m
+		}
+		if hi, lo := bits.Mul64(m, m); hi == 0 && lo <= math.MaxInt64 {
+			return int(lo)
+		}
+	}
+	return ipowInt(a, b)
+}
+
+func ipowInt(a, b int) int {
+	if b < 0 {
+		Raise("ValueError", "整数的负数次幂请使用浮点数，例如 2.0 ** -1")
+	}
+	neg := a < 0 && b&1 == 1
+	m := uint64(a)
+	if a < 0 {
+		m = uint64(^a) + 1
+	}
+	limit := uint64(math.MaxInt64)
+	if neg {
+		limit++
+	}
+	a0, b0 := a, b
+	over := func() {
+		base, fbase := strconv.Itoa(a0), strconv.Itoa(a0)+".0"
+		if a0 < 0 {
+			base, fbase = "("+base+")", "("+fbase+")"
+		}
+		Raise("OverflowError", "%s ** %d 超出了 int 的范围（-2^63 到 2^63-1）；需要更大的数时可以用浮点数，例如 %s ** %d", base, b0, fbase, b0)
+	}
+	var r uint64 = 1
+	for b > 0 {
+		if b&1 == 1 {
+			hi, lo := bits.Mul64(r, m)
+			if hi != 0 || lo > limit {
+				over()
+			}
+			r = lo
+		}
+		b >>= 1
+		if b > 0 {
+			// 后面还会用到 m 的平方：它本身超出范围时结果一定超出范围
+			hi, lo := bits.Mul64(m, m)
+			if hi != 0 || lo > limit {
+				over()
+			}
+			m = lo
+		}
+	}
+	if neg {
+		return -int(r)
+	}
+	return int(r)
 }
 
 func Pow32(a, b float32) float32 { return float32(math.Pow(float64(a), float64(b))) }

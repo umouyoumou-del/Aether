@@ -557,6 +557,8 @@ func (g *Gen) binCode(op TokKind, x string, xt Type, y string, yt Type, rt Type)
 		return r + ".FMod(" + x + ", " + y + ")"
 	case TDStar:
 		switch {
+		case basicKind(xt) == BInt && basicKind(yt) == BInt:
+			return r + ".IPowInt(" + x + ", " + y + ")"
 		case isInteger(xt):
 			return r + ".IPow(" + x + ", " + y + ")"
 		case basicKind(xt) == BF32:

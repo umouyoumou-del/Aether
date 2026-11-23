@@ -2,6 +2,7 @@ package rt
 
 import (
 	"math"
+	"math/bits"
 	"math/rand/v2"
 	"runtime"
 	"sync"
@@ -307,12 +308,20 @@ func Lcm(a, b int) int {
 	if a == 0 || b == 0 {
 		return 0
 	}
-	return Abs(a / Gcd(a, b) * b)
+	x := uint64(Abs(a / Gcd(a, b)))
+	hi, lo := bits.Mul64(x, uint64(Abs(b)))
+	if hi != 0 || lo > math.MaxInt64 {
+		Raise("OverflowError", "lcm(%d, %d) 超出了 int 的范围", a, b)
+	}
+	return int(lo)
 }
 
 func Factorial(n int) int {
 	if n < 0 {
 		Raise("ValueError", "阶乘的参数不能为负数")
+	}
+	if n > 20 {
+		Raise("OverflowError", "factorial(%d) 超出了 int 的范围（最大是 factorial(20)）；更大的阶乘可以用浮点数计算", n)
 	}
 	r := 1
 	for i := 2; i <= n; i++ {
@@ -322,17 +331,28 @@ func Factorial(n int) int {
 }
 
 func Comb(n, k int) int {
-	if k < 0 || k > n {
+	if n < 0 || k < 0 {
+		Raise("ValueError", "comb 的参数不能为负数")
+	}
+	if k > n {
 		return 0
 	}
 	if k > n-k {
 		k = n - k
 	}
-	r := 1
+	// r * (n-k+i) 可以被 i 整除；用 128 位的中间结果避免中途溢出
+	var r uint64 = 1
 	for i := 1; i <= k; i++ {
-		r = r * (n - k + i) / i
+		hi, lo := bits.Mul64(r, uint64(n-k+i))
+		if hi >= uint64(i) {
+			Raise("OverflowError", "comb(%d, %d) 超出了 int 的范围", n, k)
+		}
+		r, _ = bits.Div64(hi, lo, uint64(i))
+		if r > math.MaxInt64 {
+			Raise("OverflowError", "comb(%d, %d) 超出了 int 的范围", n, k)
+		}
 	}
-	return r
+	return int(r)
 }
 
 func Isqrt(n int) int {
