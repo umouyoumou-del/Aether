@@ -161,6 +161,12 @@ func gradCases() []gradCase {
 			ManualSeed(3) // 数值求导时每次前向都要得到同样的掩码
 			return Dropout(x[0], 0.3, true)
 		}},
+		{name: "gather", inputs: in(r(54, 3, 4)), consts: in(constT([]int{3, 2}, 3, 0, 1, 1, 2, 0), constT([]int{2, 4}, 0, 2, 1, 0, 2, 2, 0, 1)), f: func(x, c []*Tensor) *Tensor {
+			return x[0].Gather(1, c[0]).Sum(none, false).Add(x[0].Gather(0, c[1]).Mul(x[0].Narrow(0, 0, 2)).Sum(none, false))
+		}},
+		{name: "topk sort", inputs: in(distinct(55, 3, 5)), f: func(x, _ []*Tensor) *Tensor {
+			return x[0].Topk(2, true).V0.Sum(none, false).Add(x[0].Sort(false).V0.Narrow(1, 0, 3).Square().Sum(none, false))
+		}},
 		{name: "where clone", inputs: in(r(51, 6), r(52, 6)), consts: in(constT([]int{6}, 1, 0, 0, 1, 1, 0)), f: func(x, c []*Tensor) *Tensor {
 			return Where(c[0], x[0], x[1].Clone())
 		}},
@@ -528,5 +534,38 @@ func TestFastMath(t *testing.T) {
 	}
 	if !math.IsInf(float64(expf(100)), 1) || expf(-100) != 0 || expf(0) != 1 {
 		t.Fatalf("expf 的边界值不正确")
+	}
+}
+
+func TestSortTopkGather(t *testing.T) {
+	x := constT([]int{2, 4}, 3, 1, 4, 1, 5, 9, 2, 6)
+	s := x.Sort(false)
+	if got := fmt.Sprint(s.V0.host(), s.V1.host()); got != "[1 1 3 4 2 5 6 9] [1 3 0 2 2 0 3 1]" {
+		t.Fatalf("sort：%s", got)
+	}
+	k := x.Topk(2, true)
+	if got := fmt.Sprint(k.V0.host(), k.V1.host(), k.V0.shape); got != "[4 3 9 6] [2 0 1 3] [2 2]" {
+		t.Fatalf("topk：%s", got)
+	}
+	g := x.Gather(0, constT([]int{1, 4}, 1, 0, 1, 0))
+	if got := fmt.Sprint(g.host()); got != "[5 1 2 1]" {
+		t.Fatalf("gather：%s", got)
+	}
+	expectRaise(t, "IndexError", "超出范围", func() { x.Gather(1, constT([]int{2, 1}, 4, 0)) })
+}
+
+func TestImageRoundTrip(t *testing.T) {
+	img := randT(60, 0, 1, 3, 5, 7)
+	path := t.TempDir() + "/a.png"
+	SaveImage(img, path)
+	back := LoadImage(path, false)
+	if !sameShape(back.shape, []int{3, 5, 7}) {
+		t.Fatalf("形状 %v", back.shape)
+	}
+	if i, ok := closeTo(back.host(), img.host(), 1.0/255); !ok {
+		t.Fatalf("第 %d 个像素不同", i)
+	}
+	if g := LoadImage(path, true); !sameShape(g.shape, []int{1, 5, 7}) {
+		t.Fatalf("灰度图的形状 %v", g.shape)
 	}
 }

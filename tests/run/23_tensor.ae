@@ -166,3 +166,44 @@ print(tensor.masked_fill(tensor.ones(3), tensor.tensor([0.0, 1.0, 0.0]), -5))
 s = tensor.multinomial(tensor.tensor([0.0, 1.0, 3.0]), 2000)
 frac2 = s.eq(tensor.full([2000], 2)).mean().item()
 print(s.eq(tensor.zeros(2000)).sum().item(), 0.7 < frac2 and frac2 < 0.8)
+
+# ===== 循环网络、排序、图像 =====
+lstm = nn.LSTM(3, 5)
+gru = nn.GRU(3, 4)
+seqs = tensor.randn(2, 6, 3)
+print(lstm(seqs).shape, gru(seqs).shape, lstm.num_parameters(), gru.num_parameters())
+
+# 用 GRU 学习“序列中各数之和”
+class Summer(nn.Module):
+    rnn: nn.GRU
+    out: nn.Linear
+
+    def __init__(self):
+        self.rnn = nn.GRU(1, 16)
+        self.out = nn.Linear(16, 1)
+
+    def forward(self, x: Tensor) -> Tensor:
+        h = self.rnn(x)
+        return self.out(h.narrow(1, h.size(1) - 1, 1).reshape(h.size(0), 16))
+
+summer = Summer()
+sopt = optim.Adam(summer.parameters(), lr=0.02)
+first_loss = 0.0
+last_loss = 0.0
+for step in range(150):
+    seq_x = tensor.rand(32, 5, 1)
+    loss = nn.MSELoss()(summer(seq_x), seq_x.sum(dim=1))
+    sopt.zero_grad()
+    loss.backward()
+    sopt.step()
+    if step == 0:
+        first_loss = loss.item()
+    last_loss = loss.item()
+print("GRU 学会了求和：", last_loss < first_loss / 10)
+
+vals, order = tensor.tensor([3.0, 1.0, 4.0, 1.0, 5.0]).topk(3)
+print(vals, order, tensor.tensor([3.0, 1.0, 2.0]).sort(descending=true)[1])
+picture = tensor.rand(3, 4, 6)
+tensor.save_image(picture, "picture.png")
+back = tensor.load_image("picture.png")
+print(back.shape, (back - picture).abs().max().item() < 0.01, tensor.load_image("picture.png", gray=true).shape)

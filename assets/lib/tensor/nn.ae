@@ -353,6 +353,65 @@ class TransformerEncoderLayer(Module):
         h = x + self.drop(self.attn(self.norm1(x)))
         return h + self.drop(self.ff2(self.ff1(self.norm2(h)).gelu()))
 
+# 单层 LSTM：输入 [批次, 长度, input_size]，输出每个时刻的隐藏状态 [批次, 长度, hidden_size]
+#（最后时刻的状态是 out.narrow(1, 长度 - 1, 1)）
+class LSTM(Module):
+    input_size: int
+    hidden_size: int
+    ih: Linear
+    hh: Linear
+
+    def __init__(self, input_size: int, hidden_size: int):
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.ih = Linear(input_size, 4 * hidden_size)
+        self.hh = Linear(hidden_size, 4 * hidden_size, bias=false)
+
+    def forward(self, x: Tensor) -> Tensor:
+        b, t, hs = x.size(0), x.size(1), self.hidden_size
+        gates_x = self.ih(x)          # 一次算出所有时刻的输入部分
+        h = tensor.zeros(b, hs).to(x.device)
+        c = tensor.zeros(b, hs).to(x.device)
+        outs: list[Tensor] = []
+        for step in range(t):
+            g = gates_x.narrow(1, step, 1).reshape(b, 4 * hs) + self.hh(h)
+            i = g.narrow(1, 0, hs).sigmoid()
+            f = g.narrow(1, hs, hs).sigmoid()
+            cand = g.narrow(1, 2 * hs, hs).tanh()
+            o = g.narrow(1, 3 * hs, hs).sigmoid()
+            c = f * c + i * cand
+            h = o * c.tanh()
+            outs.append(h)
+        return tensor.stack(outs, dim=1)
+
+# 单层 GRU：输入 [批次, 长度, input_size]，输出 [批次, 长度, hidden_size]
+class GRU(Module):
+    input_size: int
+    hidden_size: int
+    ih: Linear
+    hh: Linear
+
+    def __init__(self, input_size: int, hidden_size: int):
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.ih = Linear(input_size, 3 * hidden_size)
+        self.hh = Linear(hidden_size, 3 * hidden_size)
+
+    def forward(self, x: Tensor) -> Tensor:
+        b, t, hs = x.size(0), x.size(1), self.hidden_size
+        gates_x = self.ih(x)
+        h = tensor.zeros(b, hs).to(x.device)
+        outs: list[Tensor] = []
+        for step in range(t):
+            gx = gates_x.narrow(1, step, 1).reshape(b, 3 * hs)
+            gh = self.hh(h)
+            r = (gx.narrow(1, 0, hs) + gh.narrow(1, 0, hs)).sigmoid()
+            z = (gx.narrow(1, hs, hs) + gh.narrow(1, hs, hs)).sigmoid()
+            n = (gx.narrow(1, 2 * hs, hs) + r * gh.narrow(1, 2 * hs, hs)).tanh()
+            h = (1 - z) * n + z * h
+            outs.append(h)
+        return tensor.stack(outs, dim=1)
+
 # 依次执行各层
 class Sequential(Module):
     layers: list[Module]

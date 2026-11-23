@@ -102,6 +102,11 @@ class Tensor:
     @go("Argmax") def argmax(self, dim: int? = null, keepdim: bool = false) -> Tensor
     @go("Argmin") def argmin(self, dim: int? = null, keepdim: bool = false) -> Tensor
 
+    # ===== 排序（沿最后一维；返回的值可以求导） =====
+    @go("Sort") def sort(self, descending: bool = false) -> (Tensor, Tensor)
+    @go("Argsort") def argsort(self, descending: bool = false) -> Tensor
+    @go("Topk") def topk(self, k: int, largest: bool = true) -> (Tensor, Tensor)
+
     # ===== 形状 =====
     @go("Reshape") def reshape(self, *shape: int) -> Tensor
     @go("Reshape") def view(self, *shape: int) -> Tensor
@@ -114,6 +119,7 @@ class Tensor:
     @go("Narrow") def narrow(self, dim: int, start: int, length: int) -> Tensor
     @go("Slice") def slice(self, dim: int, start: int, end: int? = null) -> Tensor
     @go("IndexSelectDim") def index_select(self, dim: int, index: Tensor) -> Tensor
+    @go("Gather") def gather(self, dim: int, index: Tensor) -> Tensor
     @go("Tril") def tril(self, diagonal: int = 0) -> Tensor
     @go("Triu") def triu(self, diagonal: int = 0) -> Tensor
 
@@ -223,6 +229,13 @@ def log_softmax(x: Tensor, dim: int = -1) -> Tensor:
 @go("rttensor.Synchronize") def synchronize()
 @go("rttensor.EmptyCache") def empty_cache()
 @go("rttensor.GpuMemoryAllocated") def gpu_memory_allocated() -> int
+
+# ===== 图像：[通道, 高, 宽]，数值在 [0, 1] 中 =====
+
+# 读取 PNG、JPEG 或 GIF（gray 为真时得到 1 个通道的灰度图，否则 RGB 3 个通道）
+@go("rttensor.LoadImage") def load_image(path: str, gray: bool = false) -> Tensor
+# 保存为 PNG 或 JPEG（按扩展名）；张量的形状为 [1 或 3, 高, 宽] 或 [高, 宽]
+@go("rttensor.SaveImage") def save_image(t: Tensor, path: str)
 
 # ===== 保存与读取（例如 model.state_dict()） =====
 

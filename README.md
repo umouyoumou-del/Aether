@@ -302,7 +302,7 @@ for step in range(100):
     opt.step()
 ```
 
-张量、自动求导、`Linear`/`Conv2d`/`BatchNorm`/`LayerNorm`/`Embedding`/`Dropout`/`MultiheadAttention`/`TransformerEncoderLayer` 等层、SGD/Adam/AdamW、学习率调度、模型保存与读取，接口与 PyTorch 基本一致；GPU 后端不需要安装 CUDA 或 ROCm，CPU 上的矩阵乘法使用 AVX2 汇编内核。示例有多层感知机、卷积网络和一个会“写唐诗”的小 GPT（`examples/gpt.ae`）。详见 [docs/深度学习.md](docs/深度学习.md)。
+张量、自动求导、`Linear`/`Conv2d`/`BatchNorm`/`LayerNorm`/`Embedding`/`Dropout`/`LSTM`/`GRU`/`MultiheadAttention`/`TransformerEncoderLayer` 等层、SGD/Adam/AdamW、学习率调度、模型保存与读取，接口与 PyTorch 基本一致；GPU 后端不需要安装 CUDA 或 ROCm，CPU 上的矩阵乘法使用 AVX2 汇编内核。示例有多层感知机、卷积网络和一个会“写唐诗”的小 GPT（`examples/gpt.ae`）。详见 [docs/深度学习.md](docs/深度学习.md)。
 
 ### 标准库
 
