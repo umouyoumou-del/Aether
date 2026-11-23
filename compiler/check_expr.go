@@ -1577,6 +1577,9 @@ func (c *Checker) checkOrdering(e *Compare, i int, a, b Type) {
 		c.convert(&e.Xs[i+1], b, j, "比较")
 		return
 	}
+	if tp, ok := a.(*TParamT); ok && tp.P.Bound == BoundSortable && identical(a, b) {
+		return
+	}
 	if ta, ok := a.(*TupleT); ok && identical(a, b) {
 		for _, el := range ta.Elems {
 			if !c.sortable(el) {

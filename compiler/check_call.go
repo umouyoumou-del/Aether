@@ -1564,6 +1564,9 @@ func (c *Checker) hasLess(t Type) bool {
 // sortable 判断不带 key 时类型 t 的值能否比较大小：Ordered、实现了 Comparable[t]，
 // 或者由这样的类型组成的元组（运行时由 rt.Compare 逐个元素比较）。
 func (c *Checker) sortable(t Type) bool {
+	if tp, ok := t.(*TParamT); ok && tp.P.Bound == BoundSortable {
+		return true
+	}
 	if tt, ok := t.(*TupleT); ok {
 		for _, el := range tt.Elems {
 			if !c.sortable(el) {

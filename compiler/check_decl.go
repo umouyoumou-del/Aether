@@ -86,7 +86,7 @@ func (c *Checker) resolveNamedType(t *NamedTypeX, scope *Scope) Type {
 		sym = scope.lookup(t.Name)
 		if sym == nil {
 			switch t.Name {
-			case "Ordered", "Hashable", "Number", "Integer":
+			case "Ordered", "Hashable", "Number", "Integer", "Sortable":
 				c.errorf(t.Pos, "%s 只能用作泛型约束，例如 [T: %s]", t.Name, t.Name)
 				return tInvalid
 			case "Optional", "Option":
@@ -427,6 +427,11 @@ func (c *Checker) satisfiesIn(t Type, tp *TypeParam, env Subst) (bool, string) {
 			return true, ""
 		}
 		return false, fmt.Sprintf("%s 不是整数类型", t)
+	case BoundSortable:
+		if c.sortable(t) {
+			return true, ""
+		}
+		return false, fmt.Sprintf("%s 不能比较大小（Sortable 包括数字、str、char、定义了 __lt__ 的类型，以及由它们组成的元组）", t)
 	case BoundIface:
 		s := Subst{}
 		for k, v := range env {
@@ -504,6 +509,9 @@ func (c *Checker) resolveConstraints(tps []*TypeParam, xs []*TypeParamX, sc *Sco
 			case "Integer":
 				tp.Bound = BoundInteger
 				continue
+			case "Sortable":
+				tp.Bound = BoundSortable
+				continue
 			}
 		}
 		ct := c.resolveType(x.Constraint, sc)
@@ -515,7 +523,7 @@ func (c *Checker) resolveConstraints(tps []*TypeParam, xs []*TypeParamX, sc *Sco
 			tp.Iface = n
 			continue
 		}
-		c.errorf(x.Constraint.P(), "约束必须是接口或 Ordered/Hashable/Number/Integer，不能是 %s", ct)
+		c.errorf(x.Constraint.P(), "约束必须是接口或 Ordered/Sortable/Hashable/Number/Integer，不能是 %s", ct)
 	}
 }
 

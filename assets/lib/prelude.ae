@@ -251,6 +251,13 @@ extend[T: Comparable[T]] list[T]:
     @go("rt.ListMinLess") def min(self) -> T
     @go("rt.ListMaxLess") def max(self) -> T
 
+# 元组等只能用 rt.Compare 比较的元素（Ordered 与 Comparable 的元素使用上面更快的版本）
+extend[T: Sortable] list[T]:
+    @go("rt.ListSortAny") def sort(self, reverse: bool = false)
+    @go("rt.ListSortedAny") def sorted(self, reverse: bool = false) -> list[T]
+    @go("rt.ListMinAny") def min(self) -> T
+    @go("rt.ListMaxAny") def max(self) -> T
+
 extend[T: Number] list[T]:
     @go("rt.ListSum") def sum(self) -> T
     @go("rt.ListAverage") def average(self) -> float

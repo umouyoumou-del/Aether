@@ -681,6 +681,9 @@ func (g *Gen) cmp1(e *Compare, i int, a, b string) string {
 		if _, ok := at.(*TupleT); ok {
 			return fmt.Sprintf("(%s.Compare(%s, %s) %s 0)", g.rt(), a, b, op)
 		}
+		if tp, ok := at.(*TParamT); ok && tp.P.Bound == BoundSortable {
+			return fmt.Sprintf("(%s.Compare(%s, %s) %s 0)", g.rt(), a, b, op)
+		}
 		code := "(" + a + " " + op.String() + " " + b + ")"
 		if e.Neg[i] {
 			return "!" + code

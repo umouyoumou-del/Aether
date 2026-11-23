@@ -1,0 +1,57 @@
+# Sortable 约束：heapq 与泛型函数可以使用元组、定义了 __lt__ 的类型；元组列表的 sort/min/max
+import heapq
+
+def dijkstra(g: dict[str, list[(str, int)]], src: str) -> dict[str, int]:
+    dist = {src: 0}
+    pq: list[(int, str)] = [(0, src)]
+    while pq:
+        d, u = heapq.heappop(pq)
+        if d > dist.get(u, 1 << 60):
+            continue
+        for v, w in g.get(u, []):
+            nd = d + w
+            if nd < dist.get(v, 1 << 60):
+                dist[v] = nd
+                heapq.heappush(pq, (nd, v))
+    return dist
+
+g = {"A": [("B", 4), ("C", 2)], "B": [("D", 5)], "C": [("B", 1), ("D", 8)], "D": []}
+print(dijkstra(g, "A"))
+
+struct Job:
+    pri: int
+    name: str
+    def __lt__(self, o: Job) -> bool:
+        return self.pri < o.pri
+
+h: list[Job] = []
+for j in [Job(3, "c"), Job(1, "a"), Job(2, "b")]:
+    heapq.heappush(h, j)
+print([heapq.heappop(h).name for _ in range(3)])
+nums = [5, 1, 4, 2]
+heapq.heapify(nums)
+print(heapq.heappop(nums), heapq.nlargest(2, [3, 9, 1]), heapq.nsmallest(2, [(2, "x"), (1, "y"), (3, "z")]))
+ps = [(2, "b"), (1, "z"), (2, "a")]
+ps.sort()
+print(ps, ps.sorted(reverse=true), ps.min(), ps.max())
+
+def smallest[T: Sortable](xs: list[T]) -> T:
+    best = xs[0]
+    for x in xs:
+        if x < best:
+            best = x
+    return best
+print(smallest([3, 1, 2]), smallest([("b", 2), ("a", 9)]), smallest([Job(5, "e"), Job(4, "d")]).name, smallest(["z", "y"]))
+
+# 堆中放 (优先级, 序号, 数据) 三元组：优先级相同时按插入顺序
+tasks: list[(int, int, str)] = []
+n = 0
+for pri, name in [(2, "写代码"), (1, "喝水"), (2, "开会"), (1, "回邮件")]:
+    heapq.heappush(tasks, (pri, n, name))
+    n += 1
+order: list[str] = []
+while tasks:
+    _, _, name = heapq.heappop(tasks)
+    order.append(name)
+print(order)
+print(heapq.heappushpop([1, 5, 9], 3), sorted([(1.5, "b"), (1.5, "a"), (0.5, "z")]))

@@ -36,6 +36,17 @@ func (t T2[A, B]) Cmpꞏ(o any) int {
 	return 0
 }
 
+// CmpSameꞏ 与 Cmpꞏ 相同，但参数是同类型的元组（rt.Compare 用它避免把右操作数装箱）。
+func (t T2[A, B]) CmpSameꞏ(r T2[A, B]) int {
+	if c := Compare(t.V0, r.V0); c != 0 {
+		return c
+	}
+	if c := Compare(t.V1, r.V1); c != 0 {
+		return c
+	}
+	return 0
+}
+
 type T3[A any, B any, C any] struct {
 	V0 A
 	V1 B
@@ -63,6 +74,20 @@ func (t T3[A, B, C]) Itemsꞏ() []any { return []any{t.V0, t.V1, t.V2} }
 
 func (t T3[A, B, C]) Cmpꞏ(o any) int {
 	r := o.(T3[A, B, C])
+	if c := Compare(t.V0, r.V0); c != 0 {
+		return c
+	}
+	if c := Compare(t.V1, r.V1); c != 0 {
+		return c
+	}
+	if c := Compare(t.V2, r.V2); c != 0 {
+		return c
+	}
+	return 0
+}
+
+// CmpSameꞏ 与 Cmpꞏ 相同，但参数是同类型的元组（rt.Compare 用它避免把右操作数装箱）。
+func (t T3[A, B, C]) CmpSameꞏ(r T3[A, B, C]) int {
 	if c := Compare(t.V0, r.V0); c != 0 {
 		return c
 	}
@@ -105,6 +130,23 @@ func (t T4[A, B, C, D]) Itemsꞏ() []any { return []any{t.V0, t.V1, t.V2, t.V3} 
 
 func (t T4[A, B, C, D]) Cmpꞏ(o any) int {
 	r := o.(T4[A, B, C, D])
+	if c := Compare(t.V0, r.V0); c != 0 {
+		return c
+	}
+	if c := Compare(t.V1, r.V1); c != 0 {
+		return c
+	}
+	if c := Compare(t.V2, r.V2); c != 0 {
+		return c
+	}
+	if c := Compare(t.V3, r.V3); c != 0 {
+		return c
+	}
+	return 0
+}
+
+// CmpSameꞏ 与 Cmpꞏ 相同，但参数是同类型的元组（rt.Compare 用它避免把右操作数装箱）。
+func (t T4[A, B, C, D]) CmpSameꞏ(r T4[A, B, C, D]) int {
 	if c := Compare(t.V0, r.V0); c != 0 {
 		return c
 	}
@@ -171,6 +213,26 @@ func (t T5[A, B, C, D, E]) Cmpꞏ(o any) int {
 	return 0
 }
 
+// CmpSameꞏ 与 Cmpꞏ 相同，但参数是同类型的元组（rt.Compare 用它避免把右操作数装箱）。
+func (t T5[A, B, C, D, E]) CmpSameꞏ(r T5[A, B, C, D, E]) int {
+	if c := Compare(t.V0, r.V0); c != 0 {
+		return c
+	}
+	if c := Compare(t.V1, r.V1); c != 0 {
+		return c
+	}
+	if c := Compare(t.V2, r.V2); c != 0 {
+		return c
+	}
+	if c := Compare(t.V3, r.V3); c != 0 {
+		return c
+	}
+	if c := Compare(t.V4, r.V4); c != 0 {
+		return c
+	}
+	return 0
+}
+
 type T6[A any, B any, C any, D any, E any, F any] struct {
 	V0 A
 	V1 B
@@ -207,6 +269,29 @@ func (t T6[A, B, C, D, E, F]) Itemsꞏ() []any { return []any{t.V0, t.V1, t.V2, 
 
 func (t T6[A, B, C, D, E, F]) Cmpꞏ(o any) int {
 	r := o.(T6[A, B, C, D, E, F])
+	if c := Compare(t.V0, r.V0); c != 0 {
+		return c
+	}
+	if c := Compare(t.V1, r.V1); c != 0 {
+		return c
+	}
+	if c := Compare(t.V2, r.V2); c != 0 {
+		return c
+	}
+	if c := Compare(t.V3, r.V3); c != 0 {
+		return c
+	}
+	if c := Compare(t.V4, r.V4); c != 0 {
+		return c
+	}
+	if c := Compare(t.V5, r.V5); c != 0 {
+		return c
+	}
+	return 0
+}
+
+// CmpSameꞏ 与 Cmpꞏ 相同，但参数是同类型的元组（rt.Compare 用它避免把右操作数装箱）。
+func (t T6[A, B, C, D, E, F]) CmpSameꞏ(r T6[A, B, C, D, E, F]) int {
 	if c := Compare(t.V0, r.V0); c != 0 {
 		return c
 	}
@@ -291,6 +376,32 @@ func (t T7[A, B, C, D, E, F, G]) Cmpꞏ(o any) int {
 	return 0
 }
 
+// CmpSameꞏ 与 Cmpꞏ 相同，但参数是同类型的元组（rt.Compare 用它避免把右操作数装箱）。
+func (t T7[A, B, C, D, E, F, G]) CmpSameꞏ(r T7[A, B, C, D, E, F, G]) int {
+	if c := Compare(t.V0, r.V0); c != 0 {
+		return c
+	}
+	if c := Compare(t.V1, r.V1); c != 0 {
+		return c
+	}
+	if c := Compare(t.V2, r.V2); c != 0 {
+		return c
+	}
+	if c := Compare(t.V3, r.V3); c != 0 {
+		return c
+	}
+	if c := Compare(t.V4, r.V4); c != 0 {
+		return c
+	}
+	if c := Compare(t.V5, r.V5); c != 0 {
+		return c
+	}
+	if c := Compare(t.V6, r.V6); c != 0 {
+		return c
+	}
+	return 0
+}
+
 type T8[A any, B any, C any, D any, E any, F any, G any, H any] struct {
 	V0 A
 	V1 B
@@ -333,6 +444,35 @@ func (t T8[A, B, C, D, E, F, G, H]) Itemsꞏ() []any { return []any{t.V0, t.V1, 
 
 func (t T8[A, B, C, D, E, F, G, H]) Cmpꞏ(o any) int {
 	r := o.(T8[A, B, C, D, E, F, G, H])
+	if c := Compare(t.V0, r.V0); c != 0 {
+		return c
+	}
+	if c := Compare(t.V1, r.V1); c != 0 {
+		return c
+	}
+	if c := Compare(t.V2, r.V2); c != 0 {
+		return c
+	}
+	if c := Compare(t.V3, r.V3); c != 0 {
+		return c
+	}
+	if c := Compare(t.V4, r.V4); c != 0 {
+		return c
+	}
+	if c := Compare(t.V5, r.V5); c != 0 {
+		return c
+	}
+	if c := Compare(t.V6, r.V6); c != 0 {
+		return c
+	}
+	if c := Compare(t.V7, r.V7); c != 0 {
+		return c
+	}
+	return 0
+}
+
+// CmpSameꞏ 与 Cmpꞏ 相同，但参数是同类型的元组（rt.Compare 用它避免把右操作数装箱）。
+func (t T8[A, B, C, D, E, F, G, H]) CmpSameꞏ(r T8[A, B, C, D, E, F, G, H]) int {
 	if c := Compare(t.V0, r.V0); c != 0 {
 		return c
 	}

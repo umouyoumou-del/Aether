@@ -52,6 +52,19 @@ func equalAny(a, b any) bool {
 
 // Compare 比较两个可排序的值（数字、字符串、字符、元组、列表）。
 func Compare[T any](a, b T) int {
+	// 常见类型直接比较，避免把值装箱为 any（例如 T: Sortable 的泛型代码实例化为 int）
+	switch x := any(a).(type) {
+	case int:
+		return cmp.Compare(x, any(b).(int))
+	case float64:
+		return cmp.Compare(x, any(b).(float64))
+	case string:
+		return cmp.Compare(x, any(b).(string))
+	}
+	// 元组：右操作数按原类型传递，不需要装箱
+	if t, ok := any(a).(interface{ CmpSameꞏ(T) int }); ok {
+		return t.CmpSameꞏ(b)
+	}
 	return compareAny(any(a), any(b))
 }
 

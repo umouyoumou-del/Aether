@@ -189,6 +189,7 @@ const (
 	BoundNumber
 	BoundInteger
 	BoundIface
+	BoundSortable // 能比较大小：Ordered、实现了 Comparable 的类型，以及由它们组成的元组
 )
 
 type TypeParam struct {
@@ -212,6 +213,8 @@ func (tp *TypeParam) BoundName() string {
 		return "Integer"
 	case BoundIface:
 		return tp.Iface.String()
+	case BoundSortable:
+		return "Sortable"
 	}
 	return "any"
 }

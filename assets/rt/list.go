@@ -451,6 +451,27 @@ func ListSortCmp[T any](l *List[T], f func(T, T) int) {
 	slices.SortStableFunc(l.S, f)
 }
 
+// ListSortedAny、ListMinAny、ListMaxAny 用于元素只能用 Compare 比较的列表（例如元组）。
+func ListSortedAny[T any](l *List[T], reverse bool) *List[T] {
+	c := l.Copy()
+	ListSortAny(c, reverse)
+	return c
+}
+
+func ListMinAny[T any](l *List[T]) T {
+	if len(l.S) == 0 {
+		Raise("ValueError", "不能对空列表求最小值")
+	}
+	return MinCmp(l.S...)
+}
+
+func ListMaxAny[T any](l *List[T]) T {
+	if len(l.S) == 0 {
+		Raise("ValueError", "不能对空列表求最大值")
+	}
+	return MaxCmp(l.S...)
+}
+
 func ListSortAny[T any](l *List[T], reverse bool) {
 	slices.SortStableFunc(l.S, func(a, b T) int {
 		c := Compare(a, b)
