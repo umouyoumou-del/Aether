@@ -6,7 +6,7 @@
 
 一门融合 Python、C++、Go、Java、C# 优点的编程语言：Python 的简洁语法与推导式、静态类型与类型推断、
 编译为不依赖运行时的原生可执行文件、Go 的协程与通道、Java/C# 的类/接口/异常/属性与空安全，
-并自带一个可用 GPU 的深度学习框架。
+并自带可用 GPU 的深度学习框架与纯 Aether 实现的符号数学库。
 
 [![Go 1.23+](https://img.shields.io/badge/Go-1.23%2B-00ADD8?logo=go)](https://go.dev/dl/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -351,6 +351,30 @@ for step in range(100):
 
 完整文档见 [docs/深度学习.md](docs/深度学习.md)。
 
+## 符号数学
+
+`sym` 用纯 Aether 实现：同一份表达式既能符号推导、又能编译成原生代码求值、还能检查恒等。
+
+```python
+import sym
+
+x = sym.var("x")
+f = (x + 1) ** 2
+
+print(sym.expand(f))                        # x^2 + 2*x + 1
+print(sym.diff(f, "x"))                     # 2*x + 2
+print(sym.equals(f, x ** 2 + 2 * x + 1))    # true
+
+g = sym.compile_expr(f, ["x"])              # 编译成闭包树，不再按节点种类解释
+print(g([3.0]))                             # 16.0
+```
+
+- 表达式带**值域与可微性**元数据：整数系数的展开保持精确，含 `abs` 的表达式求导会直接报错而不是给出错误结果。
+- 构造时即归到**规范形式**（合并同类项、同底数幂合并、`sin^2+cos^2=1`），因此 `equals` 是确定的判定而不是碰运气。
+- 支持展开、求导（含链式法则与商法则）、代入、编译求值、一元二次方程与数值积分。
+
+见 [docs/数学库.md](docs/数学库.md)。
+
 ## 性能
 
 Aether 编译为原生代码。以下是同一份程序在 Windows 11 上与 Python 3.13 的对比（单位：秒）：
@@ -411,6 +435,7 @@ cd compiler && go test .
 | [标准库](docs/标准库.md) | 内置函数与所有标准库模块的 API |
 | [深度学习](docs/深度学习.md) | 张量、自动求导、nn / optim、GPU 与性能 |
 | [实现原理](docs/实现原理.md) | 编译器管线、运行时与代码生成 |
+| [数学库](docs/数学库.md) | 符号表达式、化简展开、求导、编译求值、恒等检查 |
 | [MiniJev / QwenJev](examples/minijev/README.md) | 用 Aether 从零训练决策模型与微调 Qwen3 |
 
 ## 当前限制

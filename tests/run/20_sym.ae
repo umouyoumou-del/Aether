@@ -1,0 +1,94 @@
+# sym 模块：符号数学（化简、展开、求导、求值、编译、方程、积分）
+import sym
+import math
+
+x = sym.var("x")
+y = sym.var("y")
+a = sym.var("a")
+b = sym.var("b")
+
+# ===== 构造与打印 =====
+print(x + y, 2 * x, x * y, x ** 2, -x, x - y, x / 2)
+print(x + 1, 1 + x, 3 - x, x * 2.5, 2.5 * x, x ** 3)
+
+# 化简的单位元与零元
+print(x + 0, x * 1, x * 0, x ** 1, x ** 0, (2 + 3) * x, x + x + x)
+
+# 合并同类项与同底数的幂
+print(2 * x + 3 * x - x, x * x * x, x ** 2 * x ** 3, x ** 2 * x ** -2)
+
+# ===== 展开 =====
+print(sym.expand((x + 1) ** 2))
+print(sym.expand((a + b) ** 2))
+print(sym.expand((a + b) ** 3))
+print(sym.expand((a + b) * (a - b)))
+print(sym.expand((x + 1) * (x + 2) * (x + 3)))
+print(sym.expand(x * (y + 2) + y * (x + 1)))
+
+# ===== 求导 =====
+print(sym.diff(x ** 3 + 2 * x, "x"))
+print(sym.diff(x ** 2 + 3 * x + 1, "x"))
+print(sym.diff(x * x, "x"))
+print(sym.diff(x * y, "x"), sym.diff(x * y, "y"))
+print(sym.diff(sym.fn("sin", x), "x"))
+print(sym.diff(sym.fn("sin", x ** 2), "x"))
+print(sym.diff(x * sym.fn("sin", x), "x"))
+print(sym.diff(sym.fn("exp", 2 * x), "x"))
+print(sym.diff(sym.fn("log", x), "x"))
+print(sym.diff(x / (x + 1), "x"))
+
+# 不可微的表达式在求导时被拒绝
+try:
+    sym.diff(sym.fn("abs", x), "x")
+except TypeError as e:
+    print("拒绝求导：", e)
+
+# ===== 恒等检查 =====
+print(sym.equals((a + b) ** 2, a ** 2 + 2 * a * b + b ** 2))
+print(sym.equals((a + b) * (a - b), a ** 2 - b ** 2))
+print(sym.equals(sym.fn("sin", x) ** 2 + sym.fn("cos", x) ** 2, sym.num(1.0)))
+print(sym.equals(x + 1, x + 2))
+print(sym.difference((x + 1) ** 2, x ** 2 + 2 * x + 1))
+
+# ===== 代入与求值 =====
+f = (x + y) ** 2
+print(sym.subs(f, {"y": sym.num(1.0)}))
+print(sym.evaluate(f, {"x": 2.0, "y": 3.0}))
+print(sym.evaluate(sym.fn("sin", x) + sym.fn("cos", x), {"x": 0.0}))
+print(sym.vars_of(x * y + sym.fn("sin", x) + a))
+
+try:
+    sym.evaluate(x, {})
+except KeyError as e:
+    print("缺少取值：", e)
+
+# ===== 编译成闭包 =====
+g = sym.compile_expr(f, ["x", "y"])
+print(g([2.0, 3.0]), g([1.0, 1.0]))
+h = sym.compile_expr(sym.fn("exp", x) * sym.fn("sin", x), ["x"])
+env: dict[str, float] = {"x": 0.5}
+print(f"{h([0.5]):.10f}", f"{sym.evaluate(sym.fn("exp", x) * sym.fn("sin", x), env):.10f}")
+
+# 求导结果与数值差商一致
+d = sym.diff(x ** 4 + sym.fn("sin", x), "x")
+dc = sym.compile_expr(d, ["x"])
+env2: dict[str, float] = {"x": 1.3}
+expected = 4.0 * 1.3 ** 3 + sym.evaluate(sym.fn("cos", x), env2)
+print(f"{dc([1.3]):.8f}", f"{expected:.8f}")
+
+# ===== 方程 =====
+r = sym.solve_quadratic(sym.num(1.0), sym.num(-3.0), sym.num(2.0))
+print(r[0], r[1])
+r2 = sym.solve_quadratic(sym.num(1.0), sym.num(0.0), sym.num(-4.0))
+print(r2[0], r2[1])
+
+try:
+    sym.solve_quadratic(sym.num(1.0), sym.num(0.0), sym.num(1.0))
+except ValueError as e:
+    print("无实根：", e)
+
+# ===== 数值积分 =====
+q = sym.compile_expr(x ** 2, ["x"])
+print(f"{sym.integrate_numeric(q, 0.0, 1.0, 1000):.10f}")
+sine = sym.compile_expr(sym.fn("sin", x), ["x"])
+print(f"{sym.integrate_numeric(sine, 0.0, math.pi, 1000):.6f}")

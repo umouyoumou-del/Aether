@@ -1,0 +1,971 @@
+# sym 模块：符号数学（用纯 Aether 代码编写）
+#
+# 一份表达式同时具备三种用途：
+#   - 符号运算：化简、展开、求导、解方程，结果是精确的表达式而不是浮点数
+#   - 数值求值：evaluate 按环境中的数值计算，compile_expr 把表达式预先编译成闭包树（不解树的直接调用）
+#   - 可检查的相等性：equals 把两侧化为同一个规范形式，返回是否恒等
+#
+# 表达式节点带元数据：值域（整数 / 实数）与是否处处可微。求导时若表达式含有不可微的
+# 运算（abs、floor 等），会在构造阶段报错，而不是给出错误的结果——这是把类型检查用在数学上的意义。
+#
+#   import sym
+#   x = sym.var("x")
+#   f = (x + 1) ** 2
+#   print(sym.expand(f))                 # x^2 + 2*x + 1
+#   print(sym.diff(f, "x"))              # 2*x + 2
+#   g = sym.compile_expr(f, ["x"])
+#   print(g([3.0]))                      # 16.0
+
+import math
+
+# ===== 值域 =====
+
+# 表达式的值域。整数系数可以精确保持（例如二项式展开的系数不会变成 1.9999999）。
+const INTEGER = 0
+const REAL = 1
+
+# 展开时允许的最大整数指数，防止 (a + b) ** 100000 这类表达式爆炸
+const MAX_EXPAND_EXPONENT = 64
+
+# ===== 表达式 =====
+
+# 符号表达式。kind 是节点种类：
+#   "num"  数值常量（v）
+#   "var"  符号变量（name）
+#   "add"  和（kids，按规范顺序排列）
+#   "mul"  积（kids，第一个可能是数值系数）
+#   "pow"  幂（kids[0] 是底，kids[1] 是指数）
+#   "div"  商（kids[0] 是分子，kids[1] 是分母）
+#   "fn"   函数调用（name 是函数名，kids[0] 是自变量）
+class Expr:
+    kind: str
+    name: str
+    v: float
+    kids: list[Expr]
+    dom: int
+    smooth: bool
+
+    def __init__(self, kind: str, name: str, v: float, kids: list[Expr], dom: int, smooth: bool):
+        self.kind = kind
+        self.name = name
+        self.v = v
+        self.kids = kids
+        self.dom = dom
+        self.smooth = smooth
+
+    def __str__(self) -> str:
+        return render(self, 0)
+
+    def __repr__(self) -> str:
+        return render(self, 0)
+
+    def __add__(self, o: Expr) -> Expr:
+        return _mk_add([self, o])
+
+    def __add__(self, k: float) -> Expr:
+        return _mk_add([self, num(k)])
+
+    def __add__(self, k: int) -> Expr:
+        return _mk_add([self, num(float(k))])
+
+    def __radd__(self, k: float) -> Expr:
+        return _mk_add([num(k), self])
+
+    def __radd__(self, k: int) -> Expr:
+        return _mk_add([num(float(k)), self])
+
+    def __sub__(self, o: Expr) -> Expr:
+        return _mk_add([self, neg(o)])
+
+    def __sub__(self, k: float) -> Expr:
+        return _mk_add([self, num(-k)])
+
+    def __sub__(self, k: int) -> Expr:
+        return _mk_add([self, num(-float(k))])
+
+    def __rsub__(self, k: float) -> Expr:
+        return _mk_add([num(k), neg(self)])
+
+    def __rsub__(self, k: int) -> Expr:
+        return _mk_add([num(float(k)), neg(self)])
+
+    def __mul__(self, o: Expr) -> Expr:
+        return _mk_mul([self, o])
+
+    def __mul__(self, k: float) -> Expr:
+        return _mk_mul([num(k), self])
+
+    def __mul__(self, k: int) -> Expr:
+        return _mk_mul([num(float(k)), self])
+
+    def __rmul__(self, k: float) -> Expr:
+        return _mk_mul([num(k), self])
+
+    def __rmul__(self, k: int) -> Expr:
+        return _mk_mul([num(float(k)), self])
+
+    def __truediv__(self, o: Expr) -> Expr:
+        return _mk_div(self, o)
+
+    def __truediv__(self, k: float) -> Expr:
+        return _mk_div(self, num(k))
+
+    def __truediv__(self, k: int) -> Expr:
+        return _mk_div(self, num(float(k)))
+
+    def __rtruediv__(self, k: float) -> Expr:
+        return _mk_div(num(k), self)
+
+    def __rtruediv__(self, k: int) -> Expr:
+        return _mk_div(num(float(k)), self)
+
+    def __pow__(self, p: float) -> Expr:
+        return _mk_pow(self, num(p))
+
+    def __pow__(self, p: int) -> Expr:
+        return _mk_pow(self, num(float(p)))
+
+    def __neg__(self) -> Expr:
+        return _mk_mul([num(-1.0), self])
+
+# ===== 构造 =====
+
+# 数值常量（整数会记为整数域）
+def num(v: float) -> Expr:
+    d = INTEGER if _is_integral(v) else REAL
+    return Expr("num", "", v, [], d, true)
+
+# 整数常量
+def integer(n: int) -> Expr:
+    return Expr("num", "", float(n), [], INTEGER, true)
+
+# 符号变量
+def var(name: str) -> Expr:
+    if name == "":
+        raise ValueError("变量名不能为空")
+    return Expr("var", name, 0.0, [], REAL, true)
+
+# 和
+def add(a: Expr, b: Expr) -> Expr:
+    return _mk_add([a, b])
+
+# 积
+def mul(a: Expr, b: Expr) -> Expr:
+    return _mk_mul([a, b])
+
+# 商
+def div(a: Expr, b: Expr) -> Expr:
+    return _mk_div(a, b)
+
+# 幂
+def power(a: Expr, p: Expr) -> Expr:
+    return _mk_pow(a, p)
+
+# 一元负号
+def neg(a: Expr) -> Expr:
+    return _mk_mul([num(-1.0), a])
+
+# 函数调用，name 需要是 diff 表中支持的函数（sin、cos、exp、log、sqrt ……）
+def fn(name: str, a: Expr) -> Expr:
+    if not _is_known_fn(name):
+        raise ValueError(f"未知的函数：{name}")
+    smooth = a.smooth and name != "abs"
+    return Expr("fn", name, 0.0, [a], REAL, smooth)
+
+# ===== 数值格式 =====
+
+def _is_integral(v: float) -> bool:
+    return math.isinf(v) == false and math.isnan(v) == false and v == math.trunc(v)
+
+# 数值的显示形式：整数不带小数点，其余保留足够多的有效数字
+def fmt(v: float) -> str:
+    if math.isnan(v):
+        return "nan"
+    if math.isinf(v):
+        return "inf" if v > 0 else "-inf"
+    if _is_integral(v) and math.fabs(v) < 1e16:
+        return str(math.trunc(v))
+    return f"{v:.15g}"
+
+def _num(v: float) -> Expr:
+    return num(v)
+
+# ===== 规范键（用于比较与排序） =====
+
+def _key(e: Expr) -> str:
+    if e.kind == "num":
+        return "n:" + fmt(e.v)
+    if e.kind == "var":
+        return "v:" + e.name
+    if e.kind == "fn":
+        return "f:" + e.name + "(" + _key(e.kids[0]) + ")"
+    parts: list[str] = []
+    for k in e.kids:
+        parts.append(_key(k))
+    return e.kind + "(" + ",".join(parts) + ")"
+
+# 显示时的排序键：按总次数从高到低，同次数的按变量名与指数排，常数最后。
+# 这样 (a+b)^2 展开成 a^2 + 2*a*b + b^2，而不是 2*a*b + a^2 + b^2。
+def _display_key(e: Expr) -> str:
+    negative, pos = _split_sign(e)
+    if pos.kind == "num":
+        return "999\uffff"
+    factors: list[Expr] = []
+    if pos.kind == "mul":
+        for k in pos.kids:
+            if k.kind != "num":
+                factors.append(k)
+    else:
+        factors.append(pos)
+    degree = 0
+    parts: list[str] = []
+    for f in factors:
+        base = f
+        exp = 1
+        if f.kind == "pow" and f.kids[1].kind == "num" and _is_integral(f.kids[1].v):
+            base = f.kids[0]
+            exp = math.trunc(f.kids[1].v)
+        if base.kind == "var":
+            degree += exp
+        parts.append(_key(base) + "^" + f"{999 - exp:03d}")
+    parts = sorted(parts)
+    out = f"{999 - degree:03d}"
+    for part in parts:
+        out += part
+    return out
+
+def _prec(e: Expr) -> int:
+    if e.kind == "add":
+        return 1
+    if e.kind == "mul" or e.kind == "div":
+        return 2
+    if e.kind == "pow":
+        return 3
+    return 4
+
+# ===== 渲染 =====
+
+# 把表达式渲染为字符串
+def render(e: Expr, outer: int) -> str:
+    if e.kind == "num":
+        return fmt(e.v)
+    if e.kind == "var":
+        return e.name
+    if e.kind == "add":
+        return _render_sum(e, outer)
+    if e.kind == "mul":
+        return _render_product(e, outer)
+    if e.kind == "pow":
+        base = render(e.kids[0], 3)
+        exp = render(e.kids[1], 4)
+        s = base + "^" + exp
+        return "(" + s + ")" if outer > 3 else s
+    if e.kind == "div":
+        s = render(e.kids[0], 2) + "/" + render(e.kids[1], 3)
+        return "(" + s + ")" if outer > 2 else s
+    if e.kind == "fn":
+        return e.name + "(" + render(e.kids[0], 0) + ")"
+    return "?"
+
+def _render_sum(e: Expr, outer: int) -> str:
+    terms: list[Expr] = []
+    for k in e.kids:
+        terms.append(k)
+    # 以负项开头时，把正的常数项提到最前面：3 - x 而不是 -x + 3
+    first_negative, first_pos = _split_sign(terms[0])
+    if first_negative:
+        for i in range(1, len(terms)):
+            neg_i, pos_i = _split_sign(terms[i])
+            if neg_i == false and pos_i.kind == "num":
+                moved = terms[i]
+                terms.pop(i)
+                terms.insert(0, moved)
+                break
+    out = ""
+    for i in range(len(terms)):
+        negative, positive = _split_sign(terms[i])
+        body = render(positive, 2)
+        if i == 0:
+            out += ("-" if negative else "") + body
+        else:
+            out += (" - " if negative else " + ") + body
+    return "(" + out + ")" if outer > 1 else out
+
+def _render_product(e: Expr, outer: int) -> str:
+    start = 0
+    prefix = ""
+    if e.kids[0].kind == "num" and len(e.kids) > 1:
+        c = e.kids[0].v
+        if math.fabs(c + 1.0) < 1e-15:
+            prefix = "-"
+        elif c < 0:
+            prefix = "-" + fmt(-c) + "*"
+        elif math.fabs(c - 1.0) > 1e-15:
+            prefix = fmt(c) + "*"
+        start = 1
+    out = ""
+    for i in range(start, len(e.kids)):
+        if i > start:
+            out += "*"
+        out += render(e.kids[i], 3)
+    s = prefix + out
+    return "(" + s + ")" if outer > 2 else s
+
+# 拆出符号：返回 (是否为负, 去掉负号后的表达式)
+def _split_sign(e: Expr) -> (bool, Expr):
+    if e.kind == "num":
+        return (e.v < 0, num(-e.v)) if e.v < 0 else (false, e)
+    if e.kind == "mul" and len(e.kids) > 1:
+        first = e.kids[0]
+        if first.kind == "num" and first.v < 0:
+            rest: list[Expr] = [num(-first.v)]
+            for i in range(1, len(e.kids)):
+                rest.append(e.kids[i])
+            return (true, _mk_mul(rest))
+    return (false, e)
+
+# ===== 规范构造（自动完成合并与化简） =====
+
+def _mk_add(terms: list[Expr]) -> Expr:
+    flat: list[Expr] = []
+    for t in terms:
+        if t.kind == "add":
+            for u in t.kids:
+                flat.append(u)
+        else:
+            flat.append(t)
+
+    # 用字典合并同类项（键是去掉数值系数之后的符号部分）
+    coefs: dict[str, float] = {}
+    syms: dict[str, Expr] = {}
+    constant = 0.0
+    for t in flat:
+        c, s = _split_coef(t)
+        if s.kind == "num":
+            constant += c
+            continue
+        k = _key(s)
+        coefs[k] = coefs.get(k, 0.0) + c
+        syms[k] = s
+
+    items: list[Expr] = []
+    for k in coefs.keys():
+        c = coefs[k]
+        if math.fabs(c) < 1e-15:
+            continue
+        s = syms[k]
+        if math.fabs(c - 1.0) < 1e-15:
+            items.append(s)
+        elif math.fabs(c + 1.0) < 1e-15:
+            items.append(_mk_mul([num(-1.0), s]))
+        else:
+            items.append(_mk_mul([num(c), s]))
+
+    items = _apply_trig_identity(items)
+
+    # 三角函数恒等式可能引入了新的常数项，统一并入 constant
+    kept: list[Expr] = []
+    for t in items:
+        if t.kind == "num":
+            constant += t.v
+        else:
+            kept.append(t)
+    items = kept
+
+    dom = INTEGER
+    smooth = true
+    for t in items:
+        if t.dom != INTEGER:
+            dom = REAL
+        if t.smooth == false:
+            smooth = false
+
+    if len(items) == 0:
+        return Expr("num", "", constant, [], INTEGER if _is_integral(constant) else REAL, true)
+    items = sorted(items, key=(t: Expr) => _display_key(t))
+    if math.fabs(constant) > 1e-15:
+        items.append(Expr("num", "", constant, [], INTEGER if _is_integral(constant) else REAL, true))
+    if len(items) == 1 and math.fabs(constant) < 1e-15:
+        return items[0]
+    return Expr("add", "", 0.0, items, dom, smooth)
+
+def _mk_mul(factors: list[Expr]) -> Expr:
+    flat: list[Expr] = []
+    for f in factors:
+        if f.kind == "mul":
+            for u in f.kids:
+                flat.append(u)
+        else:
+            flat.append(f)
+
+    coef = 1.0
+    groups: dict[str, int] = {}
+    bases: dict[str, Expr] = {}
+    dom = INTEGER
+    smooth = true
+    for f in flat:
+        if f.kind == "num":
+            coef *= f.v
+            continue
+        if f.dom != INTEGER:
+            dom = REAL
+        if f.smooth == false:
+            smooth = false
+        base = f
+        exp = 1
+        if f.kind == "pow" and f.kids[1].kind == "num" and _is_integral(f.kids[1].v):
+            base = f.kids[0]
+            exp = math.trunc(f.kids[1].v)
+        k = _key(base)
+        groups[k] = groups.get(k, 0) + exp
+        bases[k] = base
+
+    if math.fabs(coef) < 1e-15:
+        return Expr("num", "", 0.0, [], INTEGER, true)
+
+    items: list[Expr] = []
+    keys = sorted(groups.keys(), key=(k: str) => _factor_order(k, bases[k]))
+    for k in keys:
+        exp = groups[k]
+        if exp == 0:
+            continue
+        base = bases[k]
+        if exp == 1:
+            items.append(base)
+        else:
+            items.append(_mk_pow(base, Expr("num", "", float(exp), [], INTEGER, true)))
+
+    if len(items) == 0:
+        return Expr("num", "", coef, [], INTEGER if _is_integral(coef) else REAL, true)
+    if math.fabs(coef - 1.0) > 1e-15:
+        items.insert(0, Expr("num", "", coef, [], INTEGER if _is_integral(coef) else REAL, true))
+    if len(items) == 1:
+        return items[0]
+    return Expr("mul", "", 0.0, items, dom, smooth)
+
+def _mk_pow(base: Expr, exp: Expr) -> Expr:
+    if exp.kind == "num":
+        p = exp.v
+        if math.fabs(p) < 1e-15:
+            return Expr("num", "", 1.0, [], INTEGER, true)
+        if math.fabs(p - 1.0) < 1e-15:
+            return base
+        if base.kind == "num":
+            v = math.pow(base.v, p)
+            return Expr("num", "", v, [], INTEGER if _is_integral(v) else REAL, true)
+        if base.kind == "pow" and base.kids[1].kind == "num":
+            inner = base.kids[1].v
+            if _is_integral(inner) and _is_integral(p):
+                return _mk_pow(base.kids[0], Expr("num", "", inner * p, [], INTEGER, true))
+        if base.kind == "mul" and p > 0 and _is_integral(p):
+            out: list[Expr] = []
+            for k in base.kids:
+                out.append(_mk_pow(k, exp))
+            return _mk_mul(out)
+    if base.kind == "num" and math.fabs(base.v - 1.0) < 1e-15:
+        return Expr("num", "", 1.0, [], INTEGER, true)
+    dom = REAL
+    if exp.kind == "num" and _is_integral(exp.v) and exp.v >= 0:
+        dom = base.dom
+    return Expr("pow", "", 0.0, [base, exp], dom, base.smooth and exp.smooth)
+
+def _mk_div(a: Expr, b: Expr) -> Expr:
+    if b.kind == "num":
+        if math.fabs(b.v) < 1e-15:
+            raise ZeroDivisionError("除数为 0")
+        return _mk_mul([a, Expr("num", "", 1.0 / b.v, [], REAL, true)])
+    if a.kind == "num" and math.fabs(a.v) < 1e-15:
+        return Expr("num", "", 0.0, [], INTEGER, true)
+    if _key(a) == _key(b):
+        return Expr("num", "", 1.0, [], INTEGER, true)
+    if b.kind == "num" and math.fabs(b.v - 1.0) < 1e-15:
+        return a
+    return Expr("div", "", 0.0, [a, b], REAL, a.smooth and b.smooth)
+
+# 乘积中因子的显示顺序：数值系数之后，变量最先，其次函数，最后复合因子
+def _factor_order(k: str, base: Expr) -> str:
+    if base.kind == "var":
+        return "0" + k
+    if base.kind == "fn":
+        return "1" + k
+    return "2" + k
+
+# 拆出数值系数：返回 (系数, 符号部分)
+def _split_coef(e: Expr) -> (float, Expr):
+    if e.kind == "num":
+        return (e.v, Expr("num", "", 1.0, [], INTEGER, true))
+    if e.kind == "mul" and e.kids[0].kind == "num":
+        c = e.kids[0].v
+        rest: list[Expr] = []
+        for i in range(1, len(e.kids)):
+            rest.append(e.kids[i])
+        if len(rest) == 0:
+            return (c, Expr("num", "", 1.0, [], INTEGER, true))
+        if len(rest) == 1:
+            return (c, rest[0])
+        return (c, _mk_mul(rest))
+    return (1.0, e)
+
+# sin(x)^2 + cos(x)^2 = 1
+def _apply_trig_identity(items: list[Expr]) -> list[Expr]:
+    if len(items) < 2:
+        return items
+    used: list[bool] = []
+    for i in range(len(items)):
+        used.append(false)
+    out: list[Expr] = []
+    for i in range(len(items)):
+        if used[i]:
+            continue
+        c1, s1 = _split_coef(items[i])
+        m1 = _as_sin_cos_square(s1)
+        if m1 == "":
+            out.append(items[i])
+            continue
+        paired = false
+        for j in range(i + 1, len(items)):
+            if used[j]:
+                continue
+            c2, s2 = _split_coef(items[j])
+            m2 = _as_sin_cos_square(s2)
+            if m2 == "":
+                continue
+            if math.fabs(c1 - c2) > 1e-15:
+                continue
+            p1 = m1.split("|")
+            p2 = m2.split("|")
+            if p1[0] != p2[0] and p1[1] == p2[1]:
+                used[j] = true
+                out.append(Expr("num", "", c1, [], INTEGER if _is_integral(c1) else REAL, true))
+                paired = true
+                break
+        if not paired:
+            out.append(items[i])
+    return out
+
+# 如果 e 是 sin(u)^2 或 cos(u)^2，返回 "sin|<u 的键>" 或 "cos|<u 的键>"；否则返回空串
+def _as_sin_cos_square(e: Expr) -> str:
+    if e.kind != "pow":
+        return ""
+    if e.kids[1].kind != "num" or math.fabs(e.kids[1].v - 2.0) > 1e-15:
+        return ""
+    b = e.kids[0]
+    if b.kind != "fn":
+        return ""
+    if b.name != "sin" and b.name != "cos":
+        return ""
+    return b.name + "|" + _key(b.kids[0])
+
+# ===== 公开的化简与展开 =====
+
+# 化简：常量折叠、合并同类项、去掉 0 与 1、合并同底数的幂，不做分配律展开
+def simplify(e: Expr) -> Expr:
+    if e.kind == "num" or e.kind == "var":
+        return e
+    kids: list[Expr] = []
+    for k in e.kids:
+        kids.append(simplify(k))
+    if e.kind == "add":
+        return _mk_add(kids)
+    if e.kind == "mul":
+        return _mk_mul(kids)
+    if e.kind == "pow":
+        return _mk_pow(kids[0], kids[1])
+    if e.kind == "div":
+        return _mk_div(kids[0], kids[1])
+    if e.kind == "fn":
+        return _mk_fn(e.name, kids[0])
+    return e
+
+# 展开：分配律 + 整数次幂展开 + 合并同类项，得到多项式的规范形式
+def expand(e: Expr) -> Expr:
+    if e.kind == "num" or e.kind == "var":
+        return e
+    if e.kind == "add":
+        terms: list[Expr] = []
+        for k in e.kids:
+            terms.append(expand(k))
+        return _mk_add(terms)
+    if e.kind == "mul":
+        acc: list[Expr] = [Expr("num", "", 1.0, [], INTEGER, true)]
+        for k in e.kids:
+            f = expand(k)
+            if f.kind == "add":
+                acc = _distribute(acc, f)
+            else:
+                out: list[Expr] = []
+                for t in acc:
+                    out.append(_mk_mul([t, f]))
+                acc = out
+        return _mk_add(acc)
+    if e.kind == "pow":
+        base = expand(e.kids[0])
+        p = e.kids[1]
+        if p.kind == "num" and _is_integral(p.v) and p.v >= 0 and p.v <= float(MAX_EXPAND_EXPONENT):
+            n = math.trunc(p.v)
+            if base.kind == "add":
+                # 和的幂用逐次分配乘法，不能再交给 _mk_mul（它会把和又合成幂）
+                parts: list[Expr] = [Expr("num", "", 1.0, [], INTEGER, true)]
+                for step in range(n):
+                    parts = _distribute(parts, base)
+                return _mk_add(parts)
+            result = Expr("num", "", 1.0, [], INTEGER, true)
+            for step in range(n):
+                result = _mk_mul([result, base])
+            return result
+        return _mk_pow(base, expand(p))
+    if e.kind == "div":
+        return _mk_div(expand(e.kids[0]), expand(e.kids[1]))
+    if e.kind == "fn":
+        return _mk_fn(e.name, expand(e.kids[0]))
+    return e
+
+def _distribute(acc: list[Expr], sum_expr: Expr) -> list[Expr]:
+    out: list[Expr] = []
+    for t in acc:
+        for s in sum_expr.kids:
+            out.append(_mk_mul([t, s]))
+    return out
+
+def _mk_fn(name: str, a: Expr) -> Expr:
+    if a.kind == "num":
+        v = _eval_fn_num(name, a.v)
+        if v != null:
+            return Expr("num", "", v, [], INTEGER if _is_integral(v) else REAL, true)
+    if name == "exp" and a.kind == "num" and math.fabs(a.v) < 1e-15:
+        return Expr("num", "", 1.0, [], INTEGER, true)
+    smooth = a.smooth and name != "abs"
+    return Expr("fn", name, 0.0, [a], REAL, smooth)
+
+# 数值实参的函数值：只在能得到精确值时返回，否则返回 null 保持符号形式
+def _eval_fn_num(name: str, v: float) -> float?:
+    if name == "sin" and math.fabs(v) < 1e-15:
+        return 0.0
+    if name == "cos" and math.fabs(v) < 1e-15:
+        return 1.0
+    if name == "exp" and math.fabs(v) < 1e-15:
+        return 1.0
+    if name == "log" and math.fabs(v - 1.0) < 1e-15:
+        return 0.0
+    if name == "sqrt" and v >= 0 and _is_integral(v):
+        r = math.isqrt(math.trunc(v))
+        if float(r * r) == v:
+            return float(r)
+    if name == "tanh" and math.fabs(v) < 1e-15:
+        return 0.0
+    return null
+
+def _is_known_fn(name: str) -> bool:
+    if name == "sin" or name == "cos" or name == "tan":
+        return true
+    if name == "exp" or name == "log" or name == "sqrt":
+        return true
+    if name == "sinh" or name == "cosh" or name == "tanh":
+        return true
+    if name == "asin" or name == "acos" or name == "atan":
+        return true
+    if name == "abs":
+        return true
+    return false
+
+# ===== 求导 =====
+
+# 对 var 求导。表达式含不可微的运算时抛出 TypeError。
+def diff(e: Expr, x: str) -> Expr:
+    if e.smooth == false:
+        raise TypeError(f"表达式 {render(e, 0)} 不是处处可微的（含有 abs 等运算），不能直接求导")
+    return simplify(_diff(e, x))
+
+def _diff(e: Expr, x: str) -> Expr:
+    if e.kind == "num":
+        return Expr("num", "", 0.0, [], INTEGER, true)
+    if e.kind == "var":
+        return Expr("num", "", 1.0 if e.name == x else 0.0, [], INTEGER, true)
+    if e.kind == "add":
+        terms: list[Expr] = []
+        for k in e.kids:
+            terms.append(_diff(k, x))
+        return _mk_add(terms)
+    if e.kind == "mul":
+        total: list[Expr] = []
+        for i in range(len(e.kids)):
+            factors: list[Expr] = []
+            for j in range(len(e.kids)):
+                if i == j:
+                    factors.append(_diff(e.kids[j], x))
+                else:
+                    factors.append(e.kids[j])
+            total.append(_mk_mul(factors))
+        return _mk_add(total)
+    if e.kind == "pow":
+        u = e.kids[0]
+        v = e.kids[1]
+        du = _diff(u, x)
+        if v.kind == "num":
+            p = v.v
+            return _mk_mul([num(p), _mk_pow(u, num(p - 1.0)), du])
+        dv = _diff(v, x)
+        inner = _mk_add([_mk_mul([dv, _mk_fn("log", u)]),
+                         _mk_div(_mk_mul([v, du]), u)])
+        return _mk_mul([_mk_pow(u, v), inner])
+    if e.kind == "div":
+        u = e.kids[0]
+        v = e.kids[1]
+        num_part = _mk_add([_mk_mul([_diff(u, x), v]), neg(_mk_mul([u, _diff(v, x)]))])
+        return _mk_div(num_part, _mk_pow(v, num(2.0)))
+    if e.kind == "fn":
+        u = e.kids[0]
+        du = _diff(u, x)
+        return _mk_mul([_fn_derivative(e.name, u), du])
+    return Expr("num", "", 0.0, [], INTEGER, true)
+
+# 常见函数的导数（外层导数，链式法则的内层由调用方乘上）
+def _fn_derivative(name: str, u: Expr) -> Expr:
+    if name == "sin":
+        return _mk_fn("cos", u)
+    if name == "cos":
+        return neg(_mk_fn("sin", u))
+    if name == "tan":
+        return _mk_div(Expr("num", "", 1.0, [], INTEGER, true), _mk_pow(_mk_fn("cos", u), num(2.0)))
+    if name == "exp":
+        return _mk_fn("exp", u)
+    if name == "log":
+        return _mk_div(Expr("num", "", 1.0, [], INTEGER, true), u)
+    if name == "sqrt":
+        return _mk_div(Expr("num", "", 1.0, [], INTEGER, true), _mk_mul([num(2.0), _mk_fn("sqrt", u)]))
+    if name == "sinh":
+        return _mk_fn("cosh", u)
+    if name == "cosh":
+        return _mk_fn("sinh", u)
+    if name == "tanh":
+        return _mk_add([Expr("num", "", 1.0, [], INTEGER, true), neg(_mk_pow(_mk_fn("tanh", u), num(2.0)))])
+    if name == "atan":
+        return _mk_div(Expr("num", "", 1.0, [], INTEGER, true),
+                       _mk_add([Expr("num", "", 1.0, [], INTEGER, true), _mk_pow(u, num(2.0))]))
+    if name == "asin":
+        return _mk_div(Expr("num", "", 1.0, [], INTEGER, true),
+                       _mk_fn("sqrt", _mk_add([Expr("num", "", 1.0, [], INTEGER, true), neg(_mk_pow(u, num(2.0)))])))
+    if name == "acos":
+        return neg(_mk_div(Expr("num", "", 1.0, [], INTEGER, true),
+                           _mk_fn("sqrt", _mk_add([Expr("num", "", 1.0, [], INTEGER, true), neg(_mk_pow(u, num(2.0)))]))))
+    raise TypeError(f"函数 {name} 没有导数规则")
+
+# ===== 代入与求值 =====
+
+# 把表达式中的变量替换为其它表达式
+def subs(e: Expr, values: dict[str, Expr]) -> Expr:
+    if e.kind == "var":
+        v = values.get(e.name)
+        if v != null:
+            return v
+        return e
+    if e.kind == "num":
+        return e
+    kids: list[Expr] = []
+    for k in e.kids:
+        kids.append(subs(k, values))
+    return simplify(_rebuild(e, kids))
+
+def _rebuild(e: Expr, kids: list[Expr]) -> Expr:
+    if e.kind == "add":
+        return _mk_add(kids)
+    if e.kind == "mul":
+        return _mk_mul(kids)
+    if e.kind == "pow":
+        return _mk_pow(kids[0], kids[1])
+    if e.kind == "div":
+        return _mk_div(kids[0], kids[1])
+    if e.kind == "fn":
+        return _mk_fn(e.name, kids[0])
+    return e
+
+# 用环境中的数值求值
+def evaluate(e: Expr, env: dict[str, float]) -> float:
+    if e.kind == "num":
+        return e.v
+    if e.kind == "var":
+        v = env.get(e.name)
+        if v == null:
+            raise KeyError(f"变量 {e.name} 没有取值")
+        return v
+    if e.kind == "add":
+        s = 0.0
+        for k in e.kids:
+            s += evaluate(k, env)
+        return s
+    if e.kind == "mul":
+        s = 1.0
+        for k in e.kids:
+            s *= evaluate(k, env)
+        return s
+    if e.kind == "pow":
+        return math.pow(evaluate(e.kids[0], env), evaluate(e.kids[1], env))
+    if e.kind == "div":
+        return evaluate(e.kids[0], env) / evaluate(e.kids[1], env)
+    if e.kind == "fn":
+        return _eval_fn(e.name, evaluate(e.kids[0], env))
+    raise ValueError(f"无法求值的节点：{e.kind}")
+
+def _eval_fn(name: str, x: float) -> float:
+    if name == "sin":
+        return math.sin(x)
+    if name == "cos":
+        return math.cos(x)
+    if name == "tan":
+        return math.tan(x)
+    if name == "exp":
+        return math.exp(x)
+    if name == "log":
+        return math.log(x)
+    if name == "sqrt":
+        return math.sqrt(x)
+    if name == "sinh":
+        return math.sinh(x)
+    if name == "cosh":
+        return math.cosh(x)
+    if name == "tanh":
+        return math.tanh(x)
+    if name == "asin":
+        return math.asin(x)
+    if name == "acos":
+        return math.acos(x)
+    if name == "atan":
+        return math.atan(x)
+    if name == "abs":
+        return math.fabs(x)
+    raise ValueError(f"未知的函数：{name}")
+
+# 编译：把表达式预先构建成一棵闭包树，之后每次调用只有函数调用与算术，
+# 不需要按节点种类分支、也不需要查字典。返回的函数接受参数列表。
+def compile_expr(e: Expr, vars: list[str]) -> fn(list[float]) -> float:
+    index: dict[str, int] = {}
+    for i in range(len(vars)):
+        index[vars[i]] = i
+    return _build(e, index)
+
+def _build(e: Expr, index: dict[str, int]) -> fn(list[float]) -> float:
+    if e.kind == "num":
+        v = e.v
+        return (xs: list[float]) => v
+    if e.kind == "var":
+        i = index.get(e.name)
+        if i == null:
+            raise ValueError(f"编译时没有提供变量 {e.name}")
+        pos = i
+        return (xs: list[float]) => xs[pos]
+    kids: list[fn(list[float]) -> float] = []
+    for k in e.kids:
+        kids.append(_build(k, index))
+    if e.kind == "add":
+        parts = kids
+        return (xs: list[float]) => _sum_parts(parts, xs)
+    if e.kind == "mul":
+        parts = kids
+        return (xs: list[float]) => _prod_parts(parts, xs)
+    if e.kind == "pow":
+        a = kids[0]
+        b = kids[1]
+        return (xs: list[float]) => math.pow(a(xs), b(xs))
+    if e.kind == "div":
+        a = kids[0]
+        b = kids[1]
+        return (xs: list[float]) => a(xs) / b(xs)
+    if e.kind == "fn":
+        name = e.name
+        a = kids[0]
+        match name:
+            case "sin":
+                return (xs: list[float]) => math.sin(a(xs))
+            case "cos":
+                return (xs: list[float]) => math.cos(a(xs))
+            case "tan":
+                return (xs: list[float]) => math.tan(a(xs))
+            case "exp":
+                return (xs: list[float]) => math.exp(a(xs))
+            case "log":
+                return (xs: list[float]) => math.log(a(xs))
+            case "sqrt":
+                return (xs: list[float]) => math.sqrt(a(xs))
+            case "sinh":
+                return (xs: list[float]) => math.sinh(a(xs))
+            case "cosh":
+                return (xs: list[float]) => math.cosh(a(xs))
+            case "tanh":
+                return (xs: list[float]) => math.tanh(a(xs))
+            case "atan":
+                return (xs: list[float]) => math.atan(a(xs))
+            case "abs":
+                return (xs: list[float]) => math.fabs(a(xs))
+    raise ValueError(f"无法编译的节点：{e.kind}")
+
+def _sum_parts(parts: list[fn(list[float]) -> float], xs: list[float]) -> float:
+    s = 0.0
+    for p in parts:
+        s += p(xs)
+    return s
+
+def _prod_parts(parts: list[fn(list[float]) -> float], xs: list[float]) -> float:
+    s = 1.0
+    for p in parts:
+        s *= p(xs)
+    return s
+
+# ===== 相等性检查 =====
+
+# 两侧都展开成规范形式，检查是否恒等。返回 (是否相等, 差值)
+def equals(a: Expr, b: Expr) -> bool:
+    d = expand(_mk_add([a, neg(b)]))
+    return _is_zero(d)
+
+def _is_zero(e: Expr) -> bool:
+    if e.kind == "num":
+        return math.fabs(e.v) < 1e-12
+    if e.kind == "add":
+        for k in e.kids:
+            if _is_zero(k) == false:
+                return false
+        return true
+    return false
+
+# 一侧减去另一侧的规范形式（诊断用）
+def difference(a: Expr, b: Expr) -> Expr:
+    return expand(_mk_add([a, neg(b)]))
+
+# 表达式中出现的变量（按字典序）
+def vars_of(e: Expr) -> list[str]:
+    found: dict[str, bool] = {}
+    _collect_vars(e, found)
+    return sorted(found.keys())
+
+def _collect_vars(e: Expr, found: dict[str, bool]):
+    if e.kind == "var":
+        found[e.name] = true
+        return
+    for k in e.kids:
+        _collect_vars(k, found)
+
+# ===== 方程 =====
+
+# 解一元二次方程 a*x^2 + b*x + c = 0，返回两个根的表达式（判别式为负时给出复数形式的提示）
+def solve_quadratic(a: Expr, b: Expr, c: Expr) -> (Expr, Expr):
+    disc = _mk_add([_mk_pow(b, num(2.0)), neg(_mk_mul([num(4.0), a, c]))])
+    if disc.kind == "num" and disc.v < 0:
+        raise ValueError(f"判别式 {fmt(disc.v)} 为负，在实数范围内没有解")
+    root = _mk_fn("sqrt", disc)
+    denom = _mk_mul([num(2.0), a])
+    r1 = _mk_div(_mk_add([neg(b), root]), denom)
+    r2 = _mk_div(_mk_add([neg(b), neg(root)]), denom)
+    return (simplify(r1), simplify(r2))
+
+# ===== 数值积分 =====
+
+# 复合辛普森法求定积分。f 可以是由 compile_expr 得到的函数，n 必须是偶数。
+def integrate_numeric(f: fn(list[float]) -> float, a: float, b: float, n: int = 1000) -> float:
+    if n <= 0 or n % 2 != 0:
+        raise ValueError("n 必须是正偶数")
+    h = (b - a) / float(n)
+    total = f([a]) + f([b])
+    for i in range(1, n):
+        x = a + h * float(i)
+        total += 4.0 * f([x]) if i % 2 == 1 else 2.0 * f([x])
+    return total * h / 3.0
