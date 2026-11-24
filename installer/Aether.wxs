@@ -62,6 +62,7 @@
       <File Id="doc_stdlib" Source="$(sys.SOURCEFILEDIR)..\docs\标准库.md" />
       <File Id="doc_dl" Source="$(sys.SOURCEFILEDIR)..\docs\深度学习.md" />
       <File Id="doc_ref" Source="$(sys.SOURCEFILEDIR)..\docs\语言参考.md" />
+      <File Id="doc_math" Source="$(sys.SOURCEFILEDIR)..\docs\数学库.md" />
     </Component>
 
     <Component Id="ExampleFiles" Guid="{136E24CC-F260-5361-B368-7DFFEB5C2904}" Directory="ExamplesFolder">
@@ -82,6 +83,8 @@
       <File Id="ex_todo" Source="$(sys.SOURCEFILEDIR)..\examples\todo.ae" />
       <File Id="ex_web" Source="$(sys.SOURCEFILEDIR)..\examples\web.ae" />
       <File Id="ex_wordfreq" Source="$(sys.SOURCEFILEDIR)..\examples\wordfreq.ae" />
+      <File Id="ex_codegen_demo" Source="$(sys.SOURCEFILEDIR)..\examples\codegen_demo.ae" />
+      <File Id="ex_latex_demo" Source="$(sys.SOURCEFILEDIR)..\examples\latex_demo.ae" />
     </Component>
 
     <Component Id="MiniJevFiles" Guid="{2F196099-3925-549C-93ED-AFB7CD9FB5CC}" Directory="MiniJevFolder">

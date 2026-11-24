@@ -1,0 +1,65 @@
+== 解析 ==
+2*x + 3*y
+(a - b)*(a + b)
+(x^2 - 1)/(x - 1)
+0.5*x
+2*pi*r^2
+7
+abs(x - y)
+1
+sin(2*x)
+cos(x)*sin(x)
+atan(0.5*x)
+log(x) + log(y)
+a*b^2
+sin(a*b)
+== 写回 LaTeX ==
+\frac{x^{2} - 1}{x - 1}
+\left(a + b\right)^{2}
+0.5x
+\alpha \, x_{1} + \pi
+y_{i+1}
+x^{3} - 2x + 1
+== 运算 ==
+a^{3} + 3a^{2} \, b + 3a \, b^{2} + b^{3}
+3x
+3x^{2} + 3
+2\cos\left(x\right)^{2} \, \sin\left(x\right) - \sin\left(x\right)^{3}
+y + \left(a + b\right)^{2}
+43.5
+12.566370614359172
+== 恒等 ==
+true
+false
+true
+true
+true
+== 等号两侧 ==
+0.5*x + 1 | 3
+== Unicode 输入 ==
+x^2 + 2*x + 1
+pi*r^2
+sqrt(x + 1)
+x^{3} \, y^{2}
+== 往返一致 ==
+10/10 条往返后仍恒等
+== 交给 codegen ==
+0.5 * x + 1.0
+# 由 Aether codegen 生成，请勿手工编辑。
+# 表达式：x^3 + sin(x^2)
+import math
+
+def f(x: float) -> float:
+    return x * x * x + math.sin(x * x)
+
+def f_dx(x: float) -> float:
+    _t0 = x * x
+    return 3.0 * _t0 + 2.0 * x * math.cos(_t0)
+== 错误 ==
+[\sum_{i=1}^{n} x_i] 暂不支持求和/连乘/积分记号；请先展开成有限项再用 parse（位置 4，附近：\sum_{i=1}^{n} x）
+[\frac{1}{}] \frac 的参数不能为空（位置 8，附近：\frac{1}{}）
+[(x+1] 圆括号没有闭合（位置 4，附近：(x+1）
+[\foo x] 不支持的 LaTeX 命令 \foo（位置 4，附近：\foo x）
+[x + \infty] 暂不支持无穷大；它不能参与符号运算（位置 10，附近：x + \infty）
+[x = 1] 这段 LaTeX 里有等号，是等式：用 latex.parse_equation 取两侧
+[a \\ b] 不支持多行公式（\\），一次只解析一行（位置 4，附近：a \\ b）

@@ -1,0 +1,62 @@
+# LaTeX 公式直接参与运算
+#
+#   aether run examples/latex_demo.ae
+#
+# 平时做数学是「读公式 → 手推导 → 写代码 → 数值验证」四步，每一步都要人肉翻译一次。
+# 这个示例把公式本身当成输入：LaTeX 源码读进来就是表达式树，化简、求导、证明、
+# 生成代码都在同一棵树上做，最后还能写回 LaTeX。
+
+import sym
+import latex
+import egraph
+import codegen
+
+print("=== 1. 读进来 ===")
+# 论文里常见的形式：分式、根式、希腊字母、函数
+src = r"\frac{1}{\sqrt{2\pi}\,\sigma} \exp\left(-\frac{(x-\mu)^2}{2\sigma^2}\right)"
+f = latex.parse(src)
+print("原文：", src)
+print("表达式：", f)
+
+print()
+print("=== 2. 求导（符号推导，不是数值近似） ===")
+# 先看一个干净的：exp(-x^2/2) 的导数是 -x*exp(-x^2/2)
+g = latex.parse(r"\exp\left(-\frac{x^2}{2}\right)")
+print("g  =", g)
+print("g' =", sym.diff(g, "x"))
+print("LaTeX：", latex.diff_latex(r"\exp\left(-\frac{x^2}{2}\right)", "x"))
+
+print()
+print("=== 3. 验证论文里的恒等式 ===")
+# 不用人眼看，交给 e-graph 做相等饱和：分配律、合并同类项、因式分解一起搜
+lhs = r"(a+b)^3"
+rhs = r"a^3 + 3a^2b + 3ab^2 + b^3"
+print(f"{lhs} = {rhs} ?", latex.prove_equal_latex(lhs, rhs))
+print(r"(a+b)^2 = a^2 + b^2 ?", latex.prove_equal_latex(r"(a+b)^2", r"a^2 + b^2"))
+print(r"(a+b)(a-b) = a^2 - b^2 ?", latex.prove_equal_latex(r"(a+b)(a-b)", r"a^2 - b^2"))
+
+print()
+print("=== 4. 代入与求值 ===")
+# 把 sigma 换成 1，再代 x 求值，最后与手算对照
+h = latex.subs_latex(src, {"sigma": "1", "mu": "0"})
+print("代入 sigma=1, mu=0：", h)
+env: dict[str, float] = {"x": 0.5, "pi": 3.141592653589793}
+value = latex.evaluate_latex(h, env)
+print(f"x=0.5 处：{value:.6f}")
+
+print()
+print("=== 5. 直接生成原生代码 ===")
+# 公式变成函数，再交给 codegen 生成 Aether 源码（设了 AETHER 就能编译成可执行文件）
+print(codegen.to_function(latex.parse(r"\frac{1}{1 + x^2}"), ["x"], "bump"))
+
+print()
+print("=== 6. 写回 LaTeX ===")
+# 化简后的结果可以直接贴回论文
+print(latex.simplify_latex(r"x + x + x - 2x"))
+print(latex.expand_latex(r"(x+y)^2"))
+print(latex.diff_latex(r"\sin^2 x \cos x", "x"))
+
+print()
+print("=== 7. 从 PDF / 网页复制来的 Unicode 公式也能读 ===")
+print(latex.parse("πr²"))
+print(latex.to_latex(latex.parse("x³ − 2x + 1")))

@@ -376,6 +376,16 @@ print(g([3.0]))                             # 16.0
   并通过代价提取把 `x*y + x*z` 因式分解成 `x*(y + z)`。
 - 还有 `codegen`：把表达式生成 Aether 源码（自动提取公共子表达式、`x^2` 换成 `x*x`、连偏导一起生成），
   再编译成原生可执行文件——同一份表达式既可符号推导，也可编译执行，结果由 `verify` 逐点比对。
+- 还有 `latex`：**直接读 LaTeX 源码**参与运算，结果再写回 LaTeX。论文里粘来一条公式就能求导、
+  证明恒等（`latex.prove_equal_latex`）、求值、生成原生函数；从 PDF 复制的 `πr²`、`x³ − 2x` 也能读。
+
+```python
+import latex
+
+latex.diff_latex(r"\exp\left(-\frac{x^2}{2}\right)", "x")          # -x \, \exp\left(-0.5x^{2}\right)
+latex.prove_equal_latex(r"(a+b)^3", r"a^3 + 3a^2b + 3ab^2 + b^3")     # true
+latex.to_latex(sym.expand(latex.parse(r"(x+y)^2")))                   # x^{2} + 2x \, y + y^{2}
+```
 
 见 [docs/数学库.md](docs/数学库.md)。
 
@@ -439,7 +449,7 @@ cd compiler && go test .
 | [标准库](docs/标准库.md) | 内置函数与所有标准库模块的 API |
 | [深度学习](docs/深度学习.md) | 张量、自动求导、nn / optim、GPU 与性能 |
 | [实现原理](docs/实现原理.md) | 编译器管线、运行时与代码生成 |
-| [数学库](docs/数学库.md) | 符号表达式、化简展开、求导、e-graph 相等饱和、生成原生代码 |
+| [数学库](docs/数学库.md) | 符号表达式、化简展开、求导、e-graph 相等饱和、生成原生代码、LaTeX 读写 |
 | [MiniJev / QwenJev](examples/minijev/README.md) | 用 Aether 从零训练决策模型与微调 Qwen3 |
 
 ## 当前限制

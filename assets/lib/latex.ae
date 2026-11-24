@@ -1,0 +1,993 @@
+# latex 模块：读取 LaTeX 数学源码，变成 sym.Expr 参与运算
+#
+# 这条链路和 git 的「读入 → 变换 → 写回」是一个意思：
+#
+#   LaTeX 源码  --parse-->  sym.Expr  --simplify/expand/diff/egraph-->  sym.Expr  --to_latex-->  LaTeX 源码
+#
+# 于是可以：
+#   - 把论文里的公式粘进来做化简、展开、求导，结果还是 LaTeX，能直接贴回去
+#   - 判断两条 LaTeX 是否恒等（交给 egraph 做相等饱和，而不是靠人眼看）
+#   - 把 LaTeX 公式变成数值函数（sym.compile_expr）或原生代码（codegen）
+#
+#   import latex
+#   e = latex.parse(r"\frac{x^2 + 2x + 1}{x + 1}")
+#   print(latex.to_latex(sym.expand(e)))
+#   print(latex.diff_latex(r"\sin^2 x \cos x", "x"))
+#   print(latex.evaluate_latex(r"\sqrt{16} + \frac{1}{2}", {}))
+#
+# 支持的是 LaTeX 数学模式的常用子集（四则、幂、括号、分式、根式、绝对值、希腊字母、
+# 三角与指数对数函数、隐式乘法、上下标）。不支持的写法会抛 LatexError 并指出位置，
+# 而不是悄悄给出错误结果。
+
+import math
+import sym
+import egraph
+
+# ===== 错误 =====
+
+# LaTeX 解析错误。pos 是出错位置（字符下标，从 0 开始），message 说明原因。
+class LatexError(ValueError):
+    pos: int
+
+    def __init__(self, message: str, pos: int):
+        super().__init__(message)
+        self.pos = pos
+
+# ===== 词表 =====
+
+# 希腊字母：变量名 -> LaTeX 命令。两个方向共用这一张表。
+GREEK: dict[str, str] = {
+    "alpha": "\\alpha",
+    "beta": "\\beta",
+    "gamma": "\\gamma",
+    "delta": "\\delta",
+    "epsilon": "\\epsilon",
+    "varepsilon": "\\varepsilon",
+    "zeta": "\\zeta",
+    "eta": "\\eta",
+    "theta": "\\theta",
+    "vartheta": "\\vartheta",
+    "iota": "\\iota",
+    "kappa": "\\kappa",
+    "lambda": "\\lambda",
+    "mu": "\\mu",
+    "nu": "\\nu",
+    "xi": "\\xi",
+    "pi": "\\pi",
+    "rho": "\\rho",
+    "sigma": "\\sigma",
+    "tau": "\\tau",
+    "upsilon": "\\upsilon",
+    "phi": "\\phi",
+    "varphi": "\\varphi",
+    "chi": "\\chi",
+    "psi": "\\psi",
+    "omega": "\\omega",
+    "Gamma": "\\Gamma",
+    "Delta": "\\Delta",
+    "Theta": "\\Theta",
+    "Lambda": "\\Lambda",
+    "Xi": "\\Xi",
+    "Pi": "\\Pi",
+    "Sigma": "\\Sigma",
+    "Phi": "\\Phi",
+    "Psi": "\\Psi",
+    "Omega": "\\Omega",
+}
+
+# 函数命令 -> sym 里的函数名。\ln 与 \log 都映射到自然对数（sym.log 是 ln）。
+FUNCS: dict[str, str] = {
+    "sin": "sin",
+    "cos": "cos",
+    "tan": "tan",
+    "arcsin": "asin",
+    "arccos": "acos",
+    "arctan": "atan",
+    "sinh": "sinh",
+    "cosh": "cosh",
+    "tanh": "tanh",
+    "exp": "exp",
+    "log": "log",
+    "ln": "log",
+}
+
+# 明确不支持、但很常见的命令：给出针对性的提示，而不是笼统的「未知命令」
+def _unsupported_hint(name: str) -> str?:
+    if name == "sum" or name == "prod" or name == "int" or name == "iint" or name == "oint":
+        return "暂不支持求和/连乘/积分记号；请先展开成有限项再用 parse"
+    if name == "lim":
+        return "暂不支持极限；请先确定收敛形式再 parse"
+    if name == "partial":
+        return "暂不支持偏导记号；用 latex.diff_latex(公式, 变量) 求偏导"
+    if name == "infty":
+        return "暂不支持无穷大；它不能参与符号运算"
+    if name == "cdot" or name == "times" or name == "div" or name == "ast":
+        return "乘除运算符的位置不对（前面缺少运算对象）"
+    if name == "quad" or name == "qquad":
+        return "间距命令出现在不该出现的位置"
+    return null
+
+# 从 PDF / 网页复制公式时常见的 Unicode 数学字符：先归一成 LaTeX 命令，
+# 免得用户手工改。上标单独处理（连续的 ²³ 要合成 ^{23}）。
+UNICODE: dict[str, str] = {
+    "−": "-",
+    "×": "\\times ",
+    "·": "\\cdot ",
+    "÷": "\\div ",
+    "√": "\\sqrt ",
+    "π": "\\pi ",
+    "α": "\\alpha ",
+    "β": "\\beta ",
+    "γ": "\\gamma ",
+    "δ": "\\delta ",
+    "ε": "\\varepsilon ",
+    "θ": "\\theta ",
+    "λ": "\\lambda ",
+    "μ": "\\mu ",
+    "ν": "\\nu ",
+    "ξ": "\\xi ",
+    "ρ": "\\rho ",
+    "σ": "\\sigma ",
+    "τ": "\\tau ",
+    "φ": "\\varphi ",
+    "χ": "\\chi ",
+    "ψ": "\\psi ",
+    "ω": "\\omega ",
+    "Γ": "\\Gamma ",
+    "Δ": "\\Delta ",
+    "Θ": "\\Theta ",
+    "Λ": "\\Lambda ",
+    "Ξ": "\\Xi ",
+    "Σ": "\\Sigma ",
+    "Φ": "\\Phi ",
+    "Ψ": "\\Psi ",
+    "Ω": "\\Omega ",
+    "∞": "\\infty ",
+}
+
+SUP: dict[str, str] = {
+    "⁰": "0",
+    "¹": "1",
+    "²": "2",
+    "³": "3",
+    "⁴": "4",
+    "⁵": "5",
+    "⁶": "6",
+    "⁷": "7",
+    "⁸": "8",
+    "⁹": "9",
+    "⁻": "-",
+    "⁺": "+",
+}
+
+# 把 Unicode 数学字符换成等价的 LaTeX
+def _normalize(text: str) -> str:
+    out = ""
+    i = 0
+    n = len(text)
+    while i < n:
+        c = text[i]
+        sup = SUP.get(str(c))
+        if sup != null:
+            run = ""
+            while i < n:
+                d = SUP.get(str(text[i]))
+                if d == null:
+                    break
+                run += d
+                i += 1
+            out += "^{" + run + "}"
+            continue
+        m = UNICODE.get(str(c))
+        if m != null:
+            out += m
+            i += 1
+            continue
+        out += str(c)
+        i += 1
+    return out
+
+# 渲染时函数名对应的 LaTeX 命令
+def _func_cmd(name: str) -> str:
+    if name == "asin":
+        return "\\arcsin"
+    if name == "acos":
+        return "\\arccos"
+    if name == "atan":
+        return "\\arctan"
+    if name == "log":
+        return "\\ln"
+    return "\\" + name
+
+# ===== 解析 =====
+
+# 解析一段 LaTeX 数学表达式，返回 sym.Expr。
+# 会自动去掉外层 $...$、$$...$$、\[...\]、\(...\)。
+def parse(text: str) -> sym.Expr:
+    src = _normalize(_strip_delimiters(text))
+    if _find_top_level(src, '=') >= 0:
+        raise LatexError("这段 LaTeX 里有等号，是等式：用 latex.parse_equation 取两侧", 0)
+    p = _Parser(src)
+    return p.parse()
+
+# 解析等式（或方程），返回左右两侧的表达式
+def parse_equation(text: str) -> (sym.Expr, sym.Expr):
+    src = _normalize(_strip_delimiters(text))
+    idx = _find_top_level(src, '=')
+    if idx < 0:
+        raise LatexError("没有找到等号，这不是等式", 0)
+    left = parse(src[:idx])
+    right = parse(src[idx + 1:])
+    return (left, right)
+
+# 去掉外层数学定界符（$…$、$$…$$、\[…\]、\(…\)）
+def _strip_delimiters(text: str) -> str:
+    s = text.strip()
+    changed = true
+    while changed:
+        changed = false
+        s = s.strip()
+        if len(s) >= 4 and s.startswith("$$") and s.endswith("$$"):
+            s = s[2:len(s) - 2].strip()
+            changed = true
+            continue
+        if len(s) >= 2 and s.startswith("$") and s.endswith("$"):
+            s = s[1:len(s) - 1].strip()
+            changed = true
+            continue
+        if len(s) >= 4 and s.startswith("\\[") and s.endswith("\\]"):
+            s = s[2:len(s) - 2].strip()
+            changed = true
+            continue
+        if len(s) >= 4 and s.startswith("\\(") and s.endswith("\\)"):
+            s = s[2:len(s) - 2].strip()
+            changed = true
+            continue
+    return s
+
+# 在花括号之外找到 target 字符（用来切分等式的两侧）
+def _find_top_level(src: str, target: char) -> int:
+    depth = 0
+    i = 0
+    n = len(src)
+    while i < n:
+        c = src[i]
+        if c == '\\':
+            i += 1
+            while i < n and src[i].isalpha():
+                i += 1
+            continue
+        if c == '{':
+            depth += 1
+        elif c == '}':
+            depth -= 1
+        elif c == target and depth == 0:
+            return i
+        i += 1
+    return -1
+
+# 递归下降解析器。直接读字符，不做单独的记号流——LaTeX 的语法太依赖上下文。
+class _Parser:
+    src: str
+    n: int
+    i: int
+
+    def __init__(self, src: str):
+        self.src = src
+        self.n = len(src)
+        self.i = 0
+
+    # 报错：带上位置和出错附近的一小段原文，方便定位
+    def fail(self, msg: str):
+        lo = self.i - 12
+        if lo < 0:
+            lo = 0
+        hi = self.i + 12
+        if hi > self.n:
+            hi = self.n
+        raise LatexError(f"{msg}（位置 {self.i}，附近：{self.src[lo:hi]}）", self.i)
+
+    # ---- 字符层 ----
+
+    def peek(self) -> char?:
+        if self.i >= self.n:
+            return null
+        return self.src[self.i]
+
+    def slice(self, k: int) -> str:
+        return self.src[self.i:self.i + k]
+
+    def eat(self, tok: str) -> bool:
+        if self.slice(len(tok)) == tok:
+            self.i += len(tok)
+            return true
+        return false
+
+    def expect(self, tok: str, hint: str):
+        if self.eat(tok) == false:
+            self.fail(hint)
+
+    # 跳过空白与间距命令（\, \; \: \! \quad \qquad 与 ~）
+    def skip_ws(self):
+        while self.i < self.n:
+            c = self.src[self.i]
+            if c == ' ' or c == '\t' or c == '\n' or c == '\r' or c == '~':
+                self.i += 1
+                continue
+            if c == '\\':
+                if self.eat("\\,") or self.eat("\\;") or self.eat("\\:") or self.eat("\\!"):
+                    continue
+                if self.eat("\\ ") or self.eat("\\quad") or self.eat("\\qquad"):
+                    continue
+            break
+
+    # 读一个命令名（反斜杠后面的字母）。\{ \\ 这类单字符命令返回那个字符。
+    def read_cmd(self) -> str:
+        if self.peek() != '\\':
+            self.fail("这里应该是一个命令")
+        self.i += 1
+        start = self.i
+        while self.i < self.n and self.src[self.i].isalpha():
+            self.i += 1
+        if self.i == start:
+            c = self.peek()
+            if c == null:
+                self.fail("反斜杠后面没有内容")
+            self.i += 1
+            return str(c)
+        return self.src[start:self.i]
+
+    # 当前位置的 {...} 组是不是空的（{} 或 { }）
+    def group_is_empty(self) -> bool:
+        if self.peek() != '{':
+            return false
+        j = self.i + 1
+        while j < self.n and (self.src[j] == ' ' or self.src[j] == '\t'):
+            j += 1
+        if j < self.n and self.src[j] == '}':
+            return true
+        return false
+
+    # 读一个 {...} 组的原文（不含外层花括号，允许嵌套）
+    def read_group_text(self) -> str:
+        self.skip_ws()
+        self.expect("{", "这里需要 {...}")
+        start = self.i
+        depth = 1
+        while self.i < self.n:
+            c = self.src[self.i]
+            if c == '{':
+                depth += 1
+            elif c == '}':
+                depth -= 1
+                if depth == 0:
+                    text = self.src[start:self.i]
+                    self.i += 1
+                    return text
+            self.i += 1
+        self.fail("花括号没有闭合")
+        return ""
+
+    # ---- 语法层 ----
+
+    def parse(self) -> sym.Expr:
+        self.skip_ws()
+        if self.i >= self.n:
+            self.fail("表达式为空")
+        e = self.parse_expr()
+        self.skip_ws()
+        if self.i < self.n:
+            self.fail("表达式已经结束，但这里还有多余的内容")
+        return e
+
+    # 和：加减，左结合
+    def parse_expr(self) -> sym.Expr:
+        e = self.parse_term(false)
+        while true:
+            self.skip_ws()
+            c = self.peek()
+            if c == null:
+                break
+            if c == '+':
+                self.i += 1
+                e = sym.add(e, self.parse_term(false))
+                continue
+            if c == '-':
+                self.i += 1
+                e = sym.add(e, sym.neg(self.parse_term(false)))
+                continue
+            break
+        return e
+
+    # 积：显式乘除 + 隐式乘法（2x、x y、(a+b)(a-b)、2\frac{1}{2}），左结合。
+    # stop_at_fn 为真时，遇到函数命令就停下——用于函数的自变量，让 \sin x \cos x 是乘积。
+    def parse_term(self, stop_at_fn: bool) -> sym.Expr:
+        e = self.parse_unary()
+        while true:
+            self.skip_ws()
+            c = self.peek()
+            if c == null:
+                break
+            if c == '*':
+                self.i += 1
+                e = sym.mul(e, self.parse_unary())
+                continue
+            if c == '/':
+                self.i += 1
+                e = sym.div(e, self.parse_unary())
+                continue
+            if c == '\\':
+                if self.eat("\\cdot") or self.eat("\\times") or self.eat("\\ast"):
+                    e = sym.mul(e, self.parse_unary())
+                    continue
+                if self.eat("\\div"):
+                    e = sym.div(e, self.parse_unary())
+                    continue
+                if stop_at_fn and self.cmd_is_function():
+                    break
+            if self.can_start_atom():
+                e = sym.mul(e, self.parse_unary())
+                continue
+            break
+        return e
+
+    # 一元正负号
+    def parse_unary(self) -> sym.Expr:
+        self.skip_ws()
+        c = self.peek()
+        if c == '+':
+            self.i += 1
+            return self.parse_unary()
+        if c == '-':
+            self.i += 1
+            return sym.neg(self.parse_unary())
+        return self.parse_power()
+
+    # 幂与下标：右结合，x^2^3 是 x^(2^3)
+    def parse_power(self) -> sym.Expr:
+        base = self.parse_atom()
+        while true:
+            self.skip_ws()
+            c = self.peek()
+            if c == '^':
+                self.i += 1
+                e = self.parse_unary()
+                base = sym.power(base, e)
+                continue
+            if c == '_':
+                self.i += 1
+                sub = self.read_subscript()
+                if base.kind != "var":
+                    self.fail("下标只能跟变量名连用（例如 x_1）")
+                base = sym.var(base.name + "_" + sub)
+                continue
+            break
+        return base
+
+    # 读下标：x_1 得到 "1"，x_{i+1} 得到 "{i+1}"（后者作为整体变量名的后缀保留）
+    def read_subscript(self) -> str:
+        self.skip_ws()
+        text = ""
+        if self.peek() == '{':
+            text = self.read_group_text().strip()
+        else:
+            c = self.peek()
+            if c == null:
+                self.fail("下标缺少内容")
+            self.i += 1
+            text = str(c!)
+        if text == "":
+            self.fail("下标缺少内容")
+        if _is_plain_name(text):
+            return text
+        return "{" + text + "}"
+
+    def parse_atom(self) -> sym.Expr:
+        self.skip_ws()
+        c = self.peek()
+        if c == null:
+            self.fail("这里需要一个表达式")
+        if c == '{':
+            if self.group_is_empty():
+                self.fail("花括号组是空的")
+            self.i += 1
+            e = self.parse_expr()
+            self.skip_ws()
+            self.expect("}", "花括号没有闭合")
+            return e
+        if c == '(':
+            self.i += 1
+            e = self.parse_expr()
+            self.skip_ws()
+            self.expect(")", "圆括号没有闭合")
+            return e
+        if c == '[':
+            self.i += 1
+            e = self.parse_expr()
+            self.skip_ws()
+            self.expect("]", "方括号没有闭合")
+            return e
+        if c == '|':
+            self.i += 1
+            e = self.parse_expr()
+            self.skip_ws()
+            self.expect("|", "绝对值缺少结尾的 |")
+            return sym.fn("abs", e)
+        if c == '\\':
+            return self.parse_command()
+        if c!.isdigit() or c == '.':
+            return self.parse_number()
+        if c!.isalpha():
+            return self.parse_identifier()
+        self.fail(f"无法识别的字符 {c}")
+        return sym.num(0.0)
+
+    def parse_number(self) -> sym.Expr:
+        start = self.i
+        seen_dot = false
+        while self.i < self.n:
+            ch = self.src[self.i]
+            if ch.isdigit():
+                self.i += 1
+                continue
+            if ch == '.' and seen_dot == false:
+                seen_dot = true
+                self.i += 1
+                continue
+            break
+        text = self.src[start:self.i]
+        if text == ".":
+            self.fail("这里需要一个数字")
+        return sym.num(float(text))
+
+    # 不带反斜杠的标识符：已知函数名按函数处理，已知常量名（pi 等）按变量处理，
+    # 其余每个字母各是一个变量（ab 就是 a*b）。
+    def parse_identifier(self) -> sym.Expr:
+        start = self.i
+        while self.i < self.n and self.src[self.i].isalpha():
+            self.i += 1
+        word = self.src[start:self.i]
+        fname = FUNCS.get(word)
+        if fname != null:
+            return self.parse_fn_body(fname)
+        greek = GREEK.get(word)
+        if greek != null:
+            return sym.var(word)
+        # LaTeX 里一个字母就是一个变量：ab 是 a*b。这里只吃第一个字母，
+        # 剩下的交给外面的乘法循环，这样 ab^2 是 a*b^2（幂只作用于 b）。
+        self.i = start + 1
+        return sym.var(str(word[0]))
+
+    def parse_command(self) -> sym.Expr:
+        name = self.read_cmd()
+        if name == "frac" or name == "dfrac" or name == "tfrac" or name == "cfrac":
+            a = self.parse_frac_arg()
+            b = self.parse_frac_arg()
+            return sym.div(a, b)
+        if name == "sqrt":
+            self.skip_ws()
+            if self.peek() == '[':
+                self.i += 1
+                degree = self.parse_expr()
+                self.skip_ws()
+                self.expect("]", "根指数缺少 ]")
+                arg = self.parse_arg()
+                return sym.power(arg, sym.div(sym.num(1.0), degree))
+            arg = self.parse_arg()
+            e = sym.fn("sqrt", arg)
+            if arg.kind == "num":
+                e = sym.simplify(e)
+            return e
+        if name == "left":
+            return self.parse_left_right()
+        if name == "right":
+            self.fail("这里出现了多余的 \\right")
+        if name == "operatorname" or name == "mathrm" or name == "mathit" or name == "mathnormal":
+            text = self.read_group_text().strip()
+            fname = FUNCS.get(text)
+            if fname != null:
+                return self.parse_fn_body(fname)
+            return sym.var(_name_from_text(text))
+        if name == "text" or name == "textrm" or name == "textbf":
+            text = self.read_group_text().strip()
+            return sym.var(_name_from_text(text))
+        if name == "displaystyle" or name == "textstyle" or name == "scriptstyle":
+            return self.parse_atom()
+        if name == "lvert":
+            e = self.parse_expr()
+            self.skip_ws()
+            if self.eat("\\rvert") == false:
+                self.expect("|", "绝对值缺少结尾的 |")
+            return sym.fn("abs", e)
+        if name == "vert" or name == "abs":
+            return sym.fn("abs", self.parse_arg())
+        greek = GREEK.get(name)
+        if greek != null:
+            return sym.var(name)
+        fname = FUNCS.get(name)
+        if fname != null:
+            return self.parse_fn_body(fname)
+        if name == "rvert" or name == "rangle" or name == "rfloor" or name == "rceil" or name == "}":
+            self.fail(f"多余的右括号 \\{name}")
+        if name == "\\":
+            self.fail("不支持多行公式（\\\\），一次只解析一行")
+        hint = _unsupported_hint(name)
+        if hint != null:
+            self.fail(hint)
+        self.fail(f"不支持的 LaTeX 命令 \\{name}")
+        return sym.num(0.0)
+
+    # 函数的自变量。指数写在函数上时按 LaTeX 惯例处理：\sin^2 x 是 (sin x)^2。
+    def parse_fn_body(self, fname: str) -> sym.Expr:
+        self.skip_ws()
+        exp: sym.Expr? = null
+        if self.peek() == '^':
+            self.i += 1
+            exp = self.parse_unary()
+        self.skip_ws()
+        c = self.peek()
+        if c == null:
+            self.fail(f"函数 {fname} 缺少自变量")
+        arg: sym.Expr
+        if c == '(' or c == '{':
+            # 括号组作为整体：\sin(x)y 是 sin(x)*y
+            arg = self.parse_atom()
+        elif c == '\\' and self.slice(5) == "\\left":
+            # \left( … \right) 同理：\sin\left(x\right)^2 是 (sin x)^2，不是 sin(x^2)
+            arg = self.parse_atom()
+        else:
+            # 其余按「不含下一个函数的乘积」读：
+            # \sin 2x 是 sin(2x)，\sin ab 是 sin(ab)，\sin x\cos x 是乘积
+            arg = self.parse_term(true)
+        e = sym.fn(fname, arg)
+        if arg.kind == "num":
+            e = sym.simplify(e)
+        if exp != null:
+            e = sym.power(e, exp)
+        return e
+
+    # \frac 的参数：花括号组照常；单个数字只取一位（\frac12 是 1/2）
+    def parse_frac_arg(self) -> sym.Expr:
+        self.skip_ws()
+        c = self.peek()
+        if c == null:
+            self.fail("\\frac 缺少参数")
+        if self.group_is_empty():
+            self.fail("\\frac 的参数不能为空")
+        if c == '{':
+            return self.parse_atom()
+        if c!.isdigit():
+            self.i += 1
+            return sym.num(float(str(c)))
+        return self.parse_unary()
+
+    # \sqrt 等的参数：花括号组或一个原子（保持 25 这样多位的数字完整）
+    def parse_arg(self) -> sym.Expr:
+        self.skip_ws()
+        if self.i >= self.n:
+            self.fail("缺少参数")
+        if self.group_is_empty():
+            self.fail("参数不能为空")
+        if self.peek() == '{':
+            return self.parse_atom()
+        return self.parse_unary()
+
+    # \left( ... \right)
+    def parse_left_right(self) -> sym.Expr:
+        open_delim = self.read_delim()
+        close_delim = _matching_delim(open_delim)
+        e = self.parse_expr()
+        self.skip_ws()
+        if self.eat("\\right") == false:
+            self.fail("\\left 缺少配对的 \\right")
+        got = self.read_delim()
+        if got != close_delim:
+            self.fail(f"括号不配对：左边是 {open_delim}，右边是 {got}")
+        if open_delim == "|":
+            return sym.fn("abs", e)
+        return e
+
+    def read_delim(self) -> str:
+        self.skip_ws()
+        c = self.peek()
+        if c == null:
+            self.fail("缺少括号")
+        if c == '\\':
+            name = self.read_cmd()
+            if name == "{":
+                return "{"
+            if name == "}":
+                return "}"
+            if name == "|" or name == "lvert" or name == "rvert" or name == "vert":
+                return "|"
+            if name == "langle":
+                return "<"
+            if name == "rangle":
+                return ">"
+            if name == "lfloor" or name == "lceil":
+                return "L"
+            if name == "rfloor" or name == "rceil":
+                return "R"
+            self.fail(f"不支持的括号 \\{name}")
+        self.i += 1
+        if c == '(' or c == ')' or c == '[' or c == ']' or c == '|' or c == '.':
+            return str(c)
+        self.fail(f"不支持的括号 {c}")
+        return ""
+
+    # 这个位置能不能开始一个原子（用于判断隐式乘法）
+    def can_start_atom(self) -> bool:
+        c = self.peek()
+        if c == null:
+            return false
+        if c.isalnum() or c == '.':
+            return true
+        if c == '(' or c == '[' or c == '{' or c == '|':
+            return true
+        if c == '\\':
+            if self.slice(6) == "\\right":
+                return false
+            if self.slice(4) == "\\end":
+                return false
+            return true
+        return false
+
+    # 当前位置是不是一个函数命令（不消费字符）
+    def cmd_is_function(self) -> bool:
+        save = self.i
+        if self.peek() != '\\':
+            return false
+        self.i += 1
+        start = self.i
+        while self.i < self.n and self.src[self.i].isalpha():
+            self.i += 1
+        name = self.src[start:self.i]
+        self.i = save
+        return FUNCS.get(name) != null
+
+# 括号的配对表
+def _matching_delim(open_delim: str) -> str:
+    if open_delim == "(":
+        return ")"
+    if open_delim == "[":
+        return "]"
+    if open_delim == "{":
+        return "}"
+    if open_delim == "<":
+        return ">"
+    if open_delim == "L":
+        return "R"
+    return open_delim   # | 与不可见括号 .
+
+# 下标或 \mathrm 里的名字是否只由字母数字组成
+def _is_plain_name(text: str) -> bool:
+    if text == "":
+        return false
+    for c in text:
+        if c.isalnum() or c == '_':
+            continue
+        return false
+    return true
+
+# \mathrm{...} 里的文本 -> 变量名。多字母时保留为一个名字（\mathrm{d}x 是 d*x，
+# \operatorname{rank} 是 rank）。
+def _name_from_text(text: str) -> str:
+    clean = text.replace(" ", "").replace("\t", "")
+    if clean == "":
+        raise LatexError("\\mathrm{} 里的名字为空", 0)
+    return clean
+
+# ===== 渲染回 LaTeX =====
+
+const _PREC_ADD = 1
+const _PREC_MUL = 2
+const _PREC_POW = 3
+
+# 把表达式渲染成 LaTeX 源码
+def to_latex(e: sym.Expr, outer: int = 0) -> str:
+    if e.kind == "num":
+        s = sym.fmt(e.v)
+        if e.v < 0 and outer > _PREC_MUL:
+            return "\\left(" + s + "\\right)"
+        return s
+    if e.kind == "var":
+        return _var_latex(e.name)
+    if e.kind == "add":
+        return _latex_sum(e, outer)
+    if e.kind == "mul":
+        return _latex_product(e, outer)
+    if e.kind == "div":
+        return "\\frac{" + to_latex(e.kids[0], 0) + "}{" + to_latex(e.kids[1], 0) + "}"
+    if e.kind == "pow":
+        base = to_latex(e.kids[0], _PREC_POW)
+        if e.kids[0].kind == "div":
+            base = "\\left(" + base + "\\right)"
+        return base + "^{" + to_latex(e.kids[1], 0) + "}"
+    if e.kind == "fn":
+        return _latex_fn(e)
+    return "?"
+
+# 变量名 -> LaTeX。希腊字母还原成命令，带下标的名字还原成 x_{1}，
+# 多字母的普通名字用 \mathrm 包起来免得被当成多个变量相乘。
+def _var_latex(name: str) -> str:
+    greek = GREEK.get(name)
+    if greek != null:
+        return greek
+    k = name.find("_")
+    if k > 0:
+        head = name[:k]
+        rest = name[k:]
+        if rest.startswith("_{"):
+            return _var_latex(head) + rest
+        return _var_latex(head) + "_{" + rest[1:] + "}"
+    k = name.find("{")
+    if k > 0:
+        return _var_latex(name[:k]) + name[k:]
+    if len(name) > 1:
+        return "\\mathrm{" + name + "}"
+    return name
+
+def _latex_fn(e: sym.Expr) -> str:
+    if e.name == "sqrt":
+        return "\\sqrt{" + to_latex(e.kids[0], 0) + "}"
+    if e.name == "abs":
+        return "\\left|" + to_latex(e.kids[0], 0) + "\\right|"
+    return _func_cmd(e.name) + "\\left(" + to_latex(e.kids[0], 0) + "\\right)"
+
+def _latex_sum(e: sym.Expr, outer: int) -> str:
+    terms: list[sym.Expr] = []
+    for k in e.kids:
+        terms.append(k)
+    # 与 sym.render 一致：以负项开头时把正的常数项提到最前面
+    neg0, pos0 = _split_sign(terms[0])
+    if neg0:
+        for i in range(1, len(terms)):
+            neg_i, pos_i = _split_sign(terms[i])
+            if neg_i == false and pos_i.kind == "num":
+                moved = terms[i]
+                terms.pop(i)
+                terms.insert(0, moved)
+                break
+    out = ""
+    for i in range(len(terms)):
+        negative, positive = _split_sign(terms[i])
+        body = to_latex(positive, _PREC_MUL)
+        if i == 0:
+            out += ("-" if negative else "") + body
+        else:
+            out += (" - " if negative else " + ") + body
+    if outer > _PREC_ADD:
+        return "\\left(" + out + "\\right)"
+    return out
+
+def _latex_product(e: sym.Expr, outer: int) -> str:
+    coef = 1.0
+    start = 0
+    if e.kids[0].kind == "num" and len(e.kids) > 1:
+        coef = e.kids[0].v
+        start = 1
+    num_parts: list[str] = []
+    den_parts: list[str] = []
+    for i in range(start, len(e.kids)):
+        k = e.kids[i]
+        if k.kind == "div":
+            num_parts.append(to_latex(k.kids[0], _PREC_MUL))
+            den_parts.append(to_latex(k.kids[1], _PREC_MUL))
+            continue
+        if k.kind == "pow" and k.kids[1].kind == "num" and k.kids[1].v < 0:
+            # 负指数写成除法：x^-2 变成 1/x^2
+            base = k.kids[0]
+            p = -k.kids[1].v
+            if math.fabs(p - 1.0) < 1e-15:
+                den_parts.append(to_latex(base, _PREC_MUL))
+            else:
+                den_parts.append(to_latex(sym.power(base, sym.num(p)), _PREC_MUL))
+            continue
+        num_parts.append(to_latex(k, _PREC_MUL))
+    sign = ""
+    if coef < 0:
+        sign = "-"
+        coef = -coef
+    numer = ""
+    if math.fabs(coef - 1.0) > 1e-15:
+        numer = sym.fmt(coef)
+        rest = _join_factors(num_parts)
+        if rest == "":
+            return sign + numer
+        if _starts_like_factor(rest):
+            numer += rest
+        else:
+            numer += " \\cdot " + rest
+    else:
+        numer = _join_factors(num_parts)
+    if len(den_parts) > 0:
+        return sign + "\\frac{" + numer + "}{" + _join_factors(den_parts) + "}"
+    s = sign + numer
+    if outer > _PREC_MUL:
+        return "\\left(" + s + "\\right)"
+    return s
+
+# 乘积的因子之间：字母接字母用细间距（x\,y、d\,y），其余用 \cdot（显式、能被自己解析回来）
+def _join_factors(parts: list[str]) -> str:
+    out = ""
+    for i in range(len(parts)):
+        if i > 0:
+            prev = parts[i - 1]
+            if _ends_like_name(prev) and _starts_like_factor(parts[i]):
+                out += " \\, "
+            else:
+                out += " \\cdot "
+        out += parts[i]
+    return out
+
+def _ends_like_name(s: str) -> bool:
+    if s == "":
+        return false
+    c = s[len(s) - 1]
+    if c.isalpha():
+        return true
+    return c == '}' 
+
+# 以字母或命令开头（这样 2x、2\sin 不用写乘号）
+def _starts_like_factor(s: str) -> bool:
+    if s == "":
+        return false
+    c = s[0]
+    return c.isalpha() or c == '\\'
+
+# 拆出符号：返回 (是否负, 正的符号部分)
+def _split_sign(e: sym.Expr) -> (bool, sym.Expr):
+    if e.kind == "num":
+        if e.v < 0:
+            return (true, sym.num(-e.v))
+        return (false, e)
+    if e.kind == "mul" and len(e.kids) > 1:
+        first = e.kids[0]
+        if first.kind == "num" and first.v < 0:
+            # 系数要保留：-2x 的正部是 2x，不是 x
+            rest: list[sym.Expr] = [sym.num(-first.v)]
+            for i in range(1, len(e.kids)):
+                rest.append(e.kids[i])
+            return (true, _mul_list(rest))
+    return (false, e)
+
+def _mul_list(xs: list[sym.Expr]) -> sym.Expr:
+    if len(xs) == 0:
+        return sym.num(1.0)
+    out = xs[0]
+    for i in range(1, len(xs)):
+        out = sym.mul(out, xs[i])
+    return out
+
+# ===== 直接可用的运算 =====
+
+# 化简后重新渲染成 LaTeX
+def simplify_latex(text: str) -> str:
+    return to_latex(sym.simplify(parse(text)))
+
+# 展开后重新渲染成 LaTeX
+def expand_latex(text: str) -> str:
+    return to_latex(sym.expand(parse(text)))
+
+# 求导，返回 LaTeX
+def diff_latex(text: str, x: str) -> str:
+    return to_latex(sym.diff(parse(text), x))
+
+# 代入（值也是 LaTeX），返回 LaTeX
+def subs_latex(text: str, values: dict[str, str]) -> str:
+    m: dict[str, sym.Expr] = {}
+    for k in values.keys():
+        m[k] = parse(values[k])
+    return to_latex(sym.subs(parse(text), m))
+
+# 按环境求值
+def evaluate_latex(text: str, env: dict[str, float]) -> float:
+    return sym.evaluate(parse(text), env)
+
+# 两条 LaTeX 是否化为同一规范形式
+def equals_latex(a: str, b: str) -> bool:
+    return sym.equals(parse(a), parse(b))
+
+# 用 e-graph 证明两条 LaTeX 恒等（比 equals 更强：允许绕路的重写）
+def prove_equal_latex(a: str, b: str, iterations: int = 40) -> bool:
+    return egraph.prove_equal(parse(a), parse(b), iterations)

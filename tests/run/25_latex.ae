@@ -1,0 +1,98 @@
+# latex 模块：读取 LaTeX 源码参与符号运算，并能把结果写回 LaTeX
+import sym
+import latex
+import math
+import egraph
+import codegen
+
+print("== 解析 ==")
+print(latex.parse(r"2x + 3y"))
+print(latex.parse(r"(a+b)(a-b)"))
+print(latex.parse(r"\frac{x^2 - 1}{x - 1}"))
+print(latex.parse(r"\frac{1}{2} x"))
+print(latex.parse(r"2\pi r^2"))
+print(latex.parse(r"\sqrt[3]{27} + \sqrt{16}"))
+print(latex.parse(r"\left| x - y \right|"))
+print(latex.parse(r"\sin^2 x + \cos^2 x"))
+print(latex.parse(r"\sin 2x"))
+print(latex.parse(r"\sin x \cos x"))
+print(latex.parse(r"\arctan\frac{x}{2}"))
+print(latex.parse(r"\ln x + \log y"))
+print(latex.parse(r"ab^2"))
+print(latex.parse(r"\sin ab"))
+
+print("== 写回 LaTeX ==")
+print(latex.to_latex(latex.parse(r"\frac{x^2 - 1}{x - 1}")))
+print(latex.to_latex(latex.parse(r"(a+b)^2")))
+print(latex.to_latex(latex.parse(r"\frac{1}{2} x")))
+print(latex.to_latex(latex.parse(r"\alpha x_1 + \pi")))
+print(latex.to_latex(latex.parse(r"y_{i+1}")))
+print(latex.to_latex(latex.parse(r"x^3 - 2x + 1")))
+
+print("== 运算 ==")
+print(latex.expand_latex(r"(a+b)^3"))
+print(latex.simplify_latex(r"x + x + x"))
+print(latex.diff_latex(r"x^3 + 3x", "x"))
+print(latex.diff_latex(r"\sin^2 x \cos x", "x"))
+print(latex.subs_latex(r"x^2 + y", {"x": r"a + b"}))
+print(latex.evaluate_latex(r"\frac{1}{2} x^2 + \sqrt{x}", {"x": 9.0}))
+print(latex.evaluate_latex(r"\pi r^2", {"r": 2.0, "pi": math.pi}))
+
+print("== 恒等 ==")
+print(latex.equals_latex(r"(a+b)^2", r"a^2 + 2ab + b^2"))
+print(latex.equals_latex(r"(a+b)^2", r"a^2 + b^2"))
+print(latex.prove_equal_latex(r"(a+b)^2", r"a^2 + 2ab + b^2"))
+print(latex.prove_equal_latex(r"(a+b)(a-b)", r"a^2 - b^2"))
+print(latex.prove_equal_latex(r"\sin^2 x + \cos^2 x", r"1"))
+
+print("== 等号两侧 ==")
+l, r = latex.parse_equation(r"\frac{1}{2} x + 1 = 3")
+print(l, "|", r)
+
+print("== Unicode 输入 ==")
+print(latex.parse("x² + 2x + 1"))
+print(latex.parse("πr²"))
+print(latex.parse("√(x+1)"))
+print(latex.to_latex(latex.parse("x³y²")))
+
+print("== 往返一致 ==")
+sources: list[str] = [
+    r"x",
+    r"2\pi r",
+    r"\frac{a+b}{c+d}",
+    r"(x+1)(x-2)(x+3)",
+    r"\sqrt{x^{2}+y^{2}}",
+    r"\left[\frac{1}{x}\right]^{2}",
+    r"\sin x \cos x",
+    r"\left| x - y \right|",
+    r"\mathrm{rank} + x_{1} + y_{i+1}",
+    r"\frac{\mathrm{d}y}{\mathrm{d}x}",
+]
+ok = 0
+for src in sources:
+    e = latex.parse(src)
+    back = latex.parse(latex.to_latex(e))
+    if sym.equals(e, back):
+        ok = ok + 1
+print(f"{ok}/{len(sources)} 条往返后仍恒等")
+
+print("== 交给 codegen ==")
+print(codegen.expr_code(latex.parse(r"\frac{x}{2} + 1")))
+print(codegen.to_module(latex.parse(r"\sin x^2 + x^3"), ["x"], "f"))
+
+print("== 错误 ==")
+bad: list[str] = [
+    r"\sum_{i=1}^{n} x_i",
+    r"\frac{1}{}",
+    r"(x+1",
+    r"\foo x",
+    r"x + \infty",
+    r"x = 1",
+    r"a \\ b",
+]
+for src in bad:
+    try:
+        latex.parse(src)
+        print(f"[{src}] 没有报错")
+    except latex.LatexError as err:
+        print(f"[{src}] {err.message}")
