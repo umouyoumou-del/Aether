@@ -1,0 +1,599 @@
+# egraph 模块：相等饱和（e-graph）化简器（用纯 Aether 代码编写）
+#
+# sym 的规范形式构造器是“快速路径”：每一步都维持一种写法，代价是只能做能直接归一的变换。
+# e-graph 走另一条路：把“哪些表达式相等”记成一张并查集，所有重写规则都只添加等式、不丢弃形式，
+# 反复饱和之后再按代价挑一个最小的代表。于是那些需要“先绕路”才能看出来的恒等式也能被发现，
+# 例如 (a+b)^2 = a^2 + 2ab + b^2：
+#   pow(a+b,2) → (a+b)*(a+b) → a*a + a*b + b*a + b*b → a^2 + 2ab + b^2
+# 中间没有任何一步是“展开”这个整体规则，全靠分配律、交换律、合并同类项这些局部规则饱和出来。
+#
+#   import sym
+#   import egraph
+#   a, b = sym.var("a"), sym.var("b")
+#   print(egraph.prove_equal((a + b) ** 2, a ** 2 + 2*a*b + b**2))   # true
+#   print(egraph.simplify((a + b) ** 2))                             # a^2 + 2*a*b + b^2
+#
+# 与 sym 的分工：日常化简用 sym.simplify（线性、可预测）；需要证明恒等式、或想找“另一种更省的形式”时用 egraph。
+
+import sym
+import math
+
+const INF = 1e18
+
+# e-graph 中的一个节点：操作符 + 子类编号（eclass id）。num/var 用 name 与 v 携带载荷。
+class ENode:
+    op: str
+    kids: list[int]
+    name: str
+    v: float
+
+    def __init__(self, op: str, kids: list[int], name: str, v: float):
+        self.op = op
+        self.kids = kids
+        self.name = name
+        self.v = v
+
+# 相等饱和图
+class EGraph:
+    parent: list[int]              # 并查集：每个 eclass 指向父节点
+    nodes: list[list[ENode]]       # 每个 eclass 里的节点（合并后可能有很多个）
+    table: dict[str, int]          # 节点签名 -> eclass，用于哈希共享
+    zero: int
+    one: int
+    limit: int                     # 节点数上限，防止爆炸
+    saturated: bool                # 是否在迭代上限内达到饱和
+    rounds: int                    # 实际迭代轮数
+
+    def __init__(self, limit: int = 40000):
+        self.parent = []
+        self.nodes = []
+        self.table = {}
+        self.limit = limit
+        self.saturated = false
+        self.rounds = 0
+        self.zero = self._intern("num", [], "", 0.0)
+        self.one = self._intern("num", [], "", 1.0)
+
+    # ===== 并查集 =====
+
+    def find(self, i: int) -> int:
+        r = i
+        while self.parent[r] != r:
+            r = self.parent[r]
+        while self.parent[i] != r:
+            nxt = self.parent[i]
+            self.parent[i] = r
+            i = nxt
+        return r
+
+    def union(self, a: int, b: int) -> bool:
+        ra = self.find(a)
+        rb = self.find(b)
+        if ra == rb:
+            return false
+        if len(self.nodes[ra]) < len(self.nodes[rb]):
+            t = ra
+            ra = rb
+            rb = t
+        for n in self.nodes[rb]:
+            self.nodes[ra].append(n)
+        self.nodes[rb] = []
+        self.parent[rb] = ra
+        return true
+
+    # ===== 节点的哈希共享 =====
+
+    def _intern(self, op: str, kids: list[int], name: str, v: float) -> int:
+        sig = op + "("
+        for i in range(len(kids)):
+            if i > 0:
+                sig += ","
+            sig += str(kids[i])
+        sig += ")" + name + "#" + sym.fmt(v)
+        existing = self.table.get(sig)
+        if existing != null:
+            return self.find(existing)
+        cid = len(self.parent)
+        self.parent.append(cid)
+        self.nodes.append([ENode(op, kids, name, v)])
+        self.table[sig] = cid
+        return cid
+
+    # 把 sym 的表达式加入图中，返回它的 eclass
+    def add(self, e: sym.Expr) -> int:
+        if e.kind == "num":
+            return self._intern("num", [], "", e.v)
+        if e.kind == "var":
+            return self._intern("var", [], e.name, 0.0)
+        kids: list[int] = []
+        for k in e.kids:
+            kids.append(self.add(k))
+        return self._intern(e.kind, kids, e.name, 0.0)
+
+    # ===== 查询辅助 =====
+
+    def _node_of(self, cid: int, op: str) -> ENode?:
+        r = self.find(cid)
+        for n in self.nodes[r]:
+            if n.op == op:
+                return n
+        return null
+
+    def _number(self, cid: int) -> float?:
+        r = self.find(cid)
+        for n in self.nodes[r]:
+            if n.op == "num":
+                return n.v
+        return null
+
+    def size(self) -> int:
+        n = 0
+        for i in range(len(self.parent)):
+            if self.find(i) == i:
+                n += len(self.nodes[i])
+        return n
+
+    # ===== 同余闭包：子类合并后，父节点要重新归档 =====
+
+    def rebuild(self) -> bool:
+        changed_any = false
+        while true:
+            pending: list[(int, ENode)] = []
+            for i in range(len(self.parent)):
+                if self.find(i) != i:
+                    continue
+                for node in self.nodes[i]:
+                    pending.append((i, node))
+            changed = false
+            for p in pending:
+                cid = self.find(p[0])
+                node = p[1]
+                kids: list[int] = []
+                same = true
+                for k in node.kids:
+                    rk = self.find(k)
+                    if rk != k:
+                        same = false
+                    kids.append(rk)
+                if not same:
+                    nid = self._intern(node.op, kids, node.name, node.v)
+                    if self.union(cid, nid):
+                        changed = true
+            if not changed:
+                break
+            changed_any = true
+        return changed_any
+
+    # ===== 饱和 =====
+
+    # 反复应用重写规则，直到没有新的等式产生（或到达迭代 / 规模上限）。
+    # 返回是否达到饱和。
+    def saturate(self, iterations: int = 40) -> bool:
+        for round in range(iterations):
+            self.rounds = round + 1
+            changed = self.rebuild()
+            if self._rules():
+                changed = true
+            if not changed:
+                self.saturated = true
+                return true
+            if self.size() > self.limit:
+                return false
+        return false
+
+    # ===== 重写规则 =====
+
+    def _rules(self) -> bool:
+        pending: list[(int, ENode)] = []
+        for i in range(len(self.parent)):
+            if self.find(i) != i:
+                continue
+            for node in self.nodes[i]:
+                pending.append((i, node))
+        changed = false
+        for p in pending:
+            cid = self.find(p[0])
+            node = p[1]
+            if node.op == "add" or node.op == "mul":
+                if self._rule_flatten(cid, node):
+                    changed = true
+                if self._rule_sort(cid, node):
+                    changed = true
+                if self._rule_fold(cid, node):
+                    changed = true
+                if self._rule_collect(cid, node):
+                    changed = true
+                if node.op == "add":
+                    if self._rule_cancel(cid, node):
+                        changed = true
+                    if self._rule_factor(cid, node):
+                        changed = true
+                if node.op == "mul":
+                    if self._rule_distribute(cid, node):
+                        changed = true
+            if node.op == "pow":
+                if self._rule_pow(cid, node):
+                    changed = true
+        return changed
+
+    # 结合律：把嵌套的同类节点摊平
+    def _rule_flatten(self, cid: int, node: ENode) -> bool:
+        kids: list[int] = []
+        fired = false
+        for k in node.kids:
+            inner = self._node_of(self.find(k), node.op)
+            if inner != null:
+                for kk in inner.kids:
+                    kids.append(self.find(kk))
+                fired = true
+            else:
+                kids.append(self.find(k))
+        if not fired:
+            return false
+        nid = self._intern(node.op, kids, "", 0.0)
+        return self.union(cid, nid)
+
+    # 交换律：子类按编号排序，得到唯一的写法
+    def _rule_sort(self, cid: int, node: ENode) -> bool:
+        kids: list[int] = []
+        for k in node.kids:
+            kids.append(self.find(k))
+        kids = sorted(kids)
+        same = true
+        for i in range(len(kids)):
+            if kids[i] != node.kids[i]:
+                same = false
+        if same:
+            return false
+        nid = self._intern(node.op, kids, "", 0.0)
+        return self.union(cid, nid)
+
+    # 常量折叠：数值项先算出来，0 与 1 直接消掉
+    def _rule_fold(self, cid: int, node: ENode) -> bool:
+        if node.op == "add":
+            total = 0.0
+            rest: list[int] = []
+            found = false
+            for k in node.kids:
+                v = self._number(k)
+                if v != null:
+                    total += v
+                    found = true
+                else:
+                    rest.append(self.find(k))
+            if not found:
+                return false
+            if len(rest) == 0:
+                return self.union(cid, self._intern("num", [], "", total))
+            if math.fabs(total) < 1e-15:
+                if len(rest) == 1:
+                    return self.union(cid, rest[0])
+                return self.union(cid, self._intern("add", rest, "", 0.0))
+            rest.append(self._intern("num", [], "", total))
+            return self.union(cid, self._intern("add", rest, "", 0.0))
+        # mul
+        product = 1.0
+        factors: list[int] = []
+        has_number = false
+        for k in node.kids:
+            v = self._number(k)
+            if v != null:
+                product *= v
+                has_number = true
+            else:
+                factors.append(self.find(k))
+        if not has_number:
+            return false
+        if math.fabs(product) < 1e-15:
+            return self.union(cid, self.zero)
+        if len(factors) == 0:
+            return self.union(cid, self._intern("num", [], "", product))
+        if math.fabs(product - 1.0) < 1e-15:
+            if len(factors) == 1:
+                return self.union(cid, factors[0])
+            return self.union(cid, self._intern("mul", factors, "", 0.0))
+        factors.append(self._intern("num", [], "", product))
+        return self.union(cid, self._intern("mul", factors, "", 0.0))
+
+    # 合并同类项：a + a = 2a，x * x = x^2
+    def _rule_collect(self, cid: int, node: ENode) -> bool:
+        counts: dict[int, int] = {}
+        order: list[int] = []
+        for k in node.kids:
+            rk = self.find(k)
+            if counts.get(rk) == null:
+                counts[rk] = 0
+                order.append(rk)
+            counts[rk] = counts.get(rk, 0) + 1
+        repeated = false
+        for k in order:
+            if counts[k] > 1:
+                repeated = true
+        if not repeated:
+            return false
+        kids: list[int] = []
+        for k in order:
+            c = counts[k]
+            if c == 1:
+                kids.append(k)
+            elif node.op == "add":
+                factor = self._intern("mul", [self._intern("num", [], "", float(c)), k], "", 0.0)
+                kids.append(factor)
+            else:
+                kids.append(self._intern("pow", [k, self._intern("num", [], "", float(c))], "", 0.0))
+        if len(kids) == 1:
+            return self.union(cid, kids[0])
+        return self.union(cid, self._intern(node.op, kids, "", 0.0))
+
+    # 相反项相消：x + (-x) = 0
+    def _rule_cancel(self, cid: int, node: ENode) -> bool:
+        n = len(node.kids)
+        for i in range(n):
+            for j in range(i + 1, n):
+                ki = self.find(node.kids[i])
+                kj = self.find(node.kids[j])
+                if self._is_negative_of(ki, kj) or self._is_negative_of(kj, ki):
+                    rest: list[int] = []
+                    for t in range(n):
+                        if t != i and t != j:
+                            rest.append(self.find(node.kids[t]))
+                    if len(rest) == 0:
+                        return self.union(cid, self.zero)
+                    return self.union(cid, self._intern("add", rest, "", 0.0))
+        return false
+
+    # 判断 a 是否等于 -b
+    def _is_negative_of(self, a: int, b: int) -> bool:
+        pos = self._positive_part(a)
+        if pos == null:
+            return false
+        return pos == b
+
+    # 如果 eclass 表示 -X，返回 X 的 eclass；否则返回 null。
+    # 一个 eclass 里可能有多个等价的 mul 节点（合并前的各种写法），要逐个尝试。
+    def _positive_part(self, cid: int) -> int?:
+        v = self._number(cid)
+        if v != null:
+            if v < 0:
+                return self._intern("num", [], "", -v)
+            return null
+        r = self.find(cid)
+        for mul in self.nodes[r]:
+            if mul.op != "mul":
+                continue
+            coef = 1.0
+            rest: list[int] = []
+            seen_number = false
+            for k in mul.kids:
+                nv = self._number(k)
+                if nv != null:
+                    coef *= nv
+                    seen_number = true
+                else:
+                    rest.append(self.find(k))
+            if not seen_number or coef >= 0:
+                continue
+            if len(rest) == 0:
+                return self._intern("num", [], "", -coef)
+            if math.fabs(coef + 1.0) < 1e-15:
+                if len(rest) == 1:
+                    return rest[0]
+                return self._intern("mul", rest, "", 0.0)
+            rest.append(self._intern("num", [], "", -coef))
+            return self._intern("mul", rest, "", 0.0)
+        return null
+
+    # 提取公因式（分配律的逆方向）：x*y + x*z = x*(y + z)。
+    # 没有这条规则，饱和只能把乘积摊开，永远找不到更短的写法。
+    def _rule_factor(self, cid: int, node: ENode) -> bool:
+        n = len(node.kids)
+        if n < 2:
+            return false
+        lists: list[list[int]] = []
+        for k in node.kids:
+            facs = self._split_factors(k)
+            if len(facs) == 0:
+                return false
+            lists.append(facs)
+        counts: dict[int, int] = {}
+        for f in lists[0]:
+            counts[f] = counts.get(f, 0) + 1
+        for i in range(1, n):
+            avail: dict[int, int] = {}
+            for f in lists[i]:
+                avail[f] = avail.get(f, 0) + 1
+            for f in counts.keys():
+                have = avail.get(f)
+                if have == null or have < counts[f]:
+                    counts[f] = 0 if have == null else have
+        common: list[int] = []
+        left_common: dict[int, int] = {}
+        for f in lists[0]:
+            if counts.get(f) != null and counts[f] > 0:
+                common.append(f)
+                counts[f] = counts[f] - 1
+        if len(common) == 0:
+            return false
+        for f in common:
+            left_common[f] = left_common.get(f, 0) + 1
+        rems: list[int] = []
+        for facs in lists:
+            left: dict[int, int] = {}
+            for f in left_common.keys():
+                left[f] = left_common[f]
+            rem: list[int] = []
+            for f in facs:
+                if left.get(f) != null and left[f] > 0:
+                    left[f] = left[f] - 1
+                else:
+                    rem.append(f)
+            if len(rem) == 0:
+                rems.append(self.one)
+            elif len(rem) == 1:
+                rems.append(rem[0])
+            else:
+                rems.append(self._intern("mul", rem, "", 0.0))
+        inner = self._intern("add", rems, "", 0.0)
+        factors: list[int] = []
+        for f in common:
+            factors.append(f)
+        factors.append(inner)
+        return self.union(cid, self._intern("mul", factors, "", 0.0))
+
+    # 把一个类拆成非数值因子（数值系数忽略，交给折叠规则）
+    def _split_factors(self, cid: int) -> list[int]:
+        r = self.find(cid)
+        for node in self.nodes[r]:
+            if node.op == "mul":
+                out: list[int] = []
+                for k in node.kids:
+                    if self._number(k) == null:
+                        out.append(self.find(k))
+                return out
+        return [r]
+
+    # 分配律：a * (b + c) = a*b + a*c
+    def _rule_distribute(self, cid: int, node: ENode) -> bool:
+        for i in range(len(node.kids)):
+            inner = self._node_of(self.find(node.kids[i]), "add")
+            if inner == null:
+                continue
+            terms: list[int] = []
+            for t in inner.kids:
+                factors: list[int] = []
+                for j in range(len(node.kids)):
+                    if j != i:
+                        factors.append(self.find(node.kids[j]))
+                factors.append(self.find(t))
+                terms.append(self._intern("mul", factors, "", 0.0))
+            return self.union(cid, self._intern("add", terms, "", 0.0))
+        return false
+
+    # 幂：x^0 = 1、x^1 = x、整数小指数展开成乘法，数值幂直接算
+    def _rule_pow(self, cid: int, node: ENode) -> bool:
+        if len(node.kids) != 2:
+            return false
+        base = self.find(node.kids[0])
+        exp = self._number(node.kids[1])
+        if exp == null:
+            return false
+        v = exp
+        if math.fabs(v) < 1e-15:
+            return self.union(cid, self.one)
+        if math.fabs(v - 1.0) < 1e-15:
+            return self.union(cid, base)
+        bv = self._number(base)
+        if bv != null:
+            return self.union(cid, self._intern("num", [], "", math.pow(bv, v)))
+        if v >= 2.0 and v <= 8.0 and v == math.trunc(v):
+            n = math.trunc(v)
+            kids: list[int] = []
+            for i in range(n):
+                kids.append(base)
+            return self.union(cid, self._intern("mul", kids, "", 0.0))
+        return false
+
+    # ===== 提取：按代价挑一个最小的代表 =====
+
+    def extract(self, cid: int) -> sym.Expr:
+        n = len(self.parent)
+        cost: list[float] = []
+        best: list[ENode?] = []
+        for i in range(n):
+            cost.append(INF)
+            best.append(null)
+        for round in range(n + 8):
+            changed = false
+            for i in range(n):
+                if self.find(i) != i:
+                    continue
+                for node in self.nodes[i]:
+                    c = 1.0
+                    ok = true
+                    for k in node.kids:
+                        ck = cost[self.find(k)]
+                        if ck >= INF:
+                            ok = false
+                            break
+                        c += ck
+                    if ok and c < cost[i]:
+                        cost[i] = c
+                        best[i] = node
+                        changed = true
+            if not changed:
+                break
+        memo: dict[int, sym.Expr] = {}
+        return _build(self, self.find(cid), best, memo)
+
+    # ===== 统计信息 =====
+
+    def report(self) -> str:
+        state = "已饱和" if self.saturated else "未饱和"
+        return f"{self.rounds} 轮，{self.size()} 个节点，{state}"
+
+def _build(g: EGraph, cid: int, best: list[ENode?], memo: dict[int, sym.Expr]) -> sym.Expr:
+    cached = memo.get(cid)
+    if cached != null:
+        return cached
+    node = best[cid]
+    if node == null:
+        raise RuntimeError("无法从 e-graph 中提取表达式（可能存在循环引用）")
+    result: sym.Expr
+    if node.op == "num":
+        result = sym.num(node.v)
+    elif node.op == "var":
+        result = sym.var(node.name)
+    else:
+        kids: list[sym.Expr] = []
+        for k in node.kids:
+            kids.append(_build(g, g.find(k), best, memo))
+        if node.op == "fn":
+            result = sym.fn(node.name, kids[0])
+        elif node.op == "pow":
+            result = sym.power(kids[0], kids[1])
+        elif node.op == "div":
+            result = sym.div(kids[0], kids[1])
+        elif node.op == "add":
+            result = kids[0]
+            for i in range(1, len(kids)):
+                result = sym.add(result, kids[i])
+        elif node.op == "mul":
+            result = kids[0]
+            for i in range(1, len(kids)):
+                result = sym.mul(result, kids[i])
+        else:
+            raise RuntimeError(f"无法提取的节点：{node.op}")
+    memo[cid] = result
+    return result
+
+# ===== 方便使用的入口 =====
+
+# 判断两个表达式是否相等：把两者放进同一张图，饱和后看是否在同一个 eclass。
+def prove_equal(a: sym.Expr, b: sym.Expr, iterations: int = 40) -> bool:
+    g = EGraph()
+    ia = g.add(a)
+    ib = g.add(b)
+    g.saturate(iterations)
+    return g.find(ia) == g.find(ib)
+
+# 与 prove_equal 相同，但同时返回图（可以查看 report()）。
+def prove_with_graph(a: sym.Expr, b: sym.Expr, iterations: int = 40) -> (bool, EGraph):
+    g = EGraph()
+    ia = g.add(a)
+    ib = g.add(b)
+    g.saturate(iterations)
+    return (g.find(ia) == g.find(ib), g)
+
+# 用相等饱和化简：饱和之后按节点代价挑最小的写法。
+def simplify(e: sym.Expr, iterations: int = 40) -> sym.Expr:
+    g = EGraph()
+    root = g.add(e)
+    g.saturate(iterations)
+    return g.extract(root)
+
+# 化简并把饱和后的图一并返回（用于观察规则覆盖到了什么程度）。
+def simplify_with_graph(e: sym.Expr, iterations: int = 40) -> (sym.Expr, EGraph):
+    g = EGraph()
+    root = g.add(e)
+    g.saturate(iterations)
+    return (g.extract(root), g)

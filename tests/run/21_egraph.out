@@ -1,0 +1,15 @@
+true
+true
+true
+true
+true
+true
+false
+true
+x*y + x*z
+x*(y + z)
+3*x
+x^3
+(a + b)^2
+(a + b)^2 true
+false

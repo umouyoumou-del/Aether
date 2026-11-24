@@ -1,0 +1,35 @@
+# egraph 模块：相等饱和化简器
+import sym
+import egraph
+
+a = sym.var("a")
+b = sym.var("b")
+x = sym.var("x")
+y = sym.var("y")
+z = sym.var("z")
+
+# ===== 证明恒等式：规则饱和之后看两者是否落在同一个 eclass =====
+print(egraph.prove_equal(x * (y + z), x * y + x * z))
+print(egraph.prove_equal((a + b) ** 2, a ** 2 + 2 * a * b + b ** 2))
+print(egraph.prove_equal((a + b) ** 3, a ** 3 + 3 * a ** 2 * b + 3 * a * b ** 2 + b ** 3))
+print(egraph.prove_equal((a + b) * (a - b), a ** 2 - b ** 2))
+print(egraph.prove_equal(x + x, 2 * x))
+print(egraph.prove_equal(x * x * x, x ** 3))
+print(egraph.prove_equal(x + 1, x + 2))
+print(egraph.prove_equal(x * y, y * x))
+
+# ===== 化简：饱和后按节点代价挑最小的写法 =====
+# 规范化简做不到因式分解，e-graph 可以
+print(sym.simplify(x * y + x * z))
+print(egraph.simplify(x * y + x * z))
+
+print(egraph.simplify(x + x + x + 0))
+print(egraph.simplify(x * x * x * 1))
+print(egraph.simplify((a + b) ** 2))
+
+# 代价最小的形式不一定“展开”，(a+b)^2 比 a^2+2ab+b^2 更省
+r = egraph.simplify_with_graph((a + b) ** 2)
+print(r[0], r[1].saturated)
+
+# 迭代次数不足时不会给出错误结论（只是没证出来）
+print(egraph.prove_equal((a + b) ** 3, a ** 3 + 3 * a ** 2 * b + 3 * a * b ** 2 + b ** 3, 1))
