@@ -1,0 +1,53 @@
+# codegen：表达式 → Aether 源码 → 原生可执行文件
+#
+#   aether run examples/codegen_demo.ae
+#
+# 设置环境变量 AETHER 指向 aether 编译器（例如 AETHER=bin/aether.exe）时，
+# 会真的把下面生成的源码编译成原生程序，校验数值、并和另外两种求值方式比速度。
+import sym
+import codegen
+import os
+import time
+
+x = sym.var("x")
+y = sym.var("y")
+
+f = sym.fn("exp", sym.fn("sin", x * y)) * sym.fn("sin", x * y) + (x + 1) ** 2
+
+print("表达式：", f)
+print()
+print(codegen.to_module(f, ["x", "y"], "f"))
+print()
+
+if os.getenv("AETHER") == null:
+    print("（设置 AETHER 指向 aether 可执行文件后，这里会把上面的源码编译成原生程序）")
+else:
+    exe = codegen.compile_native(f, ["x", "y"], "f")
+    print("已编译为原生可执行文件：", exe, os.file_size(exe), "字节")
+    args: list[float] = [0.3, 1.2]
+    print("原生程序输出（值、偏导 x、偏导 y）：", codegen.run_native(exe, args))
+
+    points: list[list[float]] = [[0.3, 1.2], [1.0, -0.5], [-2.0, 0.7]]
+    err = codegen.verify(f, ["x", "y"], points)
+    print(f"与符号求值的最大相对误差：{err:.3e}")
+
+    iters = 500000
+    ns_native, acc = codegen.bench_native(f, ["x", "y"], args, iters)
+    print(f"原生代码：  {ns_native:7.1f} ns/次")
+
+    g = sym.compile_expr(f, ["x", "y"])
+    t0 = time.monotonic()
+    s = 0.0
+    for i in range(iters):
+        s = s + g(args)
+    el = time.monotonic() - t0
+    print(f"闭包树：    {el / iters * 1e9:7.1f} ns/次")
+
+    env: dict[str, float] = {"x": 0.3, "y": 1.2}
+    t0 = time.monotonic()
+    s2 = 0.0
+    for i in range(iters):
+        s2 = s2 + sym.evaluate(f, env)
+    el2 = time.monotonic() - t0
+    print(f"解释求值：  {el2 / iters * 1e9:7.1f} ns/次")
+    print(f"三者累加值一致：{acc:.17g} / {s:.17g} / {s2:.17g}")

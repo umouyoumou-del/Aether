@@ -1,0 +1,40 @@
+# codegen 模块：表达式 → Aether 源码（公共子表达式提取、强度削减、梯度一起生成）
+import sym
+import codegen
+
+x = sym.var("x")
+y = sym.var("y")
+a = sym.var("a")
+b = sym.var("b")
+
+print("—— 乘积与减法 ——")
+print(codegen.to_function(x * y - 3, ["x", "y"], "f"))
+
+print("—— 平方与立方换成乘法 ——")
+print(codegen.to_function(x ** 2 + x ** 3, ["x"], "f"))
+
+print("—— 商、负系数、倒数 ——")
+print(codegen.to_function(1 / (x + 1) - 1 / x, ["x"], "f"))
+
+print("—— 变量指数、sqrt ——")
+print(codegen.to_function(sym.power(x, y) + sym.fn("sqrt", x), ["x", "y"], "f"))
+
+print("—— 公共子表达式只算一次 ——")
+print(codegen.to_function(sym.fn("exp", sym.fn("sin", x)) * sym.fn("sin", x) + sym.fn("sin", x), ["x"], "f"))
+
+print("—— 展开后的多项式 ——")
+print(codegen.to_function(sym.expand((a + b) ** 3), ["a", "b"], "f"))
+
+print("—— 常量表达式没有参数 ——")
+print(codegen.to_function(sym.num(2.5), [], "f"))
+
+print("—— 同一份表达式派生出的梯度函数 ——")
+print(codegen.to_module(sym.fn("sin", x * y), ["x", "y"], "g"))
+
+print("—— 完整程序骨架 ——")
+print(codegen.to_program(sym.fn("exp", x * y), ["x", "y"], "f"))
+
+print("—— 一行表达式文本 ——")
+print(codegen.expr_code((x + 1) ** 2 / (y - 2)))
+print(codegen.expr_code(-sym.fn("cos", x) * 2))
+print(codegen.expr_code(sym.power(x, sym.num(0.5))))

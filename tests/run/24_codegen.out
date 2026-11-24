@@ -1,0 +1,64 @@
+—— 乘积与减法 ——
+def f(x: float, y: float) -> float:
+    return x * y - 3.0
+—— 平方与立方换成乘法 ——
+def f(x: float) -> float:
+    return x * x * x + x * x
+—— 商、负系数、倒数 ——
+def f(x: float) -> float:
+    return 1.0 / (x + 1.0) - 1.0 / x
+—— 变量指数、sqrt ——
+def f(x: float, y: float) -> float:
+    return math.sqrt(x) + math.pow(x, y)
+—— 公共子表达式只算一次 ——
+def f(x: float) -> float:
+    _t0 = math.sin(x)
+    return math.exp(_t0) * _t0 + _t0
+—— 展开后的多项式 ——
+def f(a: float, b: float) -> float:
+    return a * a * a + 3.0 * (a * a) * b + 3.0 * a * (b * b) + b * b * b
+—— 常量表达式没有参数 ——
+def f() -> float:
+    return 2.5
+—— 同一份表达式派生出的梯度函数 ——
+# 由 Aether codegen 生成，请勿手工编辑。
+# 表达式：sin(x*y)
+import math
+
+def g(x: float, y: float) -> float:
+    return math.sin(x * y)
+
+def g_dx(x: float, y: float) -> float:
+    return y * math.cos(x * y)
+
+def g_dy(x: float, y: float) -> float:
+    return x * math.cos(x * y)
+—— 完整程序骨架 ——
+# 由 Aether codegen 生成，请勿手工编辑。
+# 表达式：exp(x*y)
+import math
+import sys
+
+def f(x: float, y: float) -> float:
+    return math.exp(x * y)
+
+def f_dx(x: float, y: float) -> float:
+    return y * math.exp(x * y)
+
+def f_dy(x: float, y: float) -> float:
+    return x * math.exp(x * y)
+
+_args: list[float] = [float(a) for a in sys.argv[1:]]
+if len(_args) != 2:
+    print("用法：f x y", file=sys.stderr)
+    sys.exit(2)
+_v = f(_args[0], _args[1])
+print(f"{_v:.17g}")
+_g0 = f_dx(_args[0], _args[1])
+print(f"{_g0:.17g}")
+_g1 = f_dy(_args[0], _args[1])
+print(f"{_g1:.17g}")
+—— 一行表达式文本 ——
+(x + 1.0) * (x + 1.0) / (y - 2.0)
+-2.0 * math.cos(x)
+math.sqrt(x)

@@ -1,0 +1,495 @@
+# codegen 模块：把 sym 表达式编译成 Aether 源码，再交给 Aether 编译器变成原生可执行文件
+#
+# 这是「同一份表达式，三条出路」里的第二条：
+#   sym.evaluate      解释执行：按节点种类分支、查字典取变量（灵活，慢）
+#   sym.compile_expr  闭包树：去掉分支与查表，但仍是 Aether 运行时的函数调用（较快）
+#   codegen           生成源码 → 编译器优化 → 原生机器码（最快，可以脱离本进程单独部署）
+#
+#   import sym
+#   import codegen
+#
+#   x = sym.var("x")
+#   f = sym.fn("exp", sym.fn("sin", x)) * sym.fn("sin", x)
+#   print(codegen.to_module(f, ["x"], "f"))   # 看生成的 Aether 源码
+#   print(codegen.verify(f, ["x"], [[0.3], [1.2]]))  # 编译成原生程序并校验数值
+#
+# 生成器做的三件事：
+#   1. 公共子表达式提取：同一棵子树出现两次以上就提成局部变量（sin(x) 只算一次）
+#   2. 强度削减：x^2 → x*x，x^3 → x*x*x，x^0.5 → math.sqrt(x)，x^-1 → 1/x
+#   3. 梯度一起生成：sym.diff 的结果用同一套规则生成 f_dx / f_dy，符号推导与原生执行必然一致
+#
+# 生成的源码只依赖 math 与 sys，可以直接 `aether build` 成单个可执行文件。
+
+import math
+import os
+import sys
+import time
+
+import sym
+
+# Aether 的运算符优先级：数值越大，结合越紧
+const _P_ADD = 1
+const _P_MUL = 2
+
+# ===== 生成器：一趟遍历完成 CSE 与代码生成 =====
+
+class Emitter:
+    # 每个结构签名出现的次数：用来判断值不值得提成变量
+    counts: dict[str, int]
+    # 结构签名 → 已生成的局部变量名
+    names: dict[str, str]
+    # 已生成的赋值语句（按依赖顺序，子表达式在前）
+    lines: list[str]
+    counter: int
+    taken: dict[str, bool]
+
+    def __init__(self, vars: list[str]):
+        self.counts = {}
+        self.names = {}
+        self.lines = []
+        self.counter = 0
+        self.taken = {}
+        for v in vars:
+            self.taken[v] = true
+
+    # 取一个不会和用户变量重名的临时变量名
+    def fresh(self) -> str:
+        while true:
+            name = "_t" + str(self.counter)
+            self.counter = self.counter + 1
+            if self.taken.get(name) == null:
+                self.taken[name] = true
+                return name
+
+    # 把 e 提成一个局部变量（已经提过就直接返回名字）
+    def hoist(self, e: sym.Expr) -> str:
+        key = _sig(e)
+        got = self.names.get(key)
+        if got != null:
+            return got
+        # 注意顺序：先按「子表达式已经提好」生成右侧，再登记自己，
+        # 否则 emit 会立刻把 e 认成已提过的变量。
+        text = self.emit(e, 0)
+        name = self.fresh()
+        self.names[key] = name
+        self.lines.append("    " + name + " = " + text)
+        return name
+
+    # 这个子表达式重复写几遍，代价是否可以接受：
+    # 原子与已提好的变量是 0 遍额外开销；不含函数调用的小表达式按节点数算预算。
+    # 平方比 math.pow 快一个数量级，所以宁可多写一遍加法也要换成乘法。
+    def cheap(self, e: sym.Expr, budget: int) -> bool:
+        if e.kind == "var" or e.kind == "num":
+            return true
+        if self.names.get(_sig(e)) != null:
+            return true
+        if _has_call(e):
+            return false
+        return _cost(e) <= budget
+
+    # 生成表达式文本；outer 是外层要求的优先级，低于它就要加括号
+    def emit(self, e: sym.Expr, outer: int) -> str:
+        got = self.names.get(_sig(e))
+        if got != null:
+            return got
+        if e.kind == "num":
+            return _lit(e.v, outer)
+        if e.kind == "var":
+            return e.name
+        if e.kind == "add":
+            return _paren(self._sum(e), outer, _P_ADD)
+        if e.kind == "mul":
+            return _paren(self._product(e), outer, _P_MUL)
+        if e.kind == "div":
+            s = self.emit(e.kids[0], _P_MUL) + " / " + self.emit(e.kids[1], 3)
+            return _paren(s, outer, _P_MUL)
+        if e.kind == "pow":
+            return self._pow(e, outer)
+        if e.kind == "fn":
+            return _math_call(e.name) + "(" + self.emit(e.kids[0], 0) + ")"
+        raise ValueError("无法生成代码的节点：" + e.kind)
+
+    # 和：把负项写成减法，读起来与教科书一致
+    def _sum(self, e: sym.Expr) -> str:
+        out = ""
+        for i in range(len(e.kids)):
+            negative, positive = _split_neg(e.kids[i])
+            body = self.emit(positive, _P_MUL)
+            if i == 0:
+                out = ("-" if negative else "") + body
+            else:
+                out = out + (" - " if negative else " + ") + body
+        return out
+
+    def _product(self, e: sym.Expr) -> str:
+        parts: list[str] = []
+        for i in range(len(e.kids)):
+            # 第一个因子前面没有运算符，负号不用括号；其余因子用优先级 3，
+            # 于是商、负数都会加括号（x * (b / c) 不能写成 x * b / c）
+            parts.append(self.emit(e.kids[i], 2 if i == 0 else 3))
+        return " * ".join(parts)
+
+    def _pow(self, e: sym.Expr, outer: int) -> str:
+        base = e.kids[0]
+        exp = e.kids[1]
+        if exp.kind == "num":
+            pv = exp.v
+            # 整数次幂用乘法，避免 math.pow 的函数调用与一般幂算法
+            if pv == 2.0 and self.cheap(base, 4):
+                s = self.emit(base, 3) + " * " + self.emit(base, 3)
+                return _paren(s, outer, _P_MUL)
+            if pv == 3.0 and self.cheap(base, 2):
+                s = self.emit(base, 3)
+                return _paren(s + " * " + s + " * " + s, outer, _P_MUL)
+            if pv == 0.5:
+                return "math.sqrt(" + self.emit(base, 0) + ")"
+            if pv == -1.0:
+                return _paren("1.0 / " + self.emit(base, 3), outer, _P_MUL)
+            return "math.pow(" + self.emit(base, 0) + ", " + _float_lit(pv) + ")"
+        return "math.pow(" + self.emit(base, 0) + ", " + self.emit(exp, 0) + ")"
+
+# ===== 数字面量 =====
+
+# 用最短且能精确还原的十进制写法，并保证它是浮点字面量（不是整数）
+def _lit(v: float, outer: int) -> str:
+    s = _float_lit(v)
+    if v < 0 and outer > _P_MUL:
+        return "(" + s + ")"
+    return s
+
+def _float_lit(v: float) -> str:
+    if math.isnan(v):
+        return "math.nan"
+    if math.isinf(v):
+        return "math.inf" if v > 0 else "(-math.inf)"
+    s = f"{v:.15g}"
+    if float(s) != v:
+        s = f"{v:.16g}"
+    if float(s) != v:
+        s = f"{v:.17g}"
+    # 2 要写成 2.0：否则生成的代码里它是 int，和 float 混算会引入类型错误
+    if s.find(".") < 0 and s.find("e") < 0 and s.find("E") < 0:
+        s = s + ".0"
+    return s
+
+def _paren(s: str, outer: int, prec: int) -> str:
+    if outer > prec:
+        return "(" + s + ")"
+    return s
+
+def _math_call(name: str) -> str:
+    if name == "abs":
+        return "math.fabs"
+    return "math." + name
+
+# ===== 结构签名与代价（CSE 的判据） =====
+
+def _sig(e: sym.Expr) -> str:
+    if e.kind == "num":
+        return "n:" + f"{e.v:.17g}"
+    if e.kind == "var":
+        return "v:" + e.name
+    if e.kind == "fn":
+        return "f:" + e.name + "(" + _sig(e.kids[0]) + ")"
+    parts: list[str] = []
+    for k in e.kids:
+        parts.append(_sig(k))
+    return e.kind + "(" + ",".join(parts) + ")"
+
+# 子树里是否含有函数调用或除法：这类节点重复展开会让代码与耗时同时膨胀
+def _has_call(e: sym.Expr) -> bool:
+    if e.kind == "fn" or e.kind == "div":
+        return true
+    for k in e.kids:
+        if _has_call(k):
+            return true
+    return false
+
+# 节点数：粗略表示「重复算一次要多少开销」
+def _cost(e: sym.Expr) -> int:
+    if e.kind == "num" or e.kind == "var":
+        return 1
+    s = 1
+    for k in e.kids:
+        s = s + _cost(k)
+    return s
+
+# 只有「省下来的计算量大于一次赋值」时才提变量，避免生成一堆 x*x 的临时变量
+def _worth_hoisting(e: sym.Expr) -> bool:
+    if e.kind == "fn" or e.kind == "div":
+        return true
+    return _cost(e) >= 3
+
+def _count(e: sym.Expr, counts: dict[str, int]):
+    key = _sig(e)
+    n = counts.get(key)
+    counts[key] = 1 if n == null else n + 1
+    for k in e.kids:
+        _count(k, counts)
+
+# 后序遍历：先处理子表达式，父表达式生成时子表达式已经是变量名了
+def _hoist_walk(e: sym.Expr, em: Emitter):
+    for k in e.kids:
+        _hoist_walk(k, em)
+    key = _sig(e)
+    n = em.counts.get(key)
+    if n == null or n < 2:
+        return
+    if em.names.get(key) != null:
+        return
+    if _worth_hoisting(e) == false:
+        return
+    em.hoist(e)
+
+# 拆出负号：返回 (是否负, 去掉负号后的表达式)
+def _split_neg(e: sym.Expr) -> (bool, sym.Expr):
+    if e.kind == "num":
+        if e.v < 0:
+            return (true, sym.num(-e.v))
+        return (false, e)
+    if e.kind == "mul" and len(e.kids) > 1:
+        first = e.kids[0]
+        if first.kind == "num" and first.v < 0:
+            acc = sym.num(-first.v)
+            for i in range(1, len(e.kids)):
+                acc = sym.mul(acc, e.kids[i])
+            return (true, acc)
+    return (false, e)
+
+# ===== 函数、模块、程序 =====
+
+def _params(vars: list[str]) -> str:
+    parts: list[str] = []
+    for v in vars:
+        parts.append(_ident(v) + ": float")
+    return ", ".join(parts)
+
+# 变量名要能直接当 Aether 标识符用
+def _ident(name: str) -> str:
+    out = ""
+    for i in range(len(name)):
+        c = name[i]
+        if str(c).isalnum() or c == '_':
+            out = out + str(c)
+        else:
+            out = out + "_"
+    if len(out) == 0:
+        out = "x"
+    if out[0].isdigit():
+        out = "_" + out
+    return out
+
+# 偏导函数名：f 对 x 的偏导叫 f_dx
+def grad_name(name: str, v: str) -> str:
+    return name + "_d" + _ident(v)
+
+def _body(e: sym.Expr, vars: list[str]) -> list[str]:
+    em = Emitter(vars)
+    _count(e, em.counts)
+    _hoist_walk(e, em)
+    out: list[str] = []
+    for line in em.lines:
+        out.append(line)
+    out.append("    return " + em.emit(e, 0))
+    return out
+
+# 表达式 → 一行 Aether 表达式文本（不做 CSE，用于嵌进别人的代码里）
+def expr_code(e: sym.Expr) -> str:
+    return Emitter([]).emit(e, 0)
+
+def to_function(e: sym.Expr, vars: list[str], name: str) -> str:
+    lines: list[str] = []
+    lines.append("def " + name + "(" + _params(vars) + ") -> float:")
+    for line in _body(e, vars):
+        lines.append(line)
+    return "\n".join(lines)
+
+def _header(e: sym.Expr) -> str:
+    return "# 表达式：" + sym.render(e, 0)
+
+def _functions(e: sym.Expr, vars: list[str], name: str, with_grad: bool) -> list[str]:
+    out: list[str] = []
+    out.append(to_function(e, vars, name))
+    if with_grad:
+        for v in vars:
+            out.append("")
+            out.append(to_function(sym.diff(e, v), vars, grad_name(name, v)))
+    return out
+
+# 只生成函数定义（可以贴进已有程序里）
+def to_module(e: sym.Expr, vars: list[str], name: str = "f", with_grad: bool = true) -> str:
+    lines: list[str] = []
+    lines.append("# 由 Aether codegen 生成，请勿手工编辑。")
+    lines.append(_header(e))
+    lines.append("import math")
+    lines.append("")
+    for fn in _functions(e, vars, name, with_grad):
+        lines.append(fn)
+    return "\n".join(lines)
+
+# 命令行参数 → 变量：生成的程序按 argv 求值，方便被别的程序或脚本调用
+def _args_lines(vars: list[str], name: str) -> list[str]:
+    out: list[str] = []
+    if len(vars) == 0:
+        return out
+    out.append("_args: list[float] = [float(a) for a in sys.argv[1:]]")
+    out.append("if len(_args) != " + str(len(vars)) + ":")
+    out.append("    print(\"用法：" + name + " " + " ".join(vars) + "\", file=sys.stderr)")
+    out.append("    sys.exit(2)")
+    return out
+
+def _call(name: str, vars: list[str], arr: str) -> str:
+    if len(vars) == 0:
+        return name + "()"
+    parts: list[str] = []
+    for i in range(len(vars)):
+        parts.append(arr + "[" + str(i) + "]")
+    return name + "(" + ", ".join(parts) + ")"
+
+# 完整程序：函数 + 梯度 + 主程序（打印值与各偏导，一行一个）
+def to_program(e: sym.Expr, vars: list[str], name: str = "f", with_grad: bool = true) -> str:
+    lines: list[str] = []
+    lines.append("# 由 Aether codegen 生成，请勿手工编辑。")
+    lines.append(_header(e))
+    lines.append("import math")
+    lines.append("import sys")
+    lines.append("")
+    for fn in _functions(e, vars, name, with_grad):
+        lines.append(fn)
+    lines.append("")
+    for line in _args_lines(vars, name):
+        lines.append(line)
+    lines.append("_v = " + _call(name, vars, "_args"))
+    lines.append("print(f\"{_v:.17g}\")")
+    if with_grad:
+        for i in range(len(vars)):
+            g = grad_name(name, vars[i])
+            var = "_g" + str(i)
+            lines.append(var + " = " + _call(g, vars, "_args"))
+            lines.append("print(f\"{" + var + ":.17g}\")")
+    return "\n".join(lines)
+
+# 基准程序：循环调用 iters 次，打印累加值与每次调用的纳秒数
+def to_bench_program(e: sym.Expr, vars: list[str], name: str = "f", iters: int = 1000000) -> str:
+    lines: list[str] = []
+    lines.append("# 由 Aether codegen 生成的基准程序")
+    lines.append(_header(e))
+    lines.append("import math")
+    lines.append("import sys")
+    lines.append("import time")
+    lines.append("")
+    lines.append(to_function(e, vars, name))
+    lines.append("")
+    for line in _args_lines(vars, name):
+        lines.append(line)
+    lines.append("_acc = 0.0")
+    lines.append("_t0 = time.monotonic()")
+    lines.append("for _i in range(" + str(iters) + "):")
+    lines.append("    _acc = _acc + " + _call(name, vars, "_args"))
+    lines.append("_elapsed = time.monotonic() - _t0")
+    lines.append("print(f\"{_acc:.17g}\")")
+    lines.append("_ns = _elapsed / float(" + str(iters) + ") * 1e9")
+    lines.append("print(f\"{_ns:.3f}\")")
+    return "\n".join(lines)
+
+# ===== 编译与运行（需要本机的 aether 编译器） =====
+
+# 找编译器：优先环境变量 AETHER，其次 PATH 上的 aether
+def aether_cli() -> str:
+    env = os.getenv("AETHER")
+    if env != null:
+        return env
+    candidates: list[str] = ["aether", "aether.exe"]
+    for c in candidates:
+        try:
+            os.run(c, ["version"])
+            return c
+        except OSError:
+            pass
+    raise OSError("找不到 aether 编译器：请把 bin 目录加入 PATH，或设置环境变量 AETHER 指向它")
+
+def _exe_suffix() -> str:
+    if sys.platform == "win32":
+        return ".exe"
+    return ""
+
+# 把源码写到 path，编译成 out
+def build(source: str, path: str, out: str, cli: str? = null) -> str:
+    c: str = ""
+    if cli != null:
+        c = cli
+    else:
+        c = aether_cli()
+    os.write_file(path, source)
+    try:
+        os.run(c, ["build", path, "-o", out])
+    except OSError as err:
+        raise OSError("编译生成的源码失败：" + str(err))
+    return out
+
+def _temp_dir() -> str:
+    stamp = f"{time.monotonic():.6f}".replace(".", "")
+    return os.join(os.tempdir(), "aether-codegen-" + stamp)
+
+# 表达式 → 原生可执行文件，返回它的路径
+def compile_native(e: sym.Expr, vars: list[str], name: str = "f", workdir: str? = null, with_grad: bool = true) -> str:
+    src = to_program(e, vars, name, with_grad)
+    d: str = ""
+    if workdir != null:
+        d = workdir
+    else:
+        d = _temp_dir()
+    os.mkdir(d)
+    path = os.join(d, name + ".ae")
+    exe = os.join(d, name + _exe_suffix())
+    return build(src, path, exe)
+
+# 运行原生程序：先输出 f 的值，随后是各偏导的值
+def run_native(exe: str, xs: list[float]) -> list[float]:
+    args: list[str] = []
+    for x in xs:
+        args.append(_float_lit(x))
+    out = os.run(exe, args)
+    vals: list[float] = []
+    for line in out.splitlines():
+        t = line.strip()
+        if t != "":
+            vals.append(float(t))
+    return vals
+
+# 端到端校验：生成源码 → 编译 → 运行，与符号求值逐点比较，返回最大相对误差
+def verify(e: sym.Expr, vars: list[str], points: list[list[float]], name: str = "f", with_grad: bool = true) -> float:
+    exe = compile_native(e, vars, name, null, with_grad)
+    wanted: list[sym.Expr] = [e]
+    if with_grad:
+        for v in vars:
+            wanted.append(sym.diff(e, v))
+    worst = 0.0
+    for p in points:
+        got = run_native(exe, p)
+        env: dict[str, float] = {}
+        for i in range(len(vars)):
+            env[vars[i]] = p[i]
+        for i in range(len(wanted)):
+            want = sym.evaluate(wanted[i], env)
+            if i >= len(got):
+                raise ValueError("原生程序输出的行数不足")
+            diff = math.fabs(got[i] - want)
+            scale = 1.0
+            if math.fabs(want) > 1.0:
+                scale = math.fabs(want)
+            rel = diff / scale
+            if rel > worst:
+                worst = rel
+    return worst
+
+# 原生基准：返回 (每次调用的纳秒数, 累加值)
+def bench_native(e: sym.Expr, vars: list[str], xs: list[float], iters: int = 1000000, name: str = "f") -> (float, float):
+    src = to_bench_program(e, vars, name, iters)
+    d = _temp_dir()
+    os.mkdir(d)
+    exe = build(src, os.join(d, name + ".ae"), os.join(d, name + _exe_suffix()))
+    lines = run_native(exe, xs)
+    if len(lines) < 2:
+        raise ValueError("基准程序输出不完整")
+    return (lines[1], lines[0])
