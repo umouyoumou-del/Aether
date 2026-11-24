@@ -1,8 +1,34 @@
-# Aether
+<div align="center">
 
-**一门融合 Python、C++、Go、Java、C# 优点的编程语言。**
+# Aether（五行）
 
-Python 的简洁语法 + 静态类型与类型推断 + 编译为原生可执行文件 + Go 的协程与通道 + Java/C# 的类、接口与异常 + C# 的空安全与 LINQ。
+**Python 的写法，静态类型的安全，原生代码的速度。**
+
+一门融合 Python、C++、Go、Java、C# 优点的编程语言：Python 的简洁语法与推导式、静态类型与类型推断、
+编译为不依赖运行时的原生可执行文件、Go 的协程与通道、Java/C# 的类/接口/异常/属性与空安全，
+并自带一个可用 GPU 的深度学习框架。
+
+[![Go 1.23+](https://img.shields.io/badge/Go-1.23%2B-00ADD8?logo=go)](https://go.dev/dl/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)](https://github.com/umouyoumou-del/Aether)
+[![Stars](https://img.shields.io/github/stars/umouyoumou-del/Aether?style=social)](https://github.com/umouyoumou-del/Aether/stargazers)
+
+[快速开始](#快速开始) · [特性](#特性) · [深度学习](#深度学习) · [性能](#性能) · [文档](#文档) · [贡献](#贡献)
+
+</div>
+
+---
+
+## 为什么是 Aether
+
+Python 写起来舒服，但类型错误要到运行时才发现，发布还要带一整套解释器；
+C++/Rust 快且安全，但写起来远没有 Python 轻快。Aether 的目标是把这条裂缝补上：
+
+- **写起来像 Python**：缩进、推导式、切片、f-字符串、`with`、`match`、生成器、装饰器。
+- **查起来像 Java/C#**：编译期类型推断、空安全窄化、确定赋值、泛型约束、穷尽性检查，中文报错带修改建议。
+- **跑起来像 Go/C++**：生成 Go 代码后编译为单个原生可执行文件，不需要 Python 解释器；比 CPython 快 2～34 倍。
+- **并发像 Go**：`go`、`chan`、`select`、`defer`、`async`/`await` 一套齐全。
+- **自带深度学习**：张量、自动求导、常见网络层与优化器，GPU 走 OpenCL，**不需要装 CUDA/ROCm**。
 
 ```python
 # hello.ae
@@ -21,7 +47,8 @@ fib(30) = 832040，80 分以上：["小明", "小红"]
 
 ## 名字的由来
 
-**Aether**（以太）是古希腊哲学中的“第五元素”——土、水、气、火之外构成天空与星辰的元素。Aether 吸收了五门语言各自最好的部分：
+**Aether**（以太 / 五行之“气”）是古希腊哲学中的第五元素——土、水、气、火之外构成天空与星辰的元素。
+Aether 吸收了五门语言各自最好的部分：
 
 | 来源 | Aether 吸收了什么 |
 |---|---|
@@ -33,26 +60,39 @@ fib(30) = 832040，80 分以上：["小明", "小红"]
 
 ## 快速开始
 
-需要 [Go 1.23+](https://go.dev/dl/)（Aether 把程序编译为 Go 代码，再由 Go 编译为原生可执行文件）。
+需要 [Go 1.23+](https://go.dev/dl/)（国内可用 [golang.google.cn](https://golang.google.cn/dl/)）。
+Aether 把 `.ae` 源码翻译成 Go，再由 Go 编译为原生程序。
+
+### Windows（PowerShell）
+
+**方式一：MSI 安装包（推荐）**——下载 Release 中的 `Aether-0.1.0-x64.msi`，双击安装。
+它会把编译器装到 `Program Files\Aether`、自动加入系统 PATH、并创建开始菜单快捷方式。
+安装后打开任意终端即可使用 `aether run hello.ae`（编译程序仍需本机有 Go 工具链）。
+
+**方式二：源码构建**
 
 ```powershell
-cd E:\Aether
+git clone https://github.com/umouyoumou-del/Aether.git
+cd Aether
 powershell -ExecutionPolicy Bypass -File install.ps1             # 构建 bin\aether.exe 并运行 hello 示例
 powershell -ExecutionPolicy Bypass -File install.ps1 -AddToPath  # 同时把 bin 加入用户 PATH
 ```
 
-也可以手动构建：`go build -o bin\aether.exe .\cmd\aether`。第一次运行程序时 Go 需要编译标准库，会多花几秒钟。
-
-Linux（以及 macOS）：
+### Linux / macOS
 
 ```sh
-cd aether
-sh install.sh                 # 构建 bin/aether，运行 hello 示例，并检查能否使用 GPU
+git clone https://github.com/umouyoumou-del/Aether.git
+cd Aether
+sh install.sh                 # 构建 bin/aether，运行 hello 示例，并检查 GPU 环境
 sh install.sh --add-to-path   # 同时把 bin 加入 PATH（写入 ~/.bashrc）
 ```
 
-在 Linux 上用 GPU 还需要 C 编译器、OpenCL 加载器和显卡驱动（Ubuntu/Debian：`apt install build-essential ocl-icd-libopencl1`），
-见 [docs/深度学习.md](docs/深度学习.md)。
+在 Linux 上用 GPU 还需要 C 编译器与 OpenCL 加载器（Ubuntu/Debian：`apt install build-essential ocl-icd-libopencl1`），详见 [深度学习文档](docs/深度学习.md)。
+
+也可以手动构建：`go build -o bin/aether ./cmd/aether`（Windows 为 `bin\aether.exe`）。
+第一次运行程序时 Go 需要编译标准库，会多花几秒钟。
+
+### 命令一览
 
 | 命令 | 作用 |
 |---|---|
@@ -64,7 +104,7 @@ sh install.sh --add-to-path   # 同时把 bin 加入 PATH（写入 ~/.bashrc）
 | `aether repl` | 交互模式：输入表达式立即看到结果 |
 | `aether lsp` | 语言服务器（供 VS Code 等编辑器使用） |
 
-## 特性一览
+## 特性
 
 ### 类型推断与静态检查
 
@@ -209,7 +249,7 @@ def area(s: Shape) -> float:
 
 `match` 还支持字面量、`|`、守卫 `if`、元组、列表 `[first, *rest]`、类型模式 `case int n`；没有覆盖所有枚举成员时会给出警告。
 
-### 空安全
+### 空安全与异常
 
 ```python
 def find(xs: list[str], p: str) -> str?:      # T? 表示可能为 null
@@ -218,11 +258,7 @@ r = find(langs, "J")
 print(r?.upper() ?? "没找到")
 if r != null:
     print(len(r))                              # 这里 r 自动窄化为 str
-```
 
-### 异常
-
-```python
 class InsufficientFunds(Exception):
     pass
 
@@ -230,10 +266,6 @@ try:
     withdraw(500.0)
 except InsufficientFunds as e:
     print("失败：", e)
-except (ValueError, KeyError):
-    ...
-else:
-    ...
 finally:
     ...
 ```
@@ -263,10 +295,10 @@ async def fetch(url: str) -> int:
 sizes = await [fetch(u) for u in urls]          # 并发执行，等待全部完成
 ```
 
-### 生成器、泛型、模块
+### 泛型、模块与测试
 
 ```python
-def naturals() -> iter[int]:
+def naturals() -> iter[int]:                   # 生成器
     n = 1
     while true:
         yield n
@@ -274,46 +306,11 @@ def naturals() -> iter[int]:
 
 def max_of[T: Ordered](xs: list[T]) -> T: ...
 class Stack[T]: ...
+import geo.shapes as gs                        # 导入 geo/shapes.ae
 
-import geo.shapes as gs          # 导入 geo/shapes.ae
-from math import sqrt, pi
-```
-
-### 测试
-
-```python
-test "加法":
+test "加法":                                   # aether test 文件.ae
     assert add(1, 2) == 3
 ```
-
-```
-$ aether test calc.ae
-  ✓ 加法 (2µs)
-  ✗ 故意失败
-      AssertionError: 断言失败：add(2, 2) == 5
-        左边：4
-        右边：5
-```
-
-### 深度学习（GPU 加速）
-
-```python
-import tensor
-import tensor.nn as nn
-import tensor.optim as optim
-
-tensor.set_default_device("gpu")              # NVIDIA、AMD、Intel 显卡都可以（通过驱动自带的 OpenCL；Windows 与 Linux）
-x, y = tensor.randn(256, 2), tensor.randint(0, 3, [256])
-model = nn.Sequential(nn.Linear(2, 64), nn.ReLU(), nn.Linear(64, 3))
-opt = optim.Adam(model.parameters(), lr=0.01)
-for step in range(100):
-    loss = nn.CrossEntropyLoss()(model(x), y)
-    opt.zero_grad()
-    loss.backward()                           # 自动求导
-    opt.step()
-```
-
-张量、自动求导、`Linear`/`Conv2d`/`BatchNorm`/`LayerNorm`/`Embedding`/`Dropout`/`LSTM`/`GRU`/`MultiheadAttention`/`TransformerEncoderLayer` 等层、SGD/Adam/AdamW、学习率调度、模型保存与读取，接口与 PyTorch 基本一致；GPU 后端不需要安装 CUDA 或 ROCm，CPU 上的矩阵乘法使用 AVX2 汇编内核。示例有多层感知机、卷积网络、一个会“写唐诗”的小 GPT（`examples/gpt.ae`），以及仿照 TypeSafe Jev 的小巧决策模型 MiniJev（`examples/minijev/`：给出状态和类型化的问题，返回类型化的决策与校准的概率）。详见 [docs/深度学习.md](docs/深度学习.md)。
 
 ### 标准库
 
@@ -326,6 +323,33 @@ server = http.Server()
 server.get("/hello/{name}", req => http.text(f"你好，{req.param("name") ?? "世界"}！"))
 server.listen(":8080")
 ```
+
+## 深度学习
+
+Aether 自带深度学习框架：多维张量、自动求导、常见网络层、损失函数与优化器，接口与 PyTorch 基本一致。
+GPU 后端使用显卡驱动自带的 **OpenCL**（NVIDIA / AMD / Intel 均可），**不用安装 CUDA 或 ROCm**；Windows 与 Linux 都可用。
+
+```python
+import tensor
+import tensor.nn as nn
+import tensor.optim as optim
+
+tensor.set_default_device("gpu")
+x, y = tensor.randn(256, 2), tensor.randint(0, 3, [256])
+model = nn.Sequential(nn.Linear(2, 64), nn.ReLU(), nn.Linear(64, 3))
+opt = optim.Adam(model.parameters(), lr=0.01)
+for step in range(100):
+    loss = nn.CrossEntropyLoss()(model(x), y)
+    opt.zero_grad()
+    loss.backward()                           # 自动求导
+    opt.step()
+```
+
+- **层与优化器**：`Linear` / `Conv2d` / `BatchNorm` / `LayerNorm` / `RMSNorm` / `SiLU` / `Embedding` / `Dropout` / `LSTM` / `GRU` / `MultiheadAttention` / `TransformerEncoderLayer`；SGD / Adam / AdamW；学习率调度；模型保存与读取（含 safetensors、int8 权重）。
+- **示例**：`examples/deep_learning.ae`（多层感知机）、`examples/cnn.ae`（卷积网络）、`examples/gpt.ae`（会“写唐诗”的小 GPT）。
+- **MiniJev / QwenJev**：`examples/minijev/` 是仿照 [TypeSafe Jev](https://docs.typesafe.ai) 接口的小巧 System One 决策模型；其中 QwenJev 用 **LoRA 把 Qwen3-1.7B 微调成同接口的模型**（分词器、模型、训练全部用 Aether 实现），并提供与 TypeSafe System One API 兼容的 HTTP 服务。详见 [examples/minijev/README.md](examples/minijev/README.md)。
+
+完整文档见 [docs/深度学习.md](docs/深度学习.md)。
 
 ## 性能
 
@@ -350,31 +374,61 @@ Aether 编译为原生代码。以下是同一份程序在 Windows 11 上与 Pyt
         → go build → 原生可执行文件
 ```
 
-运行时库（列表、有序字典、集合、可空值、格式化、异常回溯等）是一个 Go 包，嵌入在 `aether` 可执行文件中。详见 [docs/实现原理.md](docs/实现原理.md)。
+运行时库（列表、有序字典、集合、可空值、格式化、异常回溯等）是一个 Go 包，嵌入在 `aether` 可执行文件中。
+详见 [docs/实现原理.md](docs/实现原理.md)。
 
-## 目录结构
+## 项目结构
 
 ```
-cmd/aether/      命令行工具
-compiler/        编译器：lexer、parser、checker、代码生成、构建驱动、测试
-assets/rt/       运行时库（Go）
-assets/lib/      预导入模块 prelude.ae 与标准库 math/random/time/os/json/re/http（.ae）
-examples/        示例程序（计算器、银行、并发、Web 服务、生命游戏、神经网络……）
-tests/run/       黄金测试（程序 + 期望输出）
-tests/errors/    编译错误测试
-docs/            语言参考、标准库、深度学习、实现原理
-editors/vscode/  VS Code 插件（语法高亮，以及语言服务器的客户端）
+cmd/aether/         命令行工具
+compiler/           编译器：lexer、parser、checker、代码生成、构建驱动、测试
+assets/rt/          运行时库（Go），含 tensor 的 CPU/GPU 内核
+assets/lib/         预导入模块 prelude.ae 与标准库（.ae）
+examples/           示例程序（计算器、银行、并发、Web 服务、生命游戏、深度学习……）
+examples/minijev/   MiniJev 与 QwenJev：完整的训练与推理示例
+tests/run/          黄金测试（程序 + 期望输出）
+tests/errors/       编译错误测试
+docs/               语言参考、标准库、深度学习、实现原理
+editors/vscode/     VS Code 插件（语法高亮 + 语言服务器客户端）
 ```
 
-运行全部测试：`cd compiler && go test .`
+运行全部测试：
+
+```sh
+cd compiler && go test .
+```
 
 ## 编辑器支持
 
-`editors/vscode` 是 VS Code 插件：语法高亮，以及通过语言服务器 `aether lsp` 提供的**实时中文诊断、悬停显示类型、跳转到定义、成员补全和大纲**。把该目录复制到 `%USERPROFILE%\.vscode\extensions\aether-0.2.0` 后重启 VS Code 即可（需要 `aether` 在 PATH 中，或在设置中指定 `aether.path`），详见 [editors/vscode/README.md](editors/vscode/README.md)。其它支持 LSP 的编辑器也可以直接使用 `aether lsp`。
+`editors/vscode` 提供语法高亮，以及通过 `aether lsp` 实现的**实时中文诊断、悬停显示类型、跳转到定义、成员补全和大纲**。
+其它支持 LSP 的编辑器也可以直接使用 `aether lsp`。详见 [editors/vscode/README.md](editors/vscode/README.md)。
+
+## 文档
+
+| 文档 | 内容 |
+|---|---|
+| [语言参考](docs/语言参考.md) | 语法、类型系统、语句与表达式、模块、泛型的完整说明 |
+| [标准库](docs/标准库.md) | 内置函数与所有标准库模块的 API |
+| [深度学习](docs/深度学习.md) | 张量、自动求导、nn / optim、GPU 与性能 |
+| [实现原理](docs/实现原理.md) | 编译器管线、运行时与代码生成 |
+| [MiniJev / QwenJev](examples/minijev/README.md) | 用 Aether 从零训练决策模型与微调 Qwen3 |
 
 ## 当前限制
 
 - 整数是 64 位，溢出时回绕（不像 Python 那样自动变成大整数）。
 - 方法不能重载（扩展方法可以按参数个数区分）；装饰器只支持 `@cache` / `@lru_cache`；不支持多重继承、`**kwargs`。
 - 无限递归会因栈空间耗尽而终止（`aether run` 会显示中文说明），不能被 `try` 捕获。
-- 运行需要本机安装 Go 工具链；`aether build` 生成的可执行文件可以在没有 Go 的机器上运行。
+- 编译和运行需要本机安装 Go 工具链；`aether build` 生成的可执行文件可以在没有 Go 的机器上运行。
+
+## 贡献
+
+欢迎提交 issue 和 pull request。贡献前请：
+
+1. 在 issue 中说明你想改动的内容（大改动尤其如此）；
+2. 保持错误信息为中文，并遵循现有代码风格；
+3. 修改编译器后运行 `cd compiler && go test .`，确认全部测试通过；
+4. 新增语法特性时，同时补上 `tests/run/` 的黄金测试或 `tests/errors/` 的错误测试，并更新 [语言参考](docs/语言参考.md)。
+
+## 许可
+
+本项目使用 [MIT 许可证](LICENSE)，可自由使用、修改与分发，包括商业用途。

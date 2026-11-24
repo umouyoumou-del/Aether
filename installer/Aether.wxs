@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="Aether (五行)"
+           Manufacturer="Aether contributors"
+           Version="0.1.0"
+           UpgradeCode="{B8F3C2A1-5D47-4E9B-9A31-7C2E8F5D6401}"
+           Scope="perMachine"
+           Language="2052">
+
+    <MajorUpgrade DowngradeErrorMessage="已安装更新版本的 Aether。" />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Property Id="ARPPRODUCTICON" Value="AetherIcon" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/umouyoumou-del/Aether" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/umouyoumou-del/Aether" />
+    <Icon Id="AetherIcon" SourceFile="$(sys.SOURCEFILEDIR)..\bin\aether.exe" />
+
+    <StandardDirectory Id="ProgramFiles6432Folder">
+      <Directory Id="INSTALLFOLDER" Name="Aether">
+        <Directory Id="BinFolder" Name="bin" />
+        <Directory Id="DocsFolder" Name="docs" />
+        <Directory Id="ExamplesFolder" Name="examples">
+          <Directory Id="MiniJevFolder" Name="minijev" />
+        </Directory>
+        <Directory Id="EditorsFolder" Name="editors">
+          <Directory Id="VSCodeFolder" Name="vscode">
+            <Directory Id="SyntaxesFolder" Name="syntaxes" />
+          </Directory>
+        </Directory>
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="AetherMenuFolder" Name="Aether" />
+    </StandardDirectory>
+
+    <Feature Id="Complete" Title="Aether" Description="Aether 编译器、标准库文档与示例" Level="1" ConfigurableDirectory="INSTALLFOLDER">
+      <ComponentRef Id="AetherExecutable" />
+      <ComponentRef Id="RootDocuments" />
+      <ComponentRef Id="DocumentationFiles" />
+      <ComponentRef Id="ExampleFiles" />
+      <ComponentRef Id="MiniJevFiles" />
+      <ComponentRef Id="VSCodeFiles" />
+      <ComponentRef Id="VSCodeSyntaxFiles" />
+      <ComponentRef Id="StartMenuShortcuts" />
+    </Feature>
+  </Package>
+
+  <Fragment>
+    <Component Id="AetherExecutable" Directory="BinFolder" Guid="*">
+      <File Id="aether_exe" Source="$(sys.SOURCEFILEDIR)..\bin\aether.exe" KeyPath="yes" />
+      <Environment Id="AetherPath" Name="PATH" Value="[BinFolder]" Part="last" Action="set" System="yes" />
+    </Component>
+
+    <Component Id="RootDocuments" Guid="{5611EDC1-03B2-587B-9710-3ACC18CD0ECA}" Directory="INSTALLFOLDER">
+      <File Id="readme_md" Source="$(sys.SOURCEFILEDIR)..\README.md" KeyPath="yes" />
+      <File Id="license_file" Source="$(sys.SOURCEFILEDIR)..\LICENSE" />
+    </Component>
+
+    <Component Id="DocumentationFiles" Guid="{2ECCF9AC-B2A0-5249-92BF-F08635B8CA88}" Directory="DocsFolder">
+      <File Id="doc_impl" Source="$(sys.SOURCEFILEDIR)..\docs\实现原理.md" KeyPath="yes" />
+      <File Id="doc_stdlib" Source="$(sys.SOURCEFILEDIR)..\docs\标准库.md" />
+      <File Id="doc_dl" Source="$(sys.SOURCEFILEDIR)..\docs\深度学习.md" />
+      <File Id="doc_ref" Source="$(sys.SOURCEFILEDIR)..\docs\语言参考.md" />
+    </Component>
+
+    <Component Id="ExampleFiles" Guid="{136E24CC-F260-5361-B368-7DFFEB5C2904}" Directory="ExamplesFolder">
+      <File Id="ex_hello" Source="$(sys.SOURCEFILEDIR)..\examples\hello.ae" KeyPath="yes" />
+      <File Id="ex_bank" Source="$(sys.SOURCEFILEDIR)..\examples\bank.ae" />
+      <File Id="ex_calculator" Source="$(sys.SOURCEFILEDIR)..\examples\calculator.ae" />
+      <File Id="ex_cnn" Source="$(sys.SOURCEFILEDIR)..\examples\cnn.ae" />
+      <File Id="ex_concurrency" Source="$(sys.SOURCEFILEDIR)..\examples\concurrency.ae" />
+      <File Id="ex_deep_learning" Source="$(sys.SOURCEFILEDIR)..\examples\deep_learning.ae" />
+      <File Id="ex_generics" Source="$(sys.SOURCEFILEDIR)..\examples\generics.ae" />
+      <File Id="ex_gpt" Source="$(sys.SOURCEFILEDIR)..\examples\gpt.ae" />
+      <File Id="ex_life" Source="$(sys.SOURCEFILEDIR)..\examples\life.ae" />
+      <File Id="ex_linq" Source="$(sys.SOURCEFILEDIR)..\examples\linq.ae" />
+      <File Id="ex_mandelbrot" Source="$(sys.SOURCEFILEDIR)..\examples\mandelbrot.ae" />
+      <File Id="ex_null_safety" Source="$(sys.SOURCEFILEDIR)..\examples\null_safety.ae" />
+      <File Id="ex_shapes" Source="$(sys.SOURCEFILEDIR)..\examples\shapes.ae" />
+      <File Id="ex_testing" Source="$(sys.SOURCEFILEDIR)..\examples\testing.ae" />
+      <File Id="ex_todo" Source="$(sys.SOURCEFILEDIR)..\examples\todo.ae" />
+      <File Id="ex_web" Source="$(sys.SOURCEFILEDIR)..\examples\web.ae" />
+      <File Id="ex_wordfreq" Source="$(sys.SOURCEFILEDIR)..\examples\wordfreq.ae" />
+    </Component>
+
+    <Component Id="MiniJevFiles" Guid="{2F196099-3925-549C-93ED-AFB7CD9FB5CC}" Directory="MiniJevFolder">
+      <File Id="mj_readme" Source="$(sys.SOURCEFILEDIR)..\examples\minijev\README.md" KeyPath="yes" />
+      <File Id="mj_data" Source="$(sys.SOURCEFILEDIR)..\examples\minijev\data.ae" />
+      <File Id="mj_demo" Source="$(sys.SOURCEFILEDIR)..\examples\minijev\demo.ae" />
+      <File Id="mj_main" Source="$(sys.SOURCEFILEDIR)..\examples\minijev\minijev.ae" />
+      <File Id="mj_qwen_demo" Source="$(sys.SOURCEFILEDIR)..\examples\minijev\qwen_demo.ae" />
+      <File Id="mj_qwen_model" Source="$(sys.SOURCEFILEDIR)..\examples\minijev\qwen_model.ae" />
+      <File Id="mj_qwen_server" Source="$(sys.SOURCEFILEDIR)..\examples\minijev\qwen_server.ae" />
+      <File Id="mj_qwen_tokenizer" Source="$(sys.SOURCEFILEDIR)..\examples\minijev\qwen_tokenizer.ae" />
+      <File Id="mj_qwen_train" Source="$(sys.SOURCEFILEDIR)..\examples\minijev\qwen_train.ae" />
+      <File Id="mj_qwenjev" Source="$(sys.SOURCEFILEDIR)..\examples\minijev\qwenjev.ae" />
+      <File Id="mj_train" Source="$(sys.SOURCEFILEDIR)..\examples\minijev\train.ae" />
+    </Component>
+
+    <Component Id="VSCodeFiles" Guid="{89D13C04-FEF8-5B21-ADF2-2E1CCB6C7462}" Directory="VSCodeFolder">
+      <File Id="vscode_readme" Source="$(sys.SOURCEFILEDIR)..\editors\vscode\README.md" KeyPath="yes" />
+      <File Id="vscode_extension" Source="$(sys.SOURCEFILEDIR)..\editors\vscode\extension.js" />
+      <File Id="vscode_config" Source="$(sys.SOURCEFILEDIR)..\editors\vscode\language-configuration.json" />
+      <File Id="vscode_package" Source="$(sys.SOURCEFILEDIR)..\editors\vscode\package.json" />
+    </Component>
+
+    <Component Id="VSCodeSyntaxFiles" Directory="SyntaxesFolder" Guid="*">
+      <File Id="vscode_grammar" Source="$(sys.SOURCEFILEDIR)..\editors\vscode\syntaxes\aether.tmLanguage.json" KeyPath="yes" />
+    </Component>
+
+    <Component Id="StartMenuShortcuts" Directory="AetherMenuFolder" Guid="*">
+      <Shortcut Id="AetherReplShortcut"
+                Name="Aether REPL"
+                Description="Aether 交互式解释器"
+                Target="[BinFolder]aether.exe"
+                Arguments="repl"
+                WorkingDirectory="BinFolder"
+                Icon="AetherIcon" />
+      <Shortcut Id="UninstallShortcut"
+                Name="卸载 Aether"
+                Target="[System64Folder]msiexec.exe"
+                Arguments="/x [ProductCode]" />
+      <RegistryValue Root="HKCU" Key="Software\Aether\Installer" Name="StartMenu" Type="integer" Value="1" KeyPath="yes" />
+      <RemoveFolder Id="RemoveAetherMenu" On="uninstall" />
+    </Component>
+  </Fragment>
+</Wix>

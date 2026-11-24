@@ -1,3 +1,6 @@
 /bin/
 *.exe
 /tests/out/
+/installer/.wix/
+/installer/*.msi
+/installer/*.wixpdb
