@@ -239,6 +239,14 @@ func (x *Tensor) Gelu() *Tensor {
 	})
 }
 
+// Silu 是 x * sigmoid(x)（也叫 Swish，Qwen、LLaMA 等模型的前馈网络使用）。
+func (x *Tensor) Silu() *Tensor {
+	out := unaryRaw(uSilu, x, 0, 0)
+	return record(out, "silu", []*Tensor{x}, func(g *Tensor) []*Tensor {
+		return []*Tensor{g.Mul(unaryRaw(uSiluGrad, x, 0, 0))}
+	})
+}
+
 func (x *Tensor) Sin() *Tensor {
 	out := unaryRaw(uSin, x, 0, 0)
 	return record(out, "sin", []*Tensor{x}, func(g *Tensor) []*Tensor {
@@ -1067,6 +1075,32 @@ func LayerNorm(x, weight, bias *Tensor, eps float64) *Tensor {
 			gb = g2.sumDim(0, false).view(bias.shape)
 		}
 		return []*Tensor{gx, gw, gb}
+	})
+}
+
+// RMSNorm 对最后一维做均方根归一化：x / sqrt(mean(x²) + eps) * weight（前向、反向各是一个融合的运算）。
+func RMSNorm(x, weight *Tensor, eps float64) *Tensor {
+	if len(x.shape) == 0 {
+		raiseShape("rms_norm 不能用于零维张量")
+	}
+	d := x.shape[len(x.shape)-1]
+	if weight.n != d {
+		raiseShape("rms_norm：输入的最后一维是 %d，但 weight 的形状是 %s", d, shapeStr(weight.shape))
+	}
+	dev := sameDevice("rms_norm", x, weight)
+	rows := x.n / max(d, 1)
+	out, xhat, rstd := newTensor(dev, x.shape), newTensor(dev, x.shape), newTensor(dev, []int{rows})
+	dev.rmsNorm(x.st, weight.st, out.st, xhat.st, rstd.st, rows, d, float32(eps))
+	return record(out, "rms_norm", []*Tensor{x, weight}, func(g *Tensor) []*Tensor {
+		var gx, gw *Tensor
+		if x.requiresGrad {
+			gx = newTensor(dev, x.shape)
+			dev.rmsNormBack(g.st, weight.st, xhat.st, rstd.st, gx.st, rows, d)
+		}
+		if weight.requiresGrad {
+			gw = g.view([]int{rows, d}).Mul(xhat.view([]int{rows, d})).sumDim(0, false).view(weight.shape)
+		}
+		return []*Tensor{gx, gw}
 	})
 }
 

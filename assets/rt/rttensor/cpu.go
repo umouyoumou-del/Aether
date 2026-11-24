@@ -172,6 +172,10 @@ func unaryFunc(op int, a, b float32) func(float32) float32 {
 		return func(x float32) float32 { return b2f(x < a) }
 	case uGeluGrad:
 		return geluGradF
+	case uSilu:
+		return siluf
+	case uSiluGrad:
+		return siluGradf
 	case uSigDeriv:
 		return func(y float32) float32 { return y * (1 - y) }
 	case uTanhDeriv:
@@ -601,6 +605,45 @@ func (*cpuBackend) layerNormBack(dy, w, xhat, rstd, dx *storage, rows, d int) {
 			inv := rs[r]
 			for j := range g {
 				out[j] = inv * (g[j]*ws[j] - mg - h[j]*mgh)
+			}
+		}
+	})
+}
+
+func (*cpuBackend) rmsNorm(x, w, y, xhat, rstd *storage, rows, d int, eps float32) {
+	xs, ws, ys, hs, rs := x.cpu, w.cpu, y.cpu, xhat.cpu, rstd.cpu
+	parallelFor(rows, max(1, 4096/max(d, 1)), func(lo, hi int) {
+		for r := lo; r < hi; r++ {
+			row := xs[r*d : (r+1)*d]
+			var ss float64
+			for _, v := range row {
+				ss += float64(v) * float64(v)
+			}
+			inv := float32(1 / math.Sqrt(ss/float64(d)+float64(eps)))
+			rs[r] = inv
+			h, out := hs[r*d:(r+1)*d], ys[r*d:(r+1)*d]
+			for j, v := range row {
+				xh := v * inv
+				h[j] = xh
+				out[j] = xh * ws[j]
+			}
+		}
+	})
+}
+
+func (*cpuBackend) rmsNormBack(dy, w, xhat, rstd, dx *storage, rows, d int) {
+	gs, ws, hs, rs, ds := dy.cpu, w.cpu, xhat.cpu, rstd.cpu, dx.cpu
+	parallelFor(rows, max(1, 4096/max(d, 1)), func(lo, hi int) {
+		for r := lo; r < hi; r++ {
+			g, h, out := gs[r*d:(r+1)*d], hs[r*d:(r+1)*d], ds[r*d:(r+1)*d]
+			var sgh float64
+			for j := range g {
+				sgh += float64(g[j] * ws[j] * h[j])
+			}
+			mgh := float32(sgh / float64(d))
+			inv := rs[r]
+			for j := range g {
+				out[j] = inv * (g[j]*ws[j] - h[j]*mgh)
 			}
 		}
 	})

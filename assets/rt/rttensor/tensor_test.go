@@ -167,6 +167,9 @@ func gradCases() []gradCase {
 		{name: "topk sort", inputs: in(distinct(55, 3, 5)), f: func(x, _ []*Tensor) *Tensor {
 			return x[0].Topk(2, true).V0.Sum(none, false).Add(x[0].Sort(false).V0.Narrow(1, 0, 3).Square().Sum(none, false))
 		}},
+		{name: "rms_norm silu", inputs: in(r(56, 3, 8), r(57, 8)), f: func(x, _ []*Tensor) *Tensor {
+			return RMSNorm(x[0], x[1], 1e-6).Silu()
+		}},
 		{name: "where clone", inputs: in(r(51, 6), r(52, 6)), consts: in(constT([]int{6}, 1, 0, 0, 1, 1, 0)), f: func(x, c []*Tensor) *Tensor {
 			return Where(c[0], x[0], x[1].Clone())
 		}},
@@ -396,6 +399,74 @@ func TestEmptyTensors(t *testing.T) {
 	}
 }
 
+// TestCheckpoint 检查重新计算得到的梯度与普通的反向传播相同（包括 f 中的 dropout 与参数的梯度）。
+func TestCheckpoint(t *testing.T) {
+	x0, w0 := randT(70, -1, 1, 4, 6), randT(71, -1, 1, 6, 6)
+	f := func(w *Tensor) func(*Tensor) *Tensor {
+		return func(h *Tensor) *Tensor { return Dropout(h.Matmul(w).Tanh(), 0.3, true).Add(h) }
+	}
+	run := func(ckpt bool) ([]float32, []float32) {
+		ManualSeed(9)
+		x := fromHost(cpuDev, x0.shape, x0.host()).SetRequiresGrad(true)
+		w := fromHost(cpuDev, w0.shape, w0.host()).SetRequiresGrad(true)
+		h := x
+		for i := 0; i < 3; i++ {
+			if ckpt {
+				h = Checkpoint(f(w), h)
+			} else {
+				h = f(w)(h)
+			}
+		}
+		h.Square().Sum(none, false).Backward(rt.Opt[*Tensor]{})
+		return x.grad.host(), w.grad.host()
+	}
+	gx1, gw1 := run(false)
+	gx2, gw2 := run(true)
+	if i, ok := closeTo(gx2, gx1, 1e-5); !ok {
+		t.Fatalf("输入的梯度不同（第 %d 个元素）", i)
+	}
+	if i, ok := closeTo(gw2, gw1, 1e-5); !ok {
+		t.Fatalf("参数的梯度不同（第 %d 个元素）", i)
+	}
+}
+
+// TestQuantizedLinear 比较 int8 权重的线性层与反量化后的 float32 线性层（前向与对输入的梯度）。
+func TestQuantizedLinear(t *testing.T) {
+	for _, sz := range [][3]int{{70, 133, 15}, {260, 132, 100}, {388, 1024, 70}} {
+		testQuantizedLinear(t, sz[0], sz[1], sz[2])
+	}
+}
+
+func testQuantizedLinear(t *testing.T, rows, cols, m int) {
+	devs := []backend{cpuDev}
+	if g := gpu(); g != nil {
+		devs = append(devs, g)
+	}
+	w0, x0 := randT(80, -0.5, 0.5, rows, cols), randT(81, -1, 1, m, cols)
+	for _, dev := range devs {
+		w := fromHost(dev, w0.shape, w0.host())
+		q := QuantizeInt8(w, rt.Opt[string]{})
+		deq := q.Dequantize()
+		if i, ok := closeTo(deq.host(), w0.host(), 0.5/127); !ok {
+			t.Fatalf("%s：反量化的误差太大（第 %d 个元素）", dev.name(), i)
+		}
+		run := func(f func(x *Tensor) *Tensor) ([]float32, []float32) {
+			x := fromHost(dev, x0.shape, x0.host()).SetRequiresGrad(true)
+			y := f(x)
+			y.Mul(fromHost(dev, y.shape, randT(82, -1, 1, y.shape...).host())).Sum(none, false).Backward(rt.Opt[*Tensor]{})
+			return y.host(), x.grad.host()
+		}
+		y1, g1 := run(func(x *Tensor) *Tensor { return LinearQ8(x, q) })
+		y2, g2 := run(func(x *Tensor) *Tensor { return LinearFn(x, deq, rt.Opt[*Tensor]{}) })
+		if i, ok := closeTo(y1, y2, 1e-4); !ok {
+			t.Fatalf("%s：前向结果不同（第 %d 个元素：%v 与 %v）", dev.name(), i, y1[i], y2[i])
+		}
+		if i, ok := closeTo(g1, g2, 1e-4); !ok {
+			t.Fatalf("%s：梯度不同（第 %d 个元素）", dev.name(), i)
+		}
+	}
+}
+
 func TestErrors(t *testing.T) {
 	a := Zeros(ints(2, 3))
 	expectRaise(t, "ValueError", "不能广播", func() { a.Add(Zeros(ints(4))) })
@@ -443,8 +514,8 @@ func TestAutogradBasics(t *testing.T) {
 	}
 }
 
-// TestGPUMemoryBounded 检查显存会被回收复用：反复分配大张量时，占用的显存不超过
-// “仍在使用的张量 + 回收阈值”。
+// TestGPUMemoryBounded 检查显存会被回收复用：反复分配大张量时，占用的显存（正在使用 + 缓存）
+// 不超过上限 highWater 太多。
 func TestGPUMemoryBounded(t *testing.T) {
 	needGPU(t)
 	g := gpu()
@@ -456,15 +527,15 @@ func TestGPUMemoryBounded(t *testing.T) {
 		x.Matmul(w).Relu().Sum(none, false).Backward(rt.Opt[*Tensor]{})
 		w.ZeroGrad()
 	}
-	g.collect()
-	g.poolMu.Lock()
-	pooled := int64(0)
-	for size, l := range g.pool {
-		pooled += int64(size * len(l))
+	if total := g.liveBytes.Load() + g.pooledBytes.Load(); total > g.highWater+(64<<20) {
+		t.Fatalf("显存占用 %d MB，超过了上限 %d MB", total>>20, g.highWater>>20)
 	}
-	g.poolMu.Unlock()
-	if total := g.liveBytes.Load() + pooled; total > g.gcBudget+(64<<20) {
-		t.Fatalf("显存占用 %d MB，超过了回收阈值 %d MB", total>>20, g.gcBudget>>20)
+	g.collect()
+	if live := g.liveBytes.Load(); live > 64<<20 {
+		t.Fatalf("回收之后仍有 %d MB 显存被占用", live>>20)
+	}
+	if size := sizeClass(5<<20 + 1); size != 5<<20+512<<10 {
+		t.Fatalf("5 MB + 1 字节的块大小为 %d", size)
 	}
 	EmptyCache()
 }
@@ -504,7 +575,8 @@ func TestMatmulShapes(t *testing.T) {
 		devs = append(devs, g)
 	}
 	sizes := [][3]int{{1, 1, 1}, {6, 16, 1}, {7, 17, 3}, {5, 300, 33}, {13, 1, 600}, {64, 64, 64}, {97, 131, 259}, {1, 513, 70}, {300, 7, 9},
-		{128, 16, 128}, {130, 40, 257}, {255, 129, 140}, {100, 16, 100}, {100, 100, 16}, {40, 33, 33}}
+		{128, 16, 128}, {130, 40, 257}, {255, 129, 140}, {100, 16, 100}, {100, 100, 16}, {40, 33, 33},
+		{132, 36, 260}, {300, 1024, 388}, {256, 20, 132}}
 	seed := uint64(100)
 	for _, sz := range sizes {
 		m, k, n := sz[0], sz[1], sz[2]

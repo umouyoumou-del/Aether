@@ -23,6 +23,10 @@ type backend interface {
 	layerNorm(x, w, b, y, xhat, rstd *storage, rows, d int, eps float32)
 	// 层归一化的反向（对 x）：dx = rstd * (g - mean(g) - xhat * mean(g * xhat))，其中 g = dy * w
 	layerNormBack(dy, w, xhat, rstd, dx *storage, rows, d int)
+	// RMSNorm（每行 d 个数）：y = x / sqrt(mean(x²) + eps) * w，保存 xhat 与 rstd；
+	// 反向：dx = rstd * (g - xhat * mean(g * xhat))，其中 g = dy * w
+	rmsNorm(x, w, y, xhat, rstd *storage, rows, d int, eps float32)
+	rmsNormBack(dy, w, xhat, rstd, dx *storage, rows, d int)
 	permute(x, y *storage, shape, perm []int)
 	narrow(x, y *storage, outer, dim, inner, start, length int)
 	place(x, y *storage, outer, dim, inner, start, length int)
@@ -71,6 +75,8 @@ const (
 	uLeakyGrad // x > 0 ? 1 : a
 	uPowSGrad  // a * x ** (a - 1)
 	uLtS       // x < a ? 1 : 0
+	uSilu      // x * sigmoid(x)
+	uSiluGrad  // silu'(x)
 )
 
 // 二元运算的编号

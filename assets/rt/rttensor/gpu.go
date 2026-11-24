@@ -33,13 +33,19 @@ type gpuBackend struct {
 	profile   map[string]*kernelStat
 
 	// 显存池：张量被垃圾回收时（终结器）把显存块放回池中，之后分配同样大小的块时直接复用。
-	// Go 的垃圾回收器看不到显存的占用，所以自上次回收以来分配的显存累计超过 gcBudget 时
-	// 主动触发一次回收：显存占用不超过“仍在使用的张量 + gcBudget”左右。
-	poolMu    sync.Mutex
-	pool      map[int][]uintptr
-	liveBytes atomic.Int64
-	sinceGC   atomic.Int64
-	gcBudget  int64
+	// Go 的垃圾回收器看不到显存的占用，所以需要新的显存块、而占用的显存（正在使用 + 缓存）
+	// 已经接近上限 highWater 时，主动触发一次回收；回收之后至少再分配 gcBudget 字节才会再次回收，
+	// 避免正在使用的张量本身就很多时反复回收。
+	poolMu      sync.Mutex
+	pool        map[int][]uintptr
+	liveBytes   atomic.Int64
+	pooledBytes atomic.Int64
+	sinceGC     atomic.Int64
+	gcBudget    int64
+	highWater   int64
+	collects    atomic.Int64
+	retries     atomic.Int64
+	finalized   atomic.Int64 // 已经放回池中的块数（终结器运行的次数）
 }
 
 type gpuBuf struct {
@@ -205,6 +211,7 @@ func initGPU() (*gpuBackend, error) {
 	d := devs[best]
 	g := &gpuBackend{device: d.id, kernels: map[string]clKernel{}, pool: map[int][]uintptr{}}
 	g.gcBudget = min(max(d.mem/8, 64<<20), 1<<30)
+	g.highWater = d.mem * 85 / 100
 	var errc int32
 	g.ctx, errc = clCallPtr(clCreateContext, 0, 1, uintptr(unsafe.Pointer(&g.device)), 0, 0)
 	if errc != 0 {
@@ -219,7 +226,7 @@ func initGPU() (*gpuBackend, error) {
 	if errc != 0 {
 		return nil, fmt.Errorf("创建 OpenCL 命令队列失败（错误码 %d）", errc)
 	}
-	src := []byte(kernelSource)
+	src := []byte(kernelProgram)
 	srcs := []uintptr{uintptr(unsafe.Pointer(&src[0]))}
 	lens := []uintptr{uintptr(len(src))}
 	g.prog, errc = clCallPtr(clCreateProgramWithSource, g.ctx, 1, uintptr(unsafe.Pointer(&srcs[0])), uintptr(unsafe.Pointer(&lens[0])))
@@ -282,7 +289,13 @@ func sizeClass(bytes int) int {
 		}
 		return s
 	}
-	return (bytes + (1<<20 - 1)) &^ (1<<20 - 1)
+	// 1 MB 以上：每个 2 倍的区间分成 8 级（最多浪费 12.5%），长度相近的张量可以复用同一个大小的块
+	octave := 1 << 20
+	for octave*2 < bytes {
+		octave <<= 1
+	}
+	step := octave / 8
+	return (bytes + step - 1) / step * step
 }
 
 func (g *gpuBackend) poolGet(size int) uintptr {
@@ -294,13 +307,16 @@ func (g *gpuBackend) poolGet(size int) uintptr {
 	}
 	m := l[len(l)-1]
 	g.pool[size] = l[:len(l)-1]
+	g.pooledBytes.Add(-int64(size))
 	return m
 }
 
 func (g *gpuBackend) poolPut(b *gpuBuf) {
+	g.finalized.Add(1)
 	g.poolMu.Lock()
 	g.pool[b.size] = append(g.pool[b.size], b.mem)
 	g.poolMu.Unlock()
+	g.pooledBytes.Add(int64(b.size))
 	g.liveBytes.Add(-int64(b.size))
 }
 
@@ -312,6 +328,7 @@ func (g *gpuBackend) freePool() {
 		for _, m := range l {
 			clCall(clReleaseMemObject, m)
 		}
+		g.pooledBytes.Add(-int64(size * len(l)))
 		delete(g.pool, size)
 	}
 }
@@ -323,6 +340,7 @@ type gcSentinel struct {
 
 // collect 运行垃圾回收，并等待终结器把不再使用的张量的显存放回池中。
 func (g *gpuBackend) collect() {
+	g.collects.Add(1)
 	g.sinceGC.Store(0)
 	done := make(chan struct{})
 	s := &gcSentinel{}
@@ -333,6 +351,16 @@ func (g *gpuBackend) collect() {
 	case <-done:
 	case <-time.After(200 * time.Millisecond):
 	}
+	// 终结器在一个单独的协程中依次运行，哨兵不一定是最后一个：等到放回池中的块数不再增加
+	last := g.finalized.Load()
+	for i := 0; i < 100; i++ {
+		time.Sleep(200 * time.Microsecond)
+		cur := g.finalized.Load()
+		if cur == last {
+			break
+		}
+		last = cur
+	}
 }
 
 func (g *gpuBackend) createBuffer(size int) uintptr {
@@ -341,6 +369,7 @@ func (g *gpuBackend) createBuffer(size int) uintptr {
 		return m
 	}
 	// 分配失败：回收不再使用的张量、释放空闲块，然后重试
+	g.retries.Add(1)
 	g.collect()
 	if m := g.poolGet(size); m != 0 {
 		return m
@@ -355,10 +384,18 @@ func (g *gpuBackend) createBuffer(size int) uintptr {
 
 func (g *gpuBackend) alloc(n int) *storage {
 	size := sizeClass(max(n, 1) * 4)
-	if g.sinceGC.Add(int64(size)) > g.gcBudget {
-		g.collect()
-	}
+	g.sinceGC.Add(int64(size))
 	mem := g.poolGet(size)
+	if mem == 0 && g.liveBytes.Load()+g.pooledBytes.Load()+int64(size) > g.highWater {
+		// 没有合适的空闲块，显存也快满了：先把其它大小的空闲块还给驱动；
+		// 缓存中没有多少空闲块时，才回收不再使用的张量（回收要暂停程序，比较慢）
+		if g.pooledBytes.Load() >= int64(size) {
+			g.freePool()
+		} else if g.sinceGC.Load() > g.gcBudget {
+			g.collect()
+			mem = g.poolGet(size)
+		}
+	}
 	if mem == 0 {
 		mem = g.createBuffer(size)
 	}
@@ -374,6 +411,31 @@ func GpuMemoryAllocated() int {
 		return int(g.liveBytes.Load())
 	}
 	return 0
+}
+
+// GpuMemoryCached 返回缓存池中空闲的显存字节数（张量被回收后留着复用的显存块）。
+func GpuMemoryCached() int {
+	g := gpuInst
+	if g == nil {
+		return 0
+	}
+	g.poolMu.Lock()
+	defer g.poolMu.Unlock()
+	total := 0
+	for size, l := range g.pool {
+		total += size * len(l)
+	}
+	return total
+}
+
+// GpuStats 返回显存分配的统计：显存不足时重试的次数等（用于分析性能）。
+func GpuStats() string {
+	g := gpuInst
+	if g == nil {
+		return "没有使用 GPU"
+	}
+	return fmt.Sprintf("正在使用 %.0f MB，缓存 %.0f MB，回收 %d 次，显存不足后重试 %d 次",
+		float64(g.liveBytes.Load())/(1<<20), float64(GpuMemoryCached())/(1<<20), g.collects.Load(), g.retries.Load())
 }
 
 // EmptyCache 回收不再使用的张量，并把缓存的空闲显存还给驱动。
@@ -491,6 +553,15 @@ func (g *gpuBackend) launch(name string, global, localSize []int, args ...any) {
 		return
 	}
 	r := clCall(clEnqueueNDRangeKernel, g.queue, k, uintptr(len(global)), 0, uintptr(unsafe.Pointer(&gs[0])), uintptr(unsafe.Pointer(&ls[0])), 0, 0, 0)
+	if r == clMemObjectAllocFail || r == clOutOfResources {
+		// 有的驱动在第一次使用显存块时才真正分配，所以显存不足表现为内核提交失败：
+		// 回收不再使用的张量、把缓存的空闲显存还给驱动，再试一次
+		g.retries.Add(1)
+		clCall(clFinish, g.queue)
+		g.collect()
+		g.freePool()
+		r = clCall(clEnqueueNDRangeKernel, g.queue, k, uintptr(len(global)), 0, uintptr(unsafe.Pointer(&gs[0])), uintptr(unsafe.Pointer(&ls[0])), 0, 0, 0)
+	}
 	// 内核排队之后才能让参数中的张量被回收（之后复用这块显存的命令一定排在它后面）
 	runtime.KeepAlive(args)
 	g.check(r, "运行内核 "+name)
@@ -626,6 +697,12 @@ func (g *gpuBackend) matmul(a, b, c *storage, batch, m, k, n int, ta, tb bool, s
 		g.launch("matmul_small", []int{roundUp(n, 16), roundUp(m, 16), batch}, []int{16, 16, 1}, a, b, c, m, n, k, ta, tb, sa, sb)
 		return
 	}
+	if m >= 128 && n >= 128 && k >= 16 && !ta && k%4 == 0 && n%4 == 0 && sa%4 == 0 && sb%4 == 0 {
+		// 大矩阵、各维是 4 的倍数：向量化的 128x128 输出块
+		global := []int{roundUp(n, 128) / 8, roundUp(m, 128) / 8, batch}
+		g.launch("matmul_big4", global, []int{16, 16, 1}, a, b, c, m, n, k, tb, sa, sb)
+		return
+	}
 	if m >= 128 && n >= 128 && k >= 16 {
 		// 大矩阵：128x128 的输出块
 		global := []int{roundUp(n, 128) / 8, roundUp(m, 128) / 8, batch}
@@ -658,6 +735,16 @@ func (g *gpuBackend) layerNorm(x, w, b, y, xhat, rstd *storage, rows, d int, eps
 func (g *gpuBackend) layerNormBack(dy, w, xhat, rstd, dx *storage, rows, d int) {
 	l := rowGroup(d)
 	g.launch("layer_norm_back", []int{rows * l}, []int{l}, dy, w, xhat, rstd, dx, rows, d, local(2*l*4))
+}
+
+func (g *gpuBackend) rmsNorm(x, w, y, xhat, rstd *storage, rows, d int, eps float32) {
+	l := rowGroup(d)
+	g.launch("rms_norm", []int{rows * l}, []int{l}, x, w, y, xhat, rstd, rows, d, eps, local(l*4))
+}
+
+func (g *gpuBackend) rmsNormBack(dy, w, xhat, rstd, dx *storage, rows, d int) {
+	l := rowGroup(d)
+	g.launch("rms_norm_back", []int{rows * l}, []int{l}, dy, w, xhat, rstd, dx, rows, d, local(l*4))
 }
 
 func (g *gpuBackend) permute(x, y *storage, shape, perm []int) {

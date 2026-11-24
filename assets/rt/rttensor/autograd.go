@@ -139,6 +139,35 @@ func topoSort(t *Tensor) []*Tensor {
 	return order
 }
 
+// Checkpoint 实现 tensor.checkpoint(f, x)：计算 f(x)，但不保存 f 内部的中间结果，反向传播到这里时
+// 重新计算一遍 f 再求梯度——用大约多三分之一的计算换来大得多的显存（例如对每一层分别使用）。
+// 重新计算时随机数的计数器恢复到第一次计算时的值，所以 f 中的 dropout 会得到同样的掩码。
+func Checkpoint(f func(*Tensor) *Tensor, x *Tensor) *Tensor {
+	seed := seedCounter.Load()
+	if !gradEnabled() {
+		return f(x)
+	}
+	var first *Tensor
+	withNoGrad(func() { first = f(x) })
+	out := &Tensor{shape: first.shape, n: first.n, st: first.st, requiresGrad: true}
+	out.fn = &node{name: "checkpoint", inputs: []*Tensor{x}, back: func(g *Tensor) []*Tensor {
+		saved := seedCounter.Load()
+		seedCounter.Store(seed)
+		xi := x.Detach()
+		xi.requiresGrad = x.requiresGrad
+		// 反向传播时求导是关闭的：重新计算时临时打开
+		depth := noGradDepth.Swap(0)
+		y := f(xi)
+		noGradDepth.Store(depth)
+		seedCounter.Store(saved)
+		if y.requiresGrad {
+			y.backward(g)
+		}
+		return []*Tensor{xi.grad}
+	}}
+	return out
+}
+
 // GradFn 返回产生这个张量的运算的名字（叶子张量为空串）。
 func (t *Tensor) GradFn() string {
 	if t.fn == nil {

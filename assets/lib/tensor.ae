@@ -76,6 +76,7 @@ class Tensor:
     @go("Sigmoid") def sigmoid(self) -> Tensor
     @go("Tanh") def tanh(self) -> Tensor
     @go("Gelu") def gelu(self) -> Tensor
+    @go("Silu") def silu(self) -> Tensor
     @go("Clamp") def clamp(self, min: float, max: float) -> Tensor
     @go("Maximum") def maximum(self, other: Tensor) -> Tensor
     @go("Minimum") def minimum(self, other: Tensor) -> Tensor
@@ -144,6 +145,14 @@ extend Tensor:
     # 所有元素的 L2 范数
     def norm(self) -> Tensor:
         return self.square().sum().sqrt()
+
+# 按行量化为 int8 的二维权重（显存是 float32 的四分之一）：用于冻结不动的大权重，例如 LoRA 微调时的原模型
+@go("*rttensor.QTensor")
+class QTensor:
+    @go("Shape") prop shape -> list[int]
+    @go("DeviceName") prop device -> str
+    @go("Numel") def numel(self) -> int
+    @go("Dequantize") def dequantize(self) -> Tensor
 
 # ===== 创建张量（放在默认设备上，见 set_default_device） =====
 
@@ -217,11 +226,16 @@ def log_softmax(x: Tensor, dim: int = -1) -> Tensor:
     return x.log_softmax(dim)
 
 @go("rttensor.LinearFn") def linear(x: Tensor, weight: Tensor, bias: Tensor? = null) -> Tensor
+# 按行量化为 int8：W ≈ q × scale，scale 为每行的最大绝对值 / 127
+@go("rttensor.QuantizeInt8") def quantize_int8(weight: Tensor, device: str? = null) -> QTensor
+# x @ Wᵀ（W 是量化的权重，不参与求导；对 x 可以求导）
+@go("rttensor.LinearQ8") def linear_q8(x: Tensor, weight: QTensor) -> Tensor
 @go("rttensor.Conv2d") def conv2d(x: Tensor, weight: Tensor, bias: Tensor? = null, stride: int = 1, padding: int = 0) -> Tensor
 @go("rttensor.MaxPool2d") def max_pool2d(x: Tensor, kernel_size: int, stride: int = 0, padding: int = 0) -> Tensor
 @go("rttensor.AvgPool2d") def avg_pool2d(x: Tensor, kernel_size: int, stride: int = 0) -> Tensor
 @go("rttensor.Dropout") def dropout(x: Tensor, p: float = 0.5, training: bool = true) -> Tensor
 @go("rttensor.LayerNorm") def layer_norm(x: Tensor, weight: Tensor, bias: Tensor, eps: float = 1e-5) -> Tensor
+@go("rttensor.RMSNorm") def rms_norm(x: Tensor, weight: Tensor, eps: float = 1e-6) -> Tensor
 @go("rttensor.BatchNorm") def batch_norm(x: Tensor, weight: Tensor, bias: Tensor, running_mean: Tensor, running_var: Tensor, training: bool, momentum: float = 0.1, eps: float = 1e-5) -> Tensor
 @go("rttensor.Embedding") def embedding(weight: Tensor, index: Tensor) -> Tensor
 
@@ -238,6 +252,8 @@ def log_softmax(x: Tensor, dim: int = -1) -> Tensor:
 # with tensor.no_grad(): 中的计算不记录计算图（推理、手动更新参数时使用）
 @go("rttensor.NoGrad") def no_grad() -> NoGrad
 @go("rttensor.IsGradEnabled") def is_grad_enabled() -> bool
+# 计算 f(x) 但不保存 f 内部的中间结果，反向传播时重新计算（用时间换显存；f 中的 dropout 会重现同样的掩码）
+@go("rttensor.Checkpoint") def checkpoint(f: fn(Tensor) -> Tensor, x: Tensor) -> Tensor
 
 # ===== 设备 =====
 
@@ -251,6 +267,10 @@ def log_softmax(x: Tensor, dim: int = -1) -> Tensor:
 @go("rttensor.Synchronize") def synchronize()
 @go("rttensor.EmptyCache") def empty_cache()
 @go("rttensor.GpuMemoryAllocated") def gpu_memory_allocated() -> int
+# 缓存池中空闲的显存（张量被回收后留着复用）
+@go("rttensor.GpuMemoryCached") def gpu_memory_cached() -> int
+# 显存分配的统计：正在使用、缓存、回收与重试的次数
+@go("rttensor.GpuStats") def gpu_stats() -> str
 # 各个 GPU 内核的调用次数与运行时间（设置环境变量 AETHER_GPU_PROFILE=1 后运行程序时记录）
 @go("rttensor.GpuProfile") def gpu_profile() -> str
 
@@ -265,3 +285,9 @@ def log_softmax(x: Tensor, dim: int = -1) -> Tensor:
 
 @go("rttensor.Save") def save(state: dict[str, Tensor], path: str)
 @go("rttensor.Load") def load(path: str) -> dict[str, Tensor]
+
+# 读取 safetensors 文件（Hugging Face 等发布模型时使用的格式；BF16、F16 转换为 float32，放在默认设备上）。
+# names 给出时只读取这些张量
+@go("rttensor.LoadSafetensors") def load_safetensors(path: str, names: list[str]? = null) -> dict[str, Tensor]
+# 只读取文件头：每个张量的形状
+@go("rttensor.SafetensorsShapes") def safetensors_shapes(path: str) -> dict[str, list[int]]

@@ -51,3 +51,10 @@ func tanhf(x float32) float32 {
 }
 
 func sigmoidf(x float32) float32 { return 1 / (1 + expf(-x)) }
+
+func siluf(x float32) float32 { return x / (1 + expf(-x)) }
+
+func siluGradf(x float32) float32 {
+	s := sigmoidf(x)
+	return s * (1 + x*(1-s))
+}
