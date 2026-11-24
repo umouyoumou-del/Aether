@@ -1,0 +1,37 @@
+# 用 LoRA 把 Qwen3 微调成 Jev 式的决策模型（全部用 Aether 实现：分词器、模型、LoRA、训练、校准）
+#
+#     aether run examples/minijev/qwen_train.ae <模型目录> [步数] [LoRA 保存路径] [int8]
+#
+# 模型目录是 Hugging Face 格式（config.json、tokenizer.json、*.safetensors），例如从
+# https://www.modelscope.cn/models/Qwen/Qwen3-0.6B 下载的文件。训练数据与 MiniJev 相同（data.ae）。
+# 最后一个参数为 int8 时，原模型的线性层量化为 int8（Qwen3-1.7B 需要这样才能放进 4 GB 显存）。
+import os
+import sys
+import time
+import tensor
+import data
+from qwenjev import QwenJev, evaluate
+
+folder = sys.argv[1] if len(sys.argv) > 1 else "D:/aether-models/Qwen3-0.6B"
+steps = int(sys.argv[2]) if len(sys.argv) > 2 else 600
+out = sys.argv[3] if len(sys.argv) > 3 else os.path.join(os.tempdir(), "qwenjev-lora.bin")
+quantize = len(sys.argv) > 4 and sys.argv[4] == "int8"
+device = "gpu" if tensor.gpu_available() else "cpu"
+
+tensor.manual_seed(0)
+start = time.time()
+jev = QwenJev(folder, device, quantize)
+print(f"读取 {folder}：{jev.model.config.layers} 层，用时 {time.time() - start:.1f} 秒，设备 {device}" + ("，int8 权重" if quantize else ""))
+test_set = data.generate(240, 3, held_prob=0.3)
+evaluate(jev, test_set, "微调前（零样本）")
+
+train_set = data.generate(3000, 1)
+start = time.time()
+jev.train_lora(train_set, steps)
+print(f"微调用时 {time.time() - start:.0f} 秒")
+evaluate(jev, test_set, "微调后，校准前")
+jev.calibrate(data.generate(120, 2))
+print(f"温度（Choice、Score、Noul）：{jev.temperature[0]:.2f}、{jev.temperature[1]:.2f}、{jev.temperature[2]:.2f}")
+evaluate(jev, test_set, "微调并校准后")
+jev.save_lora(out)
+print(f"LoRA 参数已保存到 {out}")

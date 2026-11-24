@@ -1,0 +1,54 @@
+# QwenJev 演示：用 LoRA 微调过的 Qwen3 回答与 demo.ae 相同的问题
+#
+#     aether run examples/minijev/qwen_demo.ae <模型目录> <LoRA 文件> [int8]
+#
+# LoRA 文件由 qwen_train.ae 生成；不给 LoRA 文件时使用原模型（零样本）。
+import os
+import sys
+import time
+import tensor
+from minijev import Question, Response, cell, choice, noul, score
+from qwenjev import QwenJev
+
+folder = sys.argv[1] if len(sys.argv) > 1 else "D:/aether-models/Qwen3-0.6B"
+lora = sys.argv[2] if len(sys.argv) > 2 else os.path.join(os.tempdir(), "qwenjev-lora.bin")
+quantize = len(sys.argv) > 3 and sys.argv[3] == "int8"
+jev = QwenJev(folder, "gpu" if tensor.gpu_available() else "cpu", quantize)
+if os.exists(lora):
+    jev.load_lora(lora)
+    print(f"使用 LoRA：{lora}")
+else:
+    print("没有 LoRA 文件，使用原模型（零样本）")
+
+def ask(title: str, state: str, questions: dict[str, Question]):
+    start = time.time()
+    r = jev.system_one(state, questions)
+    print(f"\n【{title}】{state}    （{len(questions)} 个问题，{(time.time() - start) * 1000:.0f} 毫秒）")
+    for qid, a in r.choices.items():
+        print(f"  {cell(qid, 14, true)}choice  {cell(a.choice, 10, true)} 概率 {a.probabilities[a.choice]:.2f}，置信度 {a.confidence:.2f}")
+    for qid, a in r.scores.items():
+        print(f"  {cell(qid, 14, true)}score   {a.score:.2f}（{a.legend[a.level()]}），置信度 {a.confidence:.2f}")
+    for qid, a in r.nouls.items():
+        print(f"  {cell(qid, 14, true)}noul    {a.noul:.2f}")
+
+TOPICS = {"billing": "账单或扣费问题", "account": "账号或登录问题", "technical": "产品故障或技术问题", "shipping": "物流或快递问题"}
+for state in ["我的信用卡被扣了两次钱，急需处理。", "App一打开就闪退，而且信用卡被扣了两次钱。", "快递三天没有更新物流，你们到底怎么回事！"]:
+    ask("客服分流", state, {
+        "topic": choice("这条消息属于哪个主题？", TOPICS),
+        "priority": score("紧急程度如何？", ["不急", "一般", "非常紧急"]),
+        "needs_human": noul("是否需要人工处理？"),
+    })
+ask("Agent 风险", "Agent准备执行：删除所有历史日志（在生产环境执行）", {
+    "op": choice("这个操作属于哪一类？", {"read": "读取数据", "modify": "修改数据", "delete": "删除数据", "send": "对外发送信息"}),
+    "risk": score("这个操作的风险有多高？", ["低风险", "中风险", "高风险"]),
+    "irreversible": noul("这个操作是否不可撤销？"),
+})
+ask("内容审核", "评论：你就是个白痴，他的手机号是13800138000", {
+    "category": choice("这条评论属于哪一类？", {"normal": "正常内容", "spam": "垃圾广告", "abuse": "辱骂攻击", "privacy": "泄露个人信息"}),
+    "publish": noul("这条评论能直接发布吗？"),
+})
+# 训练数据之外：预训练的语言模型懂得更多（MiniJev 在这里只能瞎猜）
+ask("训练数据之外", "用户问：附近有没有好吃的川菜馆？", {
+    "intent": choice("用户想做什么？", {"food": "找餐厅或美食", "weather": "查天气", "music": "听音乐"}),
+    "complaint": noul("这是一条投诉吗？"),
+})

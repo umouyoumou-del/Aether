@@ -1,0 +1,222 @@
+# QwenJev：在 Qwen3 上实现 Jev 的接口（状态 + 类型化的问题 → 类型化的答案与概率）
+#
+# 每个问题写成一段对话：状态、问题，以及标上字母（Choice）、数字（Score）的选项，或者要求回答“是/否”
+# （Noul）。模型不生成文字，只读取“下一个词元是哪个标记”的概率，在问题自己的几个标记之间做 softmax，
+# 就是各个选项的概率。LoRA 微调就是在这些问题上最小化交叉熵；训练后再用温度缩放校准。
+import math
+import os
+import sys
+import time
+import tensor
+import tensor.nn as nn
+import tensor.optim as optim
+from tensor import Tensor
+from minijev import ChoiceAnswer, Example, NoulAnswer, Question, Response, Scene, ScoreAnswer, all_examples, argmax, choice_confidence, kind_of, report, score_confidence, softmax
+from qwen_model import Qwen3
+from qwen_tokenizer import QwenTokenizer
+
+const LETTERS = "ABCDEFGHIJ"
+const SYSTEM = "你是一个决策模型：阅读“状态”，回答关于它的“问题”。只输出答案的标记，不要解释。"
+
+# 一个问题编码后的结果：词元编号，以及答案的候选标记（在 QwenJev.candidates 中的位置）
+class Encoded:
+    ids: list[int]
+    choices: list[int]
+
+class QwenJev:
+    model: Qwen3
+    tok: QwenTokenizer
+    candidates: list[int]             # 所有可能的答案标记：A～J、0～9、是、否
+    temperature: list[float]          # Choice、Score、Noul 的温度
+    prefix: list[int]                 # 系统提示与用户消息的开头（所有问题相同）
+    suffix: list[int]                 # 用户消息的结尾与助手回答的开头
+
+    def __init__(self, folder: str, device: str = "gpu", quantize: bool = false):
+        self.model = Qwen3(folder, device, quantize)
+        self.tok = QwenTokenizer(os.path.join(folder, "tokenizer.json"))
+        self.candidates = []
+        for c in LETTERS.chars():
+            self.candidates.extend(self.tok.encode(str(c)))
+        for d in range(10):
+            self.candidates.extend(self.tok.encode(str(d)))
+        self.candidates.extend(self.tok.encode("是"))
+        self.candidates.extend(self.tok.encode("否"))
+        if len(self.candidates) != 22:
+            raise ValueError("答案标记应当各是一个词元")
+        self.temperature = [1.0, 1.0, 1.0]
+        t = self.tok
+        start, end = t.special("<|im_start|>"), t.special("<|im_end|>")
+        self.prefix = [start] + t.encode("system\n" + SYSTEM) + [end] + t.encode("\n") + [start] + t.encode("user\n")
+        self.suffix = [end] + t.encode("\n") + [start] + t.encode("assistant\n") + [t.special("<think>")] + t.encode("\n\n") + [t.special("</think>")] + t.encode("\n\n")
+
+    def encode(self, state: str, q: Question) -> Encoded:
+        text = "状态：" + state + "\n"
+        picks: list[int] = []
+        match q:
+            case Choice(instr, criteria):
+                text += "问题：" + instr + "\n选项：\n"
+                for i, key in enumerate(criteria.keys()):
+                    desc = criteria[key] if criteria[key] != "" else key
+                    text += str(LETTERS[i]) + ". " + desc + "\n"
+                    picks.append(i)
+                text += "请只回答选项前的字母。"
+            case Score(instr, levels):
+                text += "问题：" + instr + "\n等级：\n"
+                for i, level in enumerate(levels):
+                    text += str(i) + ". " + level + "\n"
+                    picks.append(10 + i)
+                text += "请只回答等级前的数字。"
+            case Noul(instr, crit):
+                text += "问题：" + instr + ("" if crit == "" else "（" + crit + "）") + "\n请只回答“是”或“否”。"
+                picks = [20, 21]
+        return Encoded(self.prefix + self.tok.encode(text) + self.suffix, picks)
+
+    # 一批（状态, 问题）在所有候选标记上的分数 [B, 22]
+    def candidate_scores(self, items: list[(str, Question)]) -> Tensor:
+        encoded = [self.encode(s, q) for s, q in items]
+        longest = max(len(e.ids) for e in encoded)
+        ids: list[int] = []
+        lengths: list[int] = []
+        for e in encoded:
+            ids.extend(e.ids + [0] * (longest - len(e.ids)))
+            lengths.append(len(e.ids))
+        return self.model.candidate_logits(tensor.from_ints(ids, [len(items), longest]), lengths, self.candidates)
+
+    # 每个问题的原始分数（在它自己的候选标记上，未除以温度）
+    def raw_scores(self, items: list[(str, Question)], batch: int = 8) -> list[list[float]]:
+        out: list[list[float]] = []
+        with tensor.no_grad():
+            for start in range(0, len(items), batch):
+                part = items[start:start + batch]
+                rows = self.candidate_scores(part).rows()
+                for i, (state, q) in enumerate(part):
+                    picks = self.encode(state, q).choices
+                    out.append([rows[i][j] for j in picks])
+        return out
+
+    # 与 Jev 的 system_one 相同的接口
+    def system_one(self, state: str, questions: dict[str, Question]) -> Response:
+        resp = Response()
+        if len(questions) == 0:
+            return resp
+        raw = self.raw_scores([(state, q) for q in questions.values()])
+        for i, (qid, q) in enumerate(questions.items()):
+            match q:
+                case Choice(_, criteria):
+                    keys = criteria.keys()
+                    probs = softmax(raw[i], self.temperature[0])
+                    resp.choices[qid] = ChoiceAnswer(keys[argmax(probs)], {k: probs[j] for j, k in enumerate(keys)}, choice_confidence(probs))
+                case Score(_, levels):
+                    probs = softmax(raw[i], self.temperature[1])
+                    resp.scores[qid] = ScoreAnswer(sum(j * p for j, p in enumerate(probs)), levels, probs, score_confidence(probs))
+                case Noul(_, _):
+                    resp.nouls[qid] = NoulAnswer(softmax(raw[i], self.temperature[2])[0])
+        return resp
+
+    # 预测每个样本的概率（与 minijev.predict 的格式相同：Noul 为 [P(是)]）
+    def predict(self, scenes: list[Scene]) -> list[list[float]]:
+        items: list[(str, Question)] = []
+        for scene in scenes:
+            for ex in scene.examples:
+                items.append((scene.state, ex.question))
+        raw = self.raw_scores(items)
+        out: list[list[float]] = []
+        for i, (_, q) in enumerate(items):
+            kind = kind_of(q)
+            probs = softmax(raw[i], self.temperature[kind])
+            out.append([probs[0]] if kind == 2 else probs)
+        return out
+
+    # ===== LoRA 微调 =====
+
+    def train_lora(self, scenes: list[Scene], steps: int, batch: int = 4, lr: float = 2e-4, r: int = 8):
+        params = self.model.enable_lora(r, 2.0 * r)
+        print(f"LoRA：秩 {r}，可训练参数 {sum(p.numel() for p in params)} 个（原模型的参数不变）")
+        opt = optim.AdamW(params, lr=lr, weight_decay=0.0)
+        sched = optim.CosineAnnealingLR(opt, t_max=steps)
+        items: list[(str, Example)] = []
+        for scene in scenes:
+            for ex in scene.examples:
+                items.append((scene.state, ex))
+        order = tensor.randperm(len(items)).tolist()
+        start = time.time()
+        running = 0.0
+        every = max(steps // 10, 1)
+        for step in range(steps):
+            part = [items[int(order[(step * batch + j) % len(items)])] for j in range(batch)]
+            logits = self.candidate_scores([(s, ex.question) for s, ex in part])
+            # 每个问题只在它自己的候选标记之间做 softmax：其余的标记加上 -1e9
+            mask: list[float] = []
+            targets: list[int] = []
+            for s, ex in part:
+                picks = self.encode(s, ex.question).choices
+                row = [-1e9] * len(self.candidates)
+                for j in picks:
+                    row[j] = 0.0
+                mask.extend(row)
+                label = ex.label if kind_of(ex.question) != 2 else (0 if ex.label == 1 else 1)
+                targets.append(picks[label])
+            loss = tensor.cross_entropy(logits + tensor.tensor(mask, [batch, len(self.candidates)]).to(logits.device), tensor.from_ints(targets))
+            opt.zero_grad()
+            loss.backward()
+            nn.clip_grad_norm_(params, 1.0)
+            opt.step()
+            sched.step()
+            running += loss.item()
+            if (step + 1) % every == 0:
+                print(f"  第 {step + 1}/{steps} 步：损失 {running / every:.4f}（{time.time() - start:.0f} 秒）", flush=true)
+                running = 0.0
+
+    # 温度缩放（与 minijev.calibrate 相同的方法）
+    def calibrate(self, scenes: list[Scene]):
+        items: list[(str, Question)] = []
+        labels: list[int] = []
+        for scene in scenes:
+            for ex in scene.examples:
+                items.append((scene.state, ex.question))
+                labels.append(ex.label if kind_of(ex.question) != 2 else (0 if ex.label == 1 else 1))
+        raw = self.raw_scores(items)
+        for kind in [0, 1, 2]:
+            sel = [i for i, (_, q) in enumerate(items) if kind_of(q) == kind]
+            if len(sel) == 0:
+                continue
+            kmax = max(len(raw[i]) for i in sel)
+            vals: list[float] = []
+            for i in sel:
+                vals.extend([raw[i][j] if j < len(raw[i]) else -1e9 for j in range(kmax)])
+            x = tensor.tensor(vals, [len(sel), kmax]).cpu()
+            y = tensor.from_ints([labels[i] for i in sel]).cpu()
+            log_t = tensor.zeros(1).cpu().requires_grad_()
+            opt = optim.Adam([log_t], lr=0.05)
+            for _ in range(300):
+                loss = tensor.cross_entropy(x / log_t.exp(), y)
+                opt.zero_grad()
+                loss.backward()
+                opt.step()
+            self.temperature[kind] = log_t.exp().item()
+
+    # 只保存 LoRA 的参数与温度（原模型的权重不变，不需要保存）
+    def save_lora(self, path: str):
+        state: dict[str, Tensor] = {}
+        for name, t in self.model.named_tensors():
+            if "lora_" in name:
+                state[name] = t
+        state["temperature"] = tensor.tensor(self.temperature).cpu()
+        r = self.model.layers[0].attn.q_proj.lora_a
+        if r != null:
+            state["lora_rank"] = tensor.scalar(float(r.size(0))).cpu()
+        tensor.save(state, path)
+
+    def load_lora(self, path: str):
+        state = tensor.load(path)
+        r = int(state["lora_rank"].item())
+        self.model.enable_lora(r, 2.0 * r)
+        self.model.load_state_dict(state, strict=false)
+        self.temperature = state["temperature"].tolist()
+
+def evaluate(jev: QwenJev, scenes: list[Scene], title: str):
+    start = time.time()
+    preds = jev.predict(scenes)
+    print(f"{title}（{len(all_examples(scenes))} 个问题，{time.time() - start:.0f} 秒）：")
+    report(scenes, preds)
+    sys.stdout.flush()

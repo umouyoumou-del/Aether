@@ -1,0 +1,204 @@
+# Qwen 的分词器：字节级 BPE，读取 Hugging Face 格式的 tokenizer.json（规则与 tokenizers 库相同）
+#
+# 1. 预切分：按 Qwen 的正则表达式把文字切成片段（单词、单个数字、标点、空白……）；
+# 2. 每个片段转换为 UTF-8 字节，每个字节用一个可打印字符表示（GPT-2 的映射）；
+# 3. BPE：反复合并优先级最高（rank 最小）的相邻两个符号，直到不能再合并，再查出编号。
+# tokenizer.json 中还有 NFC 规范化，这里省略了：普通的中英文输入本来就是 NFC 形式。
+import json
+import os
+
+class QwenTokenizer:
+    encoder: dict[str, int]           # 字节级字符串 → 编号
+    decoder: dict[int, str]           # 编号 → 字节级字符串（或特殊标记的文字）
+    ranks: dict[str, int]             # 合并规则 "左 右" → 优先级（越小越先合并）
+    specials: dict[str, int]          # 特殊标记，例如 <|im_start|>
+    byte_char: list[char]             # 字节 → 表示它的字符
+    char_byte: dict[char, int]
+    _cache: dict[str, list[int]]
+
+    def __init__(self, path: str):
+        doc = json.loads_dict(os.read_file(path))
+        model = doc["model"] as dict[str, any]
+        self.encoder = {}
+        self.decoder = {}
+        for tok, id in (model["vocab"] as dict[str, any]).items():
+            self.encoder[tok] = id as int
+            self.decoder[id as int] = tok
+        self.ranks = {}
+        for i, m in enumerate(model["merges"] as list[any]):
+            pair = m as list[any]
+            self.ranks[(pair[0] as str) + " " + (pair[1] as str)] = i
+        self.specials = {}
+        for a in doc["added_tokens"] as list[any]:
+            t = a as dict[str, any]
+            self.specials[t["content"] as str] = t["id"] as int
+            self.decoder[t["id"] as int] = t["content"] as str
+        self.byte_char = byte_chars()
+        self.char_byte = {c: b for b, c in enumerate(self.byte_char)}
+        self._cache = {}
+
+    # 特殊标记的编号，例如 special("<|im_start|>")
+    def special(self, name: str) -> int:
+        return self.specials[name]
+
+    # 把普通文字编码为编号（文字中的特殊标记不会被识别，请用 special 单独加入）
+    def encode(self, text: str) -> list[int]:
+        out: list[int] = []
+        for piece in pre_split(text):
+            word = "".join(str(self.byte_char[b]) for b in piece.bytes())
+            out.extend(self.bpe(word))
+        return out
+
+    def bpe(self, word: str) -> list[int]:
+        cached = self._cache.get(word)
+        if cached != null:
+            return cached
+        parts = [str(c) for c in word.chars()]
+        while len(parts) > 1:
+            best = -1
+            best_rank = 1 << 60
+            for i in range(len(parts) - 1):
+                r = self.ranks.get(parts[i] + " " + parts[i + 1])
+                if r != null and r < best_rank:
+                    best, best_rank = i, r
+            if best < 0:
+                break
+            parts = parts[:best] + [parts[best] + parts[best + 1]] + parts[best + 2:]
+        ids = [self.encoder[p] for p in parts]
+        self._cache[word] = ids
+        return ids
+
+    def decode(self, ids: list[int]) -> str:
+        data: list[u8] = []
+        out = ""
+        for id in ids:
+            tok = self.decoder.get(id) ?? ""
+            if tok in self.specials:
+                out += data.decode() + tok
+                data = []
+                continue
+            for c in tok.chars():
+                data.append(self.char_byte.get(c, 63) as u8)
+        return out + data.decode()
+
+# GPT-2 的字节 → 字符映射：可打印的字节对应自己，其余的字节依次对应 256 之后的字符
+def byte_chars() -> list[char]:
+    printable: set[int] = set()
+    for b in range(ord('!'), ord('~') + 1):
+        printable.add(b)
+    for b in range(0xA1, 0xAD):
+        printable.add(b)
+    for b in range(0xAE, 0x100):
+        printable.add(b)
+    table: list[char] = []
+    n = 0
+    for b in range(256):
+        if b in printable:
+            table.append(chr(b)[0])
+        else:
+            table.append(chr(256 + n)[0])
+            n += 1
+    return table
+
+# ===== 预切分 =====
+#
+# 与 Qwen 的正则表达式相同（Go 的正则表达式不支持其中的 (?!\S)，所以手写）：
+#   (?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+
+# 在每个位置依次尝试这些分支，用第一个能匹配的。
+
+def is_letter(c: char) -> bool:
+    return c.isalpha()
+
+def is_newline(c: char) -> bool:
+    return c == '\n' or c == '\r'
+
+# 不是空白、字母、数字的字符（标点、符号）
+def is_other(c: char) -> bool:
+    return not c.isspace() and not c.isalpha() and not c.isnumeric()
+
+def pre_split(text: str) -> list[str]:
+    cs = text.chars()
+    n = len(cs)
+    out: list[str] = []
+    i = 0
+    while i < n:
+        j = match_contraction(cs, i)
+        if j < 0:
+            j = match_letters(cs, i)
+        if j < 0 and cs[i].isnumeric():
+            j = i + 1
+        if j < 0:
+            j = match_symbols(cs, i)
+        if j < 0:
+            j = match_spaces(cs, i)
+        out.append("".join(str(c) for c in cs[i:j]))
+        i = j
+    return out
+
+# 's 't 're 've 'm 'll 'd（不分大小写）
+def match_contraction(cs: list[char], i: int) -> int:
+    if cs[i] != '\'' or i + 1 >= len(cs):
+        return -1
+    a = cs[i + 1].lower()
+    if a == 's' or a == 't' or a == 'm' or a == 'd':
+        return i + 2
+    if i + 2 < len(cs):
+        b = cs[i + 2].lower()
+        if (a == 'r' and b == 'e') or (a == 'v' and b == 'e') or (a == 'l' and b == 'l'):
+            return i + 3
+    return -1
+
+# [^\r\n\p{L}\p{N}]?\p{L}+：可以带一个前缀字符（空格或标点）的一串字母（汉字也是字母）
+def match_letters(cs: list[char], i: int) -> int:
+    n = len(cs)
+    k = -1
+    c = cs[i]
+    if not is_newline(c) and not is_letter(c) and not c.isnumeric() and i + 1 < n and is_letter(cs[i + 1]):
+        k = i + 1
+    elif is_letter(c):
+        k = i
+    if k < 0:
+        return -1
+    while k < n and is_letter(cs[k]):
+        k += 1
+    return k
+
+#  ?[^\s\p{L}\p{N}]+[\r\n]*：可以带一个空格的一串标点或符号，以及后面的换行
+def match_symbols(cs: list[char], i: int) -> int:
+    n = len(cs)
+    k = i
+    if cs[k] == ' ' and k + 1 < n and is_other(cs[k + 1]):
+        k += 1
+    if not is_other(cs[k]):
+        return -1
+    while k < n and is_other(cs[k]):
+        k += 1
+    while k < n and is_newline(cs[k]):
+        k += 1
+    return k
+
+# \s*[\r\n]+ | \s+(?!\S) | \s+
+def match_spaces(cs: list[char], i: int) -> int:
+    n = len(cs)
+    k = i
+    while k < n and cs[k].isspace():
+        k += 1
+    if k == i:
+        return i + 1                  # 不会发生：上面的分支已经覆盖了所有非空白字符
+    last_newline = -1
+    for p in range(i, k):
+        if is_newline(cs[p]):
+            last_newline = p
+    if last_newline >= 0:
+        return last_newline + 1
+    if k == n:
+        return k
+    if k - i >= 2:
+        return k - 1                  # 留下最后一个空白给后面的单词
+    return k
+
+test "预切分与 Qwen 的正则表达式一致":
+    assert pre_split("Hello world, it's 2024!") == ["Hello", " world", ",", " it", "'s", " ", "2", "0", "2", "4", "!"]
+    assert pre_split("我的信用卡被扣了两次钱，急需处理。") == ["我的信用卡被扣了两次钱", "，急需处理", "。"]
+    assert pre_split("a  b\n\n  c") == ["a", " ", " b", "\n\n", " ", " c"]
+    assert pre_split("x = 1") == ["x", " =", " ", "1"]

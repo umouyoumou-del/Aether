@@ -1,0 +1,276 @@
+# Qwen3 语言模型（用 Aether 的 tensor 框架实现），可以读取 Hugging Face 格式的权重，并加上 LoRA 微调
+#
+# 结构与 Hugging Face transformers 中的 Qwen3ForCausalLM 相同：词嵌入（与输出层共享）→ N 层
+# [RMSNorm → 自注意力（q、k 先各自做 RMSNorm，再加旋转位置编码 RoPE；分组查询注意力 GQA）→ 残差，
+#  RMSNorm → SwiGLU 前馈网络 → 残差] → RMSNorm。
+#
+# LoRA：原来的权重 W 冻结不动，只训练两个小矩阵 A（r × 输入维数）、B（输出维数 × r），
+# 输出为 x @ Wᵀ + (x @ Aᵀ) @ Bᵀ × (alpha / r)。B 从 0 开始，所以训练开始时与原模型完全相同。
+#
+# quantize 为真时，冻结的线性层权重按行量化为 int8 放在显存中（只有 float32 的四分之一），
+# 这样 Qwen3-1.7B 也能放进 4 GB 的显存；LoRA 的 A、B 仍然是 float32。
+import json
+import math
+import os
+import tensor
+import tensor.nn as nn
+from tensor import Tensor
+
+class QwenConfig:
+    hidden: int
+    intermediate: int
+    layers: int
+    heads: int
+    kv_heads: int
+    head_dim: int
+    vocab: int
+    rope_theta: float
+    eps: float
+
+    static def load(path: str) -> QwenConfig:
+        c = json.loads_dict(os.read_file(path))
+        return QwenConfig(c["hidden_size"] as int, c["intermediate_size"] as int, c["num_hidden_layers"] as int,
+                          c["num_attention_heads"] as int, c["num_key_value_heads"] as int, c["head_dim"] as int,
+                          c["vocab_size"] as int, number(c["rope_theta"]), number(c["rms_norm_eps"]))
+
+# JSON 中的数可能是整数也可能是小数
+def number(v: any) -> float:
+    if v is int:
+        return float(v)
+    return v as float
+
+# 可以加 LoRA 的线性层（没有偏置，Qwen3 的线性层都没有偏置）
+class LoRALinear(nn.Module):
+    weight: Tensor?                   # [输出, 输入]，冻结
+    qweight: tensor.QTensor?          # 或者量化为 int8 的权重
+    in_features: int
+    out_features: int
+    device: str
+    lora_a: Tensor?                   # [r, 输入]
+    lora_b: Tensor?                   # [输出, r]
+    scale: float = 0.0
+
+    def __init__(self, weight: Tensor, device: str, quantize: bool):
+        self.out_features = weight.size(0)
+        self.in_features = weight.size(1)
+        self.device = device
+        self.weight = null
+        self.qweight = null
+        if quantize:
+            self.qweight = tensor.quantize_int8(weight, device)
+        else:
+            self.weight = weight.to(device)
+        self.lora_a = null
+        self.lora_b = null
+
+    def enable_lora(self, r: int, alpha: float):
+        bound = 1.0 / math.sqrt(self.in_features)
+        self.lora_a = tensor.uniform([r, self.in_features], -bound, bound).to(self.device).requires_grad_()
+        self.lora_b = tensor.zeros(self.out_features, r).to(self.device).requires_grad_()
+        self.scale = alpha / r
+
+    def forward(self, x: Tensor) -> Tensor:
+        q = self.qweight
+        w = self.weight
+        y = tensor.linear_q8(x, q) if q != null else tensor.linear(x, w!)
+        a = self.lora_a
+        b = self.lora_b
+        if a != null and b != null:
+            y = y + tensor.linear(tensor.linear(x, a), b) * self.scale
+        return y
+
+class QwenAttention(nn.Module):
+    q_proj: LoRALinear
+    k_proj: LoRALinear
+    v_proj: LoRALinear
+    o_proj: LoRALinear
+    q_norm: Tensor
+    k_norm: Tensor
+    heads: int
+    kv_heads: int
+    head_dim: int
+    eps: float
+
+    def __init__(self, w: dict[str, Tensor], prefix: str, cfg: QwenConfig, device: str, quantize: bool):
+        self.q_proj = LoRALinear(w[prefix + "q_proj.weight"], device, quantize)
+        self.k_proj = LoRALinear(w[prefix + "k_proj.weight"], device, quantize)
+        self.v_proj = LoRALinear(w[prefix + "v_proj.weight"], device, quantize)
+        self.o_proj = LoRALinear(w[prefix + "o_proj.weight"], device, quantize)
+        self.q_norm = w[prefix + "q_norm.weight"].to(device)
+        self.k_norm = w[prefix + "k_norm.weight"].to(device)
+        self.heads = cfg.heads
+        self.kv_heads = cfg.kv_heads
+        self.head_dim = cfg.head_dim
+        self.eps = cfg.eps
+
+    # x：[B, T, hidden]；cos、sin：[T, head_dim]；mask：可以广播到 [B, 1, T, T] 的加性掩码
+    def attend(self, x: Tensor, cos: Tensor, sin: Tensor, mask: Tensor) -> Tensor:
+        b, t = x.size(0), x.size(1)
+        h, kv, d = self.heads, self.kv_heads, self.head_dim
+        q = tensor.rms_norm(self.q_proj(x).reshape(b, t, h, d), self.q_norm, self.eps).transpose(1, 2)
+        k = tensor.rms_norm(self.k_proj(x).reshape(b, t, kv, d), self.k_norm, self.eps).transpose(1, 2)
+        v = self.v_proj(x).reshape(b, t, kv, d).transpose(1, 2)
+        q = rope(q, cos, sin)
+        k = rope(k, cos, sin)
+        if kv != h:
+            # 分组查询注意力：每 h / kv 个查询头共用一组 k、v
+            k = k.unsqueeze(2).expand(b, kv, h // kv, t, d).reshape(b, h, t, d)
+            v = v.unsqueeze(2).expand(b, kv, h // kv, t, d).reshape(b, h, t, d)
+        scores = (q @ k.transpose(2, 3)) * (1.0 / math.sqrt(d)) + mask
+        out = (scores.softmax(dim=-1) @ v).transpose(1, 2).reshape(b, t, h * d)
+        return self.o_proj(out)
+
+# 旋转位置编码（前一半与后一半配对旋转）：x * cos + rotate_half(x) * sin
+def rope(x: Tensor, cos: Tensor, sin: Tensor) -> Tensor:
+    half = x.size(-1) // 2
+    rotated = tensor.cat([-x.narrow(-1, half, half), x.narrow(-1, 0, half)], dim=-1)
+    return x * cos + rotated * sin
+
+class QwenMLP(nn.Module):
+    gate_proj: LoRALinear
+    up_proj: LoRALinear
+    down_proj: LoRALinear
+
+    def __init__(self, w: dict[str, Tensor], prefix: str, device: str, quantize: bool):
+        self.gate_proj = LoRALinear(w[prefix + "gate_proj.weight"], device, quantize)
+        self.up_proj = LoRALinear(w[prefix + "up_proj.weight"], device, quantize)
+        self.down_proj = LoRALinear(w[prefix + "down_proj.weight"], device, quantize)
+
+    def forward(self, x: Tensor) -> Tensor:
+        return self.down_proj(self.gate_proj(x).silu() * self.up_proj(x))
+
+class QwenLayer(nn.Module):
+    input_norm: Tensor
+    post_norm: Tensor
+    attn: QwenAttention
+    mlp: QwenMLP
+    eps: float
+
+    def __init__(self, w: dict[str, Tensor], i: int, cfg: QwenConfig, device: str, quantize: bool):
+        p = f"model.layers.{i}."
+        self.input_norm = w[p + "input_layernorm.weight"].to(device)
+        self.post_norm = w[p + "post_attention_layernorm.weight"].to(device)
+        self.attn = QwenAttention(w, p + "self_attn.", cfg, device, quantize)
+        self.mlp = QwenMLP(w, p + "mlp.", device, quantize)
+        self.eps = cfg.eps
+
+    def run(self, x: Tensor, cos: Tensor, sin: Tensor, mask: Tensor) -> Tensor:
+        h = x + self.attn.attend(tensor.rms_norm(x, self.input_norm, self.eps), cos, sin, mask)
+        return h + self.mlp(tensor.rms_norm(h, self.post_norm, self.eps))
+
+class Qwen3(nn.Module):
+    config: QwenConfig
+    embed: Tensor                     # [词表, hidden]，与输出层共享
+    layers: list[QwenLayer]
+    norm: Tensor
+    _cos: Tensor
+    _sin: Tensor
+
+    # 读取目录中的 config.json 与权重（model.safetensors，或者分成几个文件时的 model.safetensors.index.json）。
+    # 权重一层一层地读到内存中再放到 device 上（quantize 时线性层的权重量化为 int8）：内存中只有词嵌入和
+    # 正在读取的这一层。一次全部读入的话，Qwen3-1.7B 转换为 float32 有 7 GB，加上等待回收的临时数据会用掉 16 GB 内存
+    def __init__(self, folder: str, device: str, quantize: bool = false):
+        self.config = QwenConfig.load(os.path.join(folder, "config.json"))
+        tensor.set_default_device("cpu")
+        files = weight_files(folder)
+        # 词嵌入留在内存中（Qwen3-0.6B 的词嵌入有 6 亿字节）：每次只需要查出用到的那几行，显存留给其余的层
+        self.embed = load_weights(files, "model.embed_tokens.")["model.embed_tokens.weight"]
+        self.layers = [QwenLayer(load_weights(files, f"model.layers.{i}."), i, self.config, device, quantize)
+                       for i in range(self.config.layers)]
+        self.norm = load_weights(files, "model.norm.")["model.norm.weight"].to(device)
+        tensor.set_default_device(device)
+        self._cos, self._sin = rope_tables(self.config.head_dim, 4096, self.config.rope_theta)
+
+    # 为所有线性层加上 LoRA，返回新增的可训练参数
+    def enable_lora(self, r: int = 8, alpha: float = 16.0) -> list[Tensor]:
+        out: list[Tensor] = []
+        for layer in self.layers:
+            for lin in [layer.attn.q_proj, layer.attn.k_proj, layer.attn.v_proj, layer.attn.o_proj,
+                        layer.mlp.gate_proj, layer.mlp.up_proj, layer.mlp.down_proj]:
+                lin.enable_lora(r, alpha)
+                a = lin.lora_a
+                b = lin.lora_b
+                if a != null and b != null:
+                    out.append(a)
+                    out.append(b)
+        return out
+
+    # ids：[B, T] 的词元编号（右侧补齐）；lengths：每一行的真实长度。返回最后一层的表示 [B, T, hidden]
+    def hidden_states(self, ids: Tensor, lengths: list[int]) -> Tensor:
+        b, t = ids.size(0), ids.size(1)
+        dev = self.norm.device
+        x = tensor.embedding(self.embed, ids).to(dev)
+        keep: list[float] = []
+        for n in lengths:
+            keep.extend([1.0] * n + [0.0] * (t - n))
+        padding = ((tensor.tensor(keep, [b, 1, 1, t]) - 1.0) * 1e9).to(dev)
+        mask = tensor.causal_mask(t).to(dev) + padding
+        cos = self._cos.narrow(0, 0, t).to(dev)
+        sin = self._sin.narrow(0, 0, t).to(dev)
+        for layer in self.layers:
+            # 训练时每一层使用检查点：反向传播时重新计算这一层，不保存层内的中间结果
+            x = tensor.checkpoint(h => layer.run(h, cos, sin, mask), x)
+        return tensor.rms_norm(x, self.norm, self.config.eps)
+
+    # 每一行最后一个真实位置的表示 [B, hidden]
+    def last_states(self, ids: Tensor, lengths: list[int]) -> Tensor:
+        b, t = ids.size(0), ids.size(1)
+        h = self.hidden_states(ids, lengths).reshape(b * t, self.config.hidden)
+        return h.index_select(0, tensor.from_ints([i * t + lengths[i] - 1 for i in range(b)]))
+
+    # 最后一个位置上，下一个词元是 candidates 中各个词元的分数（logits）[B, 候选数]
+    def candidate_logits(self, ids: Tensor, lengths: list[int], candidates: list[int]) -> Tensor:
+        h = self.last_states(ids, lengths)
+        return tensor.linear(h, self.embed.index_select(0, tensor.from_ints(candidates)).to(h.device))
+
+    # 贪心地生成 max_new 个词元（每一步重新计算整个序列，只用于检验模型）
+    def generate(self, prompt: list[int], max_new: int, stop: int = -1) -> list[int]:
+        ids = list(prompt)
+        with tensor.no_grad():
+            for _ in range(max_new):
+                h = self.last_states(tensor.from_ints(ids, [1, len(ids)]), [len(ids)])
+                logits = tensor.linear(h.cpu(), self.embed)
+                nxt = int(logits.argmax().item())
+                if nxt == stop:
+                    break
+                ids.append(nxt)
+        return ids[len(prompt):]
+
+# 每个张量在哪个文件中
+def weight_files(folder: str) -> dict[str, str]:
+    out: dict[str, str] = {}
+    index = os.path.join(folder, "model.safetensors.index.json")
+    if os.exists(index):
+        for name, f in (json.loads_dict(os.read_file(index))["weight_map"] as dict[str, any]).items():
+            out[name] = os.path.join(folder, f as str)
+    else:
+        path = os.path.join(folder, "model.safetensors")
+        for name in tensor.safetensors_shapes(path).keys():
+            out[name] = path
+    return out
+
+# 读取名字以 prefix 开头的所有张量（与词嵌入共享的 lm_head 不会被读取）
+def load_weights(files: dict[str, str], prefix: str) -> dict[str, Tensor]:
+    groups: dict[str, list[str]] = {}
+    for name, path in files.items():
+        if name.startswith(prefix):
+            if path not in groups:
+                groups[path] = []
+            groups[path].append(name)
+    w: dict[str, Tensor] = {}
+    for path, names in groups.items():
+        w.update(tensor.load_safetensors(path, names))
+    return w
+
+# RoPE 的 cos、sin 表：[长度, head_dim]，第 t 行是位置 t
+def rope_tables(dim: int, length: int, theta: float) -> (Tensor, Tensor):
+    half = dim // 2
+    inv = [1.0 / math.pow(theta, 2.0 * i / dim) for i in range(half)]
+    cos: list[float] = []
+    sin: list[float] = []
+    for t in range(length):
+        row = [t * f for f in inv]
+        for a in row + row:
+            cos.append(math.cos(a))
+            sin.append(math.sin(a))
+    return (tensor.tensor(cos, [length, dim]).cpu(), tensor.tensor(sin, [length, dim]).cpu())
