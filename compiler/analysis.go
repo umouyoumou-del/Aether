@@ -784,6 +784,10 @@ var keywordList = []string{"and", "as", "assert", "async", "await", "break", "cl
 func (a *Analysis) MembersBefore(line, dotCol int) []Completion {
 	rs := []rune(a.LineText(line))
 	i := dotCol - 2 // “.” 之前的字符（下标从 0 开始）
+	if i >= len(rs) {
+		// 光标可能落在行尾之外（编辑器里正在输入的空行、超出本行的列号），先夹到最后一个字符
+		i = len(rs) - 1
+	}
 	for i >= 0 && (rs[i] == ' ' || rs[i] == '\t') {
 		i--
 	}
