@@ -159,6 +159,7 @@ extend str:
 
 extend char:
     @go("rt.CharIsDigit") def isdigit(self) -> bool
+    @go("rt.CharIsNumeric") def isnumeric(self) -> bool
     @go("rt.CharIsAlpha") def isalpha(self) -> bool
     @go("rt.CharIsAlnum") def isalnum(self) -> bool
     @go("rt.CharIsSpace") def isspace(self) -> bool
@@ -240,6 +241,10 @@ extend[T] list[T]:
     @go("rt.ParallelMap") def parallel_map[U](self, f: fn(T) -> U) -> list[U]
     @go(".All") def iter(self) -> iter[T]
     @go(".Len") prop length -> int
+
+extend list[u8]:
+    # 把 UTF-8 字节解码为字符串（无效的字节序列替换为 U+FFFD）
+    @go("rt.StrFromBytes") def decode(self) -> str
 
 extend[T: Ordered] list[T]:
     @go("rt.ListSort") def sort(self, reverse: bool = false)

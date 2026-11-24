@@ -685,11 +685,26 @@ func (g *Gen) loopHead(target Expr, iter Expr, info *LoopInfo, body []Stmt) (str
 	case loopDictItems:
 		x := g.expr(info.Inner)
 		if tl, ok := target.(*TupleLit); ok && len(tl.Elems) == 2 {
-			k, vv := g.tmp(), g.tmp()
+			// for _, v in d.items()：不需要的键（或值）用 Go 的 _，否则生成的临时变量未被使用
+			blank := func(e Expr) bool { id, ok := e.(*Ident); return ok && id.Name == "_" }
+			k, vv := "_", "_"
+			if !blank(tl.Elems[0]) {
+				k = g.tmp()
+			}
+			if !blank(tl.Elems[1]) {
+				vv = g.tmp()
+			}
 			tt := elemT.(*TupleT)
+			if k == "_" && vv == "_" {
+				return fmt.Sprintf("for range %s.All()", x), func() {}
+			}
 			return fmt.Sprintf("for %s, %s := range %s.All()", k, vv, x), func() {
-				g.bindTarget(tl.Elems[0], k, tt.Elems[0])
-				g.bindTarget(tl.Elems[1], vv, tt.Elems[1])
+				if k != "_" {
+					g.bindTarget(tl.Elems[0], k, tt.Elems[0])
+				}
+				if vv != "_" {
+					g.bindTarget(tl.Elems[1], vv, tt.Elems[1])
+				}
 			}
 		}
 		v := g.tmp()

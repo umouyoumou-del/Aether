@@ -6,3 +6,4 @@
 ["高", "也是高", "中", "低"] null
 DefaultDict({"a": ["apple", "avocado"], "b": ["banana", "blueberry"], "c": ["cherry"]}) 3 true
 DefaultDict({"m": 1, "i": 4, "s": 4, "p": 2})
+7 ["x", "y"] 2

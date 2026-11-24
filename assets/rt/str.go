@@ -700,7 +700,7 @@ func StrFromChars(l *List[Char]) string {
 	return sb.String()
 }
 
-func StrFromBytes(l *List[uint8]) string { return string(l.S) }
+func StrFromBytes(l *List[uint8]) string { return strings.ToValidUTF8(string(l.S), "�") }
 
 func StrToChar(s string) Char {
 	if utf8.RuneCountInString(s) != 1 {
@@ -1076,6 +1076,7 @@ func StrIsEmpty(s string) bool { return s == "" }
 // ===== 字符方法 =====
 
 func CharIsDigit(c Char) bool  { return unicode.IsDigit(rune(c)) }
+func CharIsNumeric(c Char) bool { return unicode.IsNumber(rune(c)) }
 func CharIsAlpha(c Char) bool  { return unicode.IsLetter(rune(c)) }
 func CharIsSpace(c Char) bool  { return unicode.IsSpace(rune(c)) }
 func CharIsUpper(c Char) bool  { return unicode.IsUpper(rune(c)) }

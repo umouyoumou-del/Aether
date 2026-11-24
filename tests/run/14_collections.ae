@@ -41,3 +41,16 @@ counts = DefaultDict[str, int](() => 0)
 for ch in "mississippi":
     counts[str(ch)] += 1
 print(counts)
+
+# 遍历字典时用 _ 忽略键或值
+amounts = {"x": 3, "y": 4}
+total_v = 0
+for _, cv in amounts.items():
+    total_v += cv
+keys_only: list[str] = []
+for ck, _ in amounts.items():
+    keys_only.append(ck)
+pairs_seen = 0
+for _, _ in amounts.items():
+    pairs_seen += 1
+print(total_v, keys_only, pairs_seen)
