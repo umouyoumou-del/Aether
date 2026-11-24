@@ -105,6 +105,8 @@ def _unsupported_hint(name: str) -> str?:
         return "乘除运算符的位置不对（前面缺少运算对象）"
     if name == "quad" or name == "qquad":
         return "间距命令出现在不该出现的位置"
+    if name == "mid" or name == "vert" or name == "colon":
+        return "不支持条件概率/集合记号；它们没有代数含义，请先把公式改写成可计算的形式"
     return null
 
 # 从 PDF / 网页复制公式时常见的 Unicode 数学字符：先归一成 LaTeX 命令，
