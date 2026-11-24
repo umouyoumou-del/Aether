@@ -179,6 +179,37 @@ MiniJev 一栏是 `train.ae` 训练的模型在这 634 个问题上的结果。�
 - **训练数据之外**：演示的最后一个例子“附近有没有好吃的川菜馆？”，各个模型都答 food（0.98～0.99），不是投诉（0.00）；
   MiniJev 在同样的问题上答 weather（0.64）。
 
+### API 服务
+
+`qwen_server.ae` 把 QwenJev 做成 HTTP 服务，请求与响应的格式与 TypeSafe 的 System One API 相同（按它公开的
+OpenAPI 规范实现）：`POST /v1/systemone`、`GET /v1/models`，以及不需要密钥的 `GET /health`。TypeSafe 的 Python SDK
+（`typesafe-sdk` 0.7.5）只要把 `base_url` 指向这个服务就能直接使用（测试过）。
+
+```
+QWENJEV_API_KEY=密钥 aether run examples/minijev/qwen_server.ae D:/models/Qwen3-1.7B qwen17-lora.bin int8 :8460
+```
+
+```python
+from typesafe_sdk import Choice, Noul, Score, TypeSafeClient
+
+client = TypeSafeClient(api_key="密钥", base_url="http://服务器:8460")
+r = client.system_one(state="我的信用卡被扣了两次钱，急需处理。", questions={
+    "topic": Choice(instructions="这条消息属于哪个主题？", criteria={"billing": "账单或扣费问题", "account": "账号或登录问题"}),
+    "priority": Score(instructions="紧急程度如何？", criteria=["不急", "一般", "非常紧急"]),
+    "needs_human": Noul(instructions="是否需要人工处理？"),
+})
+r.answers["topic"].choice          # "billing"
+```
+
+与 TypeSafe 的 API 的差别：
+
+- 只支持文字。`state`、`instructions`、`criteria` 也可以是 JSON 对象或数组（转换为 JSON 文字），但模型是用纯文字训练的，
+  写成纯文字效果最好。没有 Box 问题和图像（`assets`）。
+- Choice 最多 10 个选项（模型用字母 A～J 表示选项），Score 最多 10 级；每个问题（状态 + 问题）最多 4096 个词元，一个请求
+  最多 32 个问题。超出时返回 400 和说明。
+- `model` 可以写 `qwenjev`、`jev-latest`（SDK 的默认值）或 `GET /v1/models` 返回的名字。
+- 同一时刻只处理一个请求：3～4 个问题在 RTX 3050 或 NVIDIA A2 上约 1～2 秒。
+
 ### 局限
 
 - 慢：每个问题都要算一遍整个语言模型，一次 `system_one` 要 0.6～2.3 秒，MiniJev 只要几毫秒。

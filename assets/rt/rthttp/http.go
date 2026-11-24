@@ -201,15 +201,26 @@ func normAddr(addr string) string {
 	return addr
 }
 
+// newServer 设置超时：读取请求头最多 10 秒、整个请求最多 60 秒、空闲的连接 2 分钟后关闭，
+// 慢速或者不发数据的客户端不会一直占着连接（处理请求本身的时间不受限制）。
+func newServer(h http.Handler) *http.Server {
+	return &http.Server{Handler: h, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 60 * time.Second, IdleTimeout: 2 * time.Minute}
+}
+
 // Listen 启动服务器并阻塞。
 func (s *HTTPServer) Listen(addr string) {
 	a := normAddr(addr)
 	s.mu.Lock()
-	s.srv = &http.Server{Addr: a, Handler: s.mux}
+	s.srv = newServer(s.mux)
+	s.srv.Addr = a
 	srv := s.srv
 	s.mu.Unlock()
 	rt.Flush()
-	fmt.Fprintf(os.Stderr, "[http] 服务器运行在 http://localhost%s\n", a)
+	shown := a
+	if strings.HasPrefix(a, ":") {
+		shown = "localhost" + a
+	}
+	fmt.Fprintf(os.Stderr, "[http] 服务器运行在 http://%s\n", shown)
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		rt.Raise("IOError", "服务器启动失败：%v", err)
 	}
@@ -222,7 +233,7 @@ func (s *HTTPServer) Start(addr string) string {
 		rt.Raise("IOError", "服务器启动失败：%v", err)
 	}
 	s.mu.Lock()
-	s.srv = &http.Server{Handler: s.mux}
+	s.srv = newServer(s.mux)
 	srv := s.srv
 	s.mu.Unlock()
 	go srv.Serve(l)

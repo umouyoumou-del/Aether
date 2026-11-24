@@ -1,0 +1,210 @@
+# QwenJev 的 HTTP API 服务。请求与响应的格式与 TypeSafe 的 System One API 相同（POST /v1/systemone），
+# 所以 TypeSafe 的 SDK 把 base_url 指向这里就能调用。只支持文字的 state 与 Choice / Score / Noul 三种问题
+# （不支持图像与 Box 问题）；Choice 最多 10 个选项，Score 最多 10 级。
+#
+#     aether run examples/minijev/qwen_server.ae <模型目录> [LoRA 文件] [int8] [监听地址，默认 :8460]
+#
+# API 密钥：环境变量 QWENJEV_API_KEY，或者 QWENJEV_API_KEY_FILE（保存密钥的文件）。请求要带上
+# “Authorization: Bearer <密钥>”。两个都没有设置时不检查密钥（只应在本机测试时这样做）。
+#
+#     curl http://localhost:8460/v1/systemone -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+#          -d '{"model": "qwenjev", "state": "我的信用卡被扣了两次钱", "questions": {"billing": {"type": "noul", "instructions": "这是账单问题吗？"}}}'
+#
+# 另外 GET /v1/models 列出模型，GET /health 不需要密钥，用于检查服务是否在运行。
+import hashlib
+import json
+import os
+import sys
+import time
+import http
+import tensor
+from minijev import Question, choice, noul, score
+from qwenjev import QwenJev
+
+const MAX_BODY = 1 << 20          # 请求体最多 1 MB
+const MAX_QUESTIONS = 32          # 每个请求最多的问题数
+const MAX_TOKENS = 4096           # 每个问题（状态 + 问题）最多的词元数：位置编码表的长度
+
+folder = sys.argv[1] if len(sys.argv) > 1 else "D:/aether-models/Qwen3-1.7B"
+lora = sys.argv[2] if len(sys.argv) > 2 else ""
+quantize = len(sys.argv) > 3 and sys.argv[3] == "int8"
+addr = sys.argv[4] if len(sys.argv) > 4 else ":8460"
+model_name = "qwenjev-" + os.path.basename(folder).lower()
+model_names = {model_name, "qwenjev", "jev-latest"}
+
+def load_key() -> str:
+    key = os.getenv("QWENJEV_API_KEY") ?? ""
+    path = os.getenv("QWENJEV_API_KEY_FILE") ?? ""
+    if key == "" and path != "":
+        key = os.read_file(path).strip()
+    return key
+
+api_key = load_key()
+key_hash = hashlib.sha256(api_key).hexdigest()
+
+# 比较摘要而不是密钥本身：比较所用的时间不会泄露密钥的内容
+def authorized(req: http.Request) -> bool:
+    if api_key == "":
+        return true
+    h = req.header("Authorization") ?? ""
+    if not h.startswith("Bearer "):
+        return false
+    return hashlib.sha256(h[7:].strip()).hexdigest() == key_hash
+
+def error(status: int, detail: str) -> http.Response:
+    return http.json({"detail": detail}, status=status)
+
+# state、instructions、criteria 可以是字符串，也可以是 JSON 对象或数组（转换为 JSON 文字）
+def text_of(v: any) -> str:
+    if v is null:
+        return ""
+    if v is str:
+        return v
+    return json.dumps(v)
+
+def parse_question(name: str, q: any) -> Question:
+    match q:
+        case dict[str, any] d:
+            kind = text_of(d.get("type"))
+            instr = text_of(d.get("instructions"))
+            crit = d.get("criteria")
+            if kind == "choice":
+                match crit:
+                    case dict[str, any] c:
+                        if len(c) < 2 or len(c) > 10:
+                            raise ValueError(f"问题 {name}：Choice 需要 2～10 个选项（这个模型用字母 A～J 表示选项）")
+                        return choice(instr, {k: text_of(v) for k, v in c.items()})
+                    case _:
+                        raise ValueError(f"问题 {name}：Choice 的 criteria 应当是“选项名 → 描述”的对象")
+            if kind == "score":
+                match crit:
+                    case list[any] levels:
+                        if len(levels) < 2 or len(levels) > 10:
+                            raise ValueError(f"问题 {name}：Score 需要 2～10 个等级")
+                        return score(instr, [text_of(v) for v in levels])
+                    case _:
+                        raise ValueError(f"问题 {name}：Score 的 criteria 应当是从第 0 级开始的各级描述（数组）")
+            if kind == "noul":
+                extra = ""
+                match crit:
+                    case dict[str, any] c:
+                        parts: list[str] = []
+                        yes = text_of(c.get("true"))
+                        no = text_of(c.get("false"))
+                        if yes != "":
+                            parts.append("“是”指：" + yes)
+                        if no != "":
+                            parts.append("“否”指：" + no)
+                        extra = "；".join(parts)
+                    case _:
+                        if crit is not null:
+                            raise ValueError(f"问题 {name}：Noul 的 criteria 应当是 {{\"true\": ..., \"false\": ...}}")
+                return noul(instr, extra)
+            if kind == "box":
+                raise ValueError(f"问题 {name}：这个服务不支持 Box 问题（需要图像）")
+            raise ValueError(f"问题 {name}：未知的问题类型 {json.dumps(kind)}，应为 choice、score 或 noul")
+        case _:
+            raise ValueError(f"问题 {name} 应当是一个对象")
+
+# 检查请求，返回（状态的文字，问题，输入的词元数）
+def parse_request(body: any) -> (str, dict[str, Question], int):
+    match body:
+        case dict[str, any] d:
+            m = d.get("model")
+            if m is not null and text_of(m) not in model_names:
+                raise ValueError(f"未知的模型 {text_of(m)}：这个服务的模型是 {model_name}（也可以写 qwenjev 或 jev-latest）")
+            if "assets" in d:
+                raise ValueError("这个服务不支持图像（assets）")
+            if d.get("state") is null:
+                raise ValueError("缺少 state")
+            state = text_of(d["state"])
+            match d.get("questions"):
+                case dict[str, any] qs:
+                    if len(qs) == 0:
+                        raise ValueError("questions 不能为空")
+                    if len(qs) > MAX_QUESTIONS:
+                        raise ValueError(f"一个请求最多 {MAX_QUESTIONS} 个问题")
+                    out: dict[str, Question] = {}
+                    tokens = 0
+                    for name, item in qs.items():
+                        q = parse_question(name, item)
+                        n = len(jev.encode(state, q).ids)
+                        if n > MAX_TOKENS:
+                            raise ValueError(f"问题 {name}：状态与问题一共 {n} 个词元，超过了 {MAX_TOKENS}")
+                        tokens += n
+                        out[name] = q
+                    return (state, out, tokens)
+                case _:
+                    raise ValueError("questions 应当是“名字 → 问题”的对象")
+        case _:
+            raise ValueError("请求体应当是一个 JSON 对象")
+
+# 模型、分词器不是线程安全的：同一时刻只处理一个请求
+mu = Mutex()
+
+def systemone(req: http.Request) -> http.Response:
+    if not authorized(req):
+        return error(401, "缺少或无效的 API 密钥：请求头应当是 Authorization: Bearer <密钥>")
+    if len(req.body) > MAX_BODY:
+        return error(413, f"请求体太大（最多 {MAX_BODY} 字节）")
+    body: any = null
+    try:
+        body = json.loads(req.body)
+    except JSONError as e:
+        return error(422, "请求体不是有效的 JSON：" + e.message)
+    with mu:
+        try:
+            state, questions, tokens = parse_request(body)
+        except ValueError as e:
+            return error(400, e.message)
+        r = jev.system_one(state, questions)
+    answers: dict[str, any] = {}
+    for qid in questions.keys():
+        c = r.choices.get(qid)
+        if c != null:
+            answers[qid] = {"type": "choice", "choice": c.choice, "confidence": c.confidence, "probabilities": c.probabilities}
+            continue
+        s = r.scores.get(qid)
+        if s != null:
+            legend: dict[str, any] = {}
+            probs: dict[str, any] = {}
+            for i, level in enumerate(s.legend):
+                legend[str(i)] = level
+                probs[str(i)] = s.probabilities[i]
+            answers[qid] = {"type": "score", "score": s.score, "confidence": s.confidence, "legend": legend, "probabilities": probs}
+            continue
+        n = r.nouls.get(qid)
+        if n != null:
+            answers[qid] = {"type": "noul", "noul": n.noul}
+    usage = {"input_tokens": tokens, "output_tokens": len(questions)}
+    return http.json({"model": model_name, "answers": answers, "usage": usage})
+
+def models(req: http.Request) -> http.Response:
+    if not authorized(req):
+        return error(401, "缺少或无效的 API 密钥：请求头应当是 Authorization: Bearer <密钥>")
+    desc = "Qwen3 经 LoRA 微调的 Jev 式决策模型（用 Aether 实现；与 TypeSafe AI 无关）"
+    return http.json({"models": [{"name": model_name, "description": desc, "release_date": "2026-11-24"}]})
+
+def health(req: http.Request) -> http.Response:
+    return http.json({"status": "ok", "model": model_name, "device": device})
+
+device = "gpu" if tensor.gpu_available() else "cpu"
+start = time.time()
+jev = QwenJev(folder, device, quantize)
+if lora != "":
+    jev.load_lora(lora)
+# 预热：第一次使用 GPU 时驱动要编译内核
+jev.system_one("测试", {"q": noul("这是一条测试消息吗？")})
+weights = "int8" if quantize else "float32"
+print(f"已读取 {folder}（{device}，{weights} 权重，LoRA：{lora if lora != "" else "无"}），用时 {time.time() - start:.1f} 秒", flush=true)
+if device == "gpu":
+    print(tensor.device_info(), flush=true)
+if api_key == "":
+    print("警告：没有设置 API 密钥（QWENJEV_API_KEY 或 QWENJEV_API_KEY_FILE），任何人都可以调用", flush=true)
+
+server = http.Server()
+server.get("/health", health)
+server.get("/v1/models", models)
+server.post("/v1/systemone", systemone)
+print(f"模型 {model_name}，监听 {addr}", flush=true)
+server.listen(addr)
