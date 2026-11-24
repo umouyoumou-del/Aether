@@ -568,6 +568,22 @@ func naiveMatmul(a, b []float32, batch, m, k, n int, ta, tb bool, sa, sb int) []
 	return out
 }
 
+// TestGPUMemoryLimit 检查环境变量 AETHER_GPU_MEMORY 的解析。
+func TestGPUMemoryLimit(t *testing.T) {
+	for _, c := range []struct {
+		s    string
+		want int64
+		bad  bool
+	}{{"", 0, false}, {"2G", 2 << 30, false}, {"1536M", 1536 << 20, false}, {"1.5gb", 3 << 29, false},
+		{"512", 512 << 20, false}, {"abc", 0, true}, {"-1G", 0, true}} {
+		t.Setenv("AETHER_GPU_MEMORY", c.s)
+		got, err := gpuMemoryLimit()
+		if (err != nil) != c.bad || got != c.want {
+			t.Fatalf("AETHER_GPU_MEMORY=%q：得到 %d（错误 %v），应为 %d", c.s, got, err, c.want)
+		}
+	}
+}
+
 // TestMatmulShapes 用各种尺寸（包括不是 6、16 的倍数的边缘情况）、转置与批次检查 CPU 和 GPU 的矩阵乘法。
 func TestMatmulShapes(t *testing.T) {
 	devs := []backend{cpuDev}

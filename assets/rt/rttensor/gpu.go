@@ -132,7 +132,7 @@ func deviceString(id uintptr, param uintptr) string {
 
 func listDevices() ([]clDevice, error) {
 	if err := clAvailable(); err != nil {
-		return nil, fmt.Errorf("找不到 OpenCL（显卡驱动中的 OpenCL.dll）：%v", err)
+		return nil, fmt.Errorf("找不到 OpenCL：%v", err)
 	}
 	var np uint32
 	if r := clCall(clGetPlatformIDs, 0, 0, uintptr(unsafe.Pointer(&np))); r != 0 || np == 0 {
@@ -167,6 +167,27 @@ func listDevices() ([]clDevice, error) {
 		return nil, fmt.Errorf("OpenCL 中没有找到 GPU 设备")
 	}
 	return out, nil
+}
+
+// gpuMemoryLimit 读取环境变量 AETHER_GPU_MEMORY（例如 2G、1536M；只写数字时单位是 MB），没有设置时返回 0。
+func gpuMemoryLimit() (int64, error) {
+	s := strings.ToUpper(strings.TrimSpace(os.Getenv("AETHER_GPU_MEMORY")))
+	if s == "" {
+		return 0, nil
+	}
+	unit := int64(1 << 20)
+	num := strings.TrimSuffix(s, "B")
+	switch {
+	case strings.HasSuffix(num, "G"):
+		unit, num = 1<<30, strings.TrimSuffix(num, "G")
+	case strings.HasSuffix(num, "M"):
+		num = strings.TrimSuffix(num, "M")
+	}
+	v, err := strconv.ParseFloat(num, 64)
+	if err != nil || v <= 0 {
+		return 0, fmt.Errorf("环境变量 AETHER_GPU_MEMORY=%s 无效：应写成 2G、1536M 这样的大小", os.Getenv("AETHER_GPU_MEMORY"))
+	}
+	return int64(v * float64(unit)), nil
 }
 
 // GpuDevices 列出所有可用的 GPU（序号可以写在环境变量 AETHER_GPU 中来选择使用哪一个）。
@@ -212,6 +233,13 @@ func initGPU() (*gpuBackend, error) {
 	g := &gpuBackend{device: d.id, kernels: map[string]clKernel{}, pool: map[int][]uintptr{}}
 	g.gcBudget = min(max(d.mem/8, 64<<20), 1<<30)
 	g.highWater = d.mem * 85 / 100
+	// 与其它程序共用显卡时（例如服务器上），AETHER_GPU_MEMORY 限制这个程序占用的显存（正在使用 + 缓存）
+	if lim, err := gpuMemoryLimit(); err != nil {
+		return nil, err
+	} else if lim > 0 && lim < g.highWater {
+		g.highWater = lim
+		g.gcBudget = min(g.gcBudget, max(lim/8, 16<<20))
+	}
 	var errc int32
 	g.ctx, errc = clCallPtr(clCreateContext, 0, 1, uintptr(unsafe.Pointer(&g.device)), 0, 0)
 	if errc != 0 {

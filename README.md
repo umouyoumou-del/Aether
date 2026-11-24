@@ -43,6 +43,17 @@ powershell -ExecutionPolicy Bypass -File install.ps1 -AddToPath  # 同时把 bin
 
 也可以手动构建：`go build -o bin\aether.exe .\cmd\aether`。第一次运行程序时 Go 需要编译标准库，会多花几秒钟。
 
+Linux（以及 macOS）：
+
+```sh
+cd aether
+sh install.sh                 # 构建 bin/aether，运行 hello 示例，并检查能否使用 GPU
+sh install.sh --add-to-path   # 同时把 bin 加入 PATH（写入 ~/.bashrc）
+```
+
+在 Linux 上用 GPU 还需要 C 编译器、OpenCL 加载器和显卡驱动（Ubuntu/Debian：`apt install build-essential ocl-icd-libopencl1`），
+见 [docs/深度学习.md](docs/深度学习.md)。
+
 | 命令 | 作用 |
 |---|---|
 | `aether run 文件.ae [参数...]` | 编译并运行（同一程序第二次运行会直接使用缓存的可执行文件） |
@@ -291,7 +302,7 @@ import tensor
 import tensor.nn as nn
 import tensor.optim as optim
 
-tensor.set_default_device("gpu")              # NVIDIA、AMD、Intel 显卡都可以（通过驱动自带的 OpenCL）
+tensor.set_default_device("gpu")              # NVIDIA、AMD、Intel 显卡都可以（通过驱动自带的 OpenCL；Windows 与 Linux）
 x, y = tensor.randn(256, 2), tensor.randint(0, 3, [256])
 model = nn.Sequential(nn.Linear(2, 64), nn.ReLU(), nn.Linear(64, 3))
 opt = optim.Adam(model.parameters(), lr=0.01)

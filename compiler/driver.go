@@ -252,18 +252,21 @@ func writeIfChanged(p string, data []byte) (bool, error) {
 	return true, os.WriteFile(p, data, 0o644)
 }
 
+// setEnv 在环境变量列表中设置 k=v（替换已有的值）。
+func setEnv(env []string, k, v string) []string {
+	for i, e := range env {
+		if strings.HasPrefix(strings.ToUpper(e), strings.ToUpper(k)+"=") {
+			env[i] = k + "=" + v
+			return env
+		}
+	}
+	return append(env, k+"="+v)
+}
+
 // GoEnv 返回调用 go 命令时使用的环境变量。
 func GoEnv(cacheDir string) []string {
 	env := os.Environ()
-	set := func(k, v string) {
-		for i, e := range env {
-			if strings.HasPrefix(strings.ToUpper(e), strings.ToUpper(k)+"=") {
-				env[i] = k + "=" + v
-				return
-			}
-		}
-		env = append(env, k+"="+v)
-	}
+	set := func(k, v string) { env = setEnv(env, k, v) }
 	if gc := os.Getenv("GOCACHE"); gc != "" {
 		if err := os.MkdirAll(gc, 0o755); err != nil {
 			set("GOCACHE", filepath.Join(cacheDir, "go-build"))
@@ -280,6 +283,35 @@ func GoEnv(cacheDir string) []string {
 	set("GOFLAGS", "-mod=mod")
 	set("GOPROXY", "off")
 	return env
+}
+
+// useCgo 决定生成的程序是否用 cgo 构建。Linux 上用到 tensor 的程序需要 cgo（GPU 后端用 dlopen 加载
+// libOpenCL.so，见 rttensor/opencl_linux.go），前提是有 C 编译器；没有的话照常不用 cgo，张量运算只用 CPU。
+// cc 不为空时作为环境变量 CC 传给 go 命令。环境变量 AETHER_CGO=0 / 1 可以强制关闭或打开。
+func useCgo(goSrc string) (enabled bool, cc string) {
+	switch os.Getenv("AETHER_CGO") {
+	case "0":
+		return false, ""
+	case "1":
+		return true, ""
+	}
+	if runtime.GOOS != "linux" || !strings.Contains(goSrc, `"aether/assets/rt/rttensor"`) {
+		return false, ""
+	}
+	if env := strings.Fields(os.Getenv("CC")); len(env) > 0 {
+		_, err := exec.LookPath(env[0])
+		return err == nil, ""
+	}
+	// go 命令默认的 C 编译器是 gcc；没有 gcc 时换成 cc 或 clang
+	for _, c := range []string{"gcc", "cc", "clang"} {
+		if _, err := exec.LookPath(c); err == nil {
+			if c == "gcc" {
+				return true, ""
+			}
+			return true, c
+		}
+	}
+	return false, ""
 }
 
 // BuildGo 把生成的 Go 源码编译为可执行文件，返回可执行文件路径。
@@ -331,7 +363,8 @@ func BuildGo(goSrc string, key string, cfg BuildConfig) (string, error) {
 	if runtime.GOOS == "windows" {
 		exe += ".exe"
 	}
-	stamp := hashOf(append(rtParts, []byte(goSrc), []byte(Version), []byte(runtime.Version()))...)
+	cgo, cc := useCgo(goSrc)
+	stamp := hashOf(append(rtParts, []byte(goSrc), []byte(Version), []byte(runtime.Version()), []byte(fmt.Sprint(cgo)))...)
 	stampFile := filepath.Join(dir, "stamp")
 	if old, err := os.ReadFile(stampFile); err == nil && string(old) == stamp {
 		if _, err := os.Stat(exe); err == nil {
@@ -345,20 +378,49 @@ func BuildGo(goSrc string, key string, cfg BuildConfig) (string, error) {
 		return "", errors.New("找不到 Go 工具链（go 命令）。Aether 需要 Go 1.23 或更新版本：https://go.dev/dl/")
 	}
 	start := time.Now()
-	cmd := exec.Command(goBin, "build", "-o", exe, ".")
-	cmd.Dir = dir
-	cmd.Env = GoEnv(cfg.CacheDir)
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &out
-	if err := cmd.Run(); err != nil {
-		return "", &GoBuildError{Output: out.String()}
+	build := func(cgo bool) (string, error) {
+		cmd := exec.Command(goBin, "build", "-o", exe, ".")
+		cmd.Dir = dir
+		cmd.Env = GoEnv(cfg.CacheDir)
+		if cgo {
+			cmd.Env = setEnv(cmd.Env, "CGO_ENABLED", "1")
+			if cc != "" {
+				cmd.Env = setEnv(cmd.Env, "CC", cc)
+			}
+		}
+		var out bytes.Buffer
+		cmd.Stdout = &out
+		cmd.Stderr = &out
+		err := cmd.Run()
+		return out.String(), err
+	}
+	if out, err := build(cgo); err != nil {
+		if !cgo || os.Getenv("AETHER_CGO") == "1" {
+			return "", &GoBuildError{Output: out}
+		}
+		// C 编译器不能用（例如缺少 C 的头文件）：不用 cgo 再构建一次，只是 GPU 不可用
+		out2, err2 := build(false)
+		if err2 != nil {
+			return "", &GoBuildError{Output: out2}
+		}
+		fmt.Fprintf(os.Stderr, "[aether] 用 cgo 构建失败，已改为不用 cgo 构建（tensor 只能使用 CPU）。"+
+			"请安装 C 编译器与 C 库的头文件（Ubuntu/Debian：apt install build-essential），或设置 AETHER_CGO=0 不再尝试。\n%s\n",
+			firstLines(out, 8))
 	}
 	if cfg.Verbose {
 		fmt.Fprintf(os.Stderr, "[aether] go build 用时 %.2fs\n", time.Since(start).Seconds())
 	}
 	os.WriteFile(stampFile, []byte(stamp), 0o644)
 	return exe, nil
+}
+
+// firstLines 返回 s 的前 n 行。
+func firstLines(s string, n int) string {
+	lines := strings.SplitN(strings.TrimSpace(s), "\n", n+1)
+	if len(lines) > n {
+		lines = append(lines[:n], "……")
+	}
+	return strings.Join(lines, "\n")
 }
 
 // GoBuildError 是 Go 编译生成代码失败（通常意味着编译器的 bug）。

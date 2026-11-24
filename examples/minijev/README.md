@@ -182,6 +182,7 @@ MiniJev 一栏是 `train.ae` 训练的模型在这 634 个问题上的结果。�
 ### 局限
 
 - 慢：每个问题都要算一遍整个语言模型，一次 `system_one` 要 0.6～2.3 秒，MiniJev 只要几毫秒。
-- 需要 4 GB 显存和约 7 GB 的提交内存；GPU 只在 Windows 上可用（见 `docs/深度学习.md`）。
+- 需要 4 GB 显存和约 7 GB 的提交内存；GPU 可以在 Windows 与 Linux 上使用（见 `docs/深度学习.md`）。在 Linux（NVIDIA A2）上，
+  0.6B 的 `qwen_demo.ae`（int8 权重）给出的概率与 Windows 上完全相同。
 - 只在三类合成场景上微调过：训练数据之外的问题靠的是预训练模型原有的理解，这部分的概率没有经过校准。
 - 同样**不是** TypeSafe 的 Jev，也与 TypeSafe AI 无关。
