@@ -16,7 +16,7 @@ sin(a*b)
 == 写回 LaTeX ==
 \frac{x^{2} - 1}{x - 1}
 \left(a + b\right)^{2}
-0.5x
+\frac{1}{2}x
 \alpha \, x_{1} + \pi
 y_{i+1}
 x^{3} - 2x + 1
@@ -56,10 +56,10 @@ def f_dx(x: float) -> float:
     _t0 = x * x
     return 3.0 * _t0 + 2.0 * x * math.cos(_t0)
 == 错误 ==
-[\sum_{i=1}^{n} x_i] 暂不支持求和/连乘/积分记号；请先展开成有限项再用 parse（位置 4，附近：\sum_{i=1}^{n} x）
+[\frac{\partial f}{\partial x}] 暂不支持偏导记号；用 latex.diff_latex(公式, 变量) 求偏导（位置 14，附近：rac{\partial f}{\partial）
 [\frac{1}{}] \frac 的参数不能为空（位置 8，附近：\frac{1}{}）
 [(x+1] 圆括号没有闭合（位置 4，附近：(x+1）
 [\foo x] 不支持的 LaTeX 命令 \foo（位置 4，附近：\foo x）
-[x + \infty] 暂不支持无穷大；它不能参与符号运算（位置 10，附近：x + \infty）
+[\int x^2] 积分缺少微分记号：在末尾写 \, dx（位置 5，附近：\int x^2）
 [x = 1] 这段 LaTeX 里有等号，是等式：用 latex.parse_equation 取两侧
 [a \\ b] 不支持多行公式（\\），一次只解析一行（位置 4，附近：a \\ b）

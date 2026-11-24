@@ -37,6 +37,15 @@ const MAX_EXPAND_EXPONENT = 64
 #   "pow"  幂（kids[0] 是底，kids[1] 是指数）
 #   "div"  商（kids[0] 是分子，kids[1] 是分母）
 #   "fn"   函数调用（name 是函数名，kids[0] 是自变量）
+#
+#   —— 下面几种节点带「绑定变量」，即某个名字在子树里被吃掉了 ——
+#   "sum"  求和（name 是哑变量，kids = [下界, 上界, 通项]）
+#   "prod" 连乘（name 是哑变量，kids = [下界, 上界, 通项]）
+#   "lim"  极限（name 是趋近变量，kids = [趋近值, 主体]，v 是方向：-1 左、0 双侧、1 右）
+#   "int"  积分（name 是积分变量，kids = [下界, 上界, 被积函数] 或 [被积函数]（不定积分））
+#   "matrix" 矩阵（kids = [num(行数), num(列数), 元素…]，按行优先）
+#   "cases"  分段函数（kids = [条件1, 值1, …, 条件n, 值n, 默认值]，v 是 n）
+#   "rel"  比较（name 是比较符，kids = [左, 右]）
 class Expr:
     kind: str
     name: str
@@ -172,6 +181,89 @@ def fn(name: str, a: Expr) -> Expr:
     smooth = a.smooth and name != "abs"
     return Expr("fn", name, 0.0, [a], REAL, smooth)
 
+# ===== 绑定变量节点的构造 =====
+
+# 求和 sum_{k=lo}^{hi} body
+def sum_expr(k: str, lo: Expr, hi: Expr, body: Expr) -> Expr:
+    if k == "":
+        raise ValueError("求和变量名不能为空")
+    return Expr("sum", k, 0.0, [lo, hi, body], REAL, lo.smooth and hi.smooth and body.smooth)
+
+# 连乘 prod_{k=lo}^{hi} body
+def prod_expr(k: str, lo: Expr, hi: Expr, body: Expr) -> Expr:
+    if k == "":
+        raise ValueError("连乘变量名不能为空")
+    return Expr("prod", k, 0.0, [lo, hi, body], REAL, lo.smooth and hi.smooth and body.smooth)
+
+# 极限 lim_{x->to} body。dir 为 -1 左极限、0 双侧、1 右极限。
+def lim_expr(x: str, to: Expr, body: Expr, dir: int = 0) -> Expr:
+    if x == "":
+        raise ValueError("极限变量名不能为空")
+    return Expr("lim", x, float(dir), [to, body], REAL, body.smooth)
+
+# 定积分 int_{lo}^{hi} body dx
+def integral(x: str, lo: Expr, hi: Expr, body: Expr) -> Expr:
+    if x == "":
+        raise ValueError("积分变量名不能为空")
+    return Expr("int", x, 0.0, [lo, hi, body], REAL, lo.smooth and hi.smooth and body.smooth)
+
+# 不定积分 int body dx
+def indefinite(x: str, body: Expr) -> Expr:
+    if x == "":
+        raise ValueError("积分变量名不能为空")
+    return Expr("int", x, 0.0, [body], REAL, body.smooth)
+
+# 矩阵。rows 是二维列表，返回行优先展开的 matrix 节点。
+def matrix(rows: list[list[Expr]]) -> Expr:
+    nr = len(rows)
+    if nr == 0:
+        raise ValueError("矩阵至少要有一行")
+    nc = len(rows[0])
+    if nc == 0:
+        raise ValueError("矩阵至少要有一列")
+    flat: list[Expr] = [Expr("num", "", float(nr), [], INTEGER, true),
+                        Expr("num", "", float(nc), [], INTEGER, true)]
+    smooth = true
+    for i in range(nr):
+        r = rows[i]
+        if len(r) != nc:
+            raise ValueError(f"矩阵第 {i + 1} 行有 {len(r)} 个元素，应对齐为 {nc} 个")
+        for x in r:
+            flat.append(x)
+            if x.smooth == false:
+                smooth = false
+    return Expr("matrix", "", 0.0, flat, REAL, smooth)
+
+# 取矩阵的行数与列数
+def shape(m: Expr) -> (int, int):
+    if m.kind != "matrix":
+        raise ValueError("这不是矩阵节点")
+    return (math.trunc(m.kids[0].v), math.trunc(m.kids[1].v))
+
+# 矩阵元素（i 行 j 列，从 0 开始）
+def at(m: Expr, i: int, j: int) -> Expr:
+    nr, nc = shape(m)
+    if i < 0 or i >= nr or j < 0 or j >= nc:
+        raise IndexError(f"下标 ({i},{j}) 超出 {nr}x{nc} 矩阵")
+    return m.kids[2 + i * nc + j]
+
+# 分段函数。pairs 是 (条件, 值) 列表，默认值在没有条件成立时使用。
+def cases(pairs: list[(Expr, Expr)], default: Expr) -> Expr:
+    if len(pairs) == 0:
+        return default
+    flat: list[Expr] = []
+    for p in pairs:
+        flat.append(p[0])
+        flat.append(p[1])
+    flat.append(default)
+    return Expr("cases", "", float(len(pairs)), flat, REAL, false)
+
+# 比较节点（只在分段函数和条件表达式里出现）
+def rel(op: str, a: Expr, b: Expr) -> Expr:
+    if op != "<" and op != "<=" and op != ">" and op != ">=" and op != "=" and op != "!=":
+        raise ValueError(f"不支持的比较符：{op}")
+    return Expr("rel", op, 0.0, [a, b], INTEGER, false)
+
 # ===== 数值格式 =====
 
 def _is_integral(v: float) -> bool:
@@ -199,10 +291,34 @@ def _key(e: Expr) -> str:
         return "v:" + e.name
     if e.kind == "fn":
         return "f:" + e.name + "(" + _key(e.kids[0]) + ")"
+    # 带绑定变量的节点必须把绑定的名字也放进键里，否则 sum(k,…) 与 sum(j,…) 会撞车
+    if e.kind == "sum" or e.kind == "prod":
+        return e.kind + ":" + e.name + "(" + _key(e.kids[0]) + "," + _key(e.kids[1]) + "," + _key(e.kids[2]) + ")"
+    if e.kind == "lim":
+        return "lim:" + e.name + ":" + fmt(e.v) + "(" + _key(e.kids[0]) + "," + _key(e.kids[1]) + ")"
+    if e.kind == "int":
+        if len(e.kids) == 3:
+            return "int:" + e.name + "(" + _key(e.kids[0]) + "," + _key(e.kids[1]) + "," + _key(e.kids[2]) + ")"
+        return "int:" + e.name + "(" + _key(e.kids[0]) + ")"
+    if e.kind == "rel":
+        return "rel:" + e.name + "(" + _key(e.kids[0]) + "," + _key(e.kids[1]) + ")"
+    if e.kind == "matrix":
+        return "matrix:" + fmt(e.kids[0].v) + "x" + fmt(e.kids[1].v) + "(" + _key_tail(e, 2) + ")"
+    if e.kind == "cases":
+        return "cases:" + fmt(e.v) + "(" + _key_tail(e, 0) + ")"
     parts: list[str] = []
     for k in e.kids:
         parts.append(_key(k))
     return e.kind + "(" + ",".join(parts) + ")"
+
+# 从第 start 个 kid 起拼键
+def _key_tail(e: Expr, start: int) -> str:
+    parts: list[str] = []
+    i = start
+    while i < len(e.kids):
+        parts.append(_key(e.kids[i]))
+        i += 1
+    return ",".join(parts)
 
 # 显示时的排序键：按总次数从高到低，同次数的按变量名与指数排，常数最后。
 # 这样 (a+b)^2 展开成 a^2 + 2*a*b + b^2，而不是 2*a*b + a^2 + b^2。
@@ -265,6 +381,42 @@ def render(e: Expr, outer: int) -> str:
         return "(" + s + ")" if outer > 2 else s
     if e.kind == "fn":
         return e.name + "(" + render(e.kids[0], 0) + ")"
+    if e.kind == "sum" or e.kind == "prod":
+        lo = render(e.kids[0], 0)
+        hi = render(e.kids[1], 0)
+        return e.kind + "(" + e.name + "=" + lo + ".." + hi + ", " + render(e.kids[2], 0) + ")"
+    if e.kind == "lim":
+        arrow = "->"
+        if e.v < 0:
+            arrow = "->-"
+        elif e.v > 0:
+            arrow = "->+"
+        return "lim(" + e.name + arrow + render(e.kids[0], 0) + ", " + render(e.kids[1], 0) + ")"
+    if e.kind == "int":
+        if len(e.kids) == 3:
+            lo = render(e.kids[0], 0)
+            hi = render(e.kids[1], 0)
+            return "int(" + lo + ".." + hi + ", " + render(e.kids[2], 0) + " d" + e.name + ")"
+        return "int(" + render(e.kids[0], 0) + " d" + e.name + ")"
+    if e.kind == "matrix":
+        nr, nc = shape(e)
+        rows: list[str] = []
+        for i in range(nr):
+            cells: list[str] = []
+            for j in range(nc):
+                cells.append(render(at(e, i, j), 0))
+            rows.append(", ".join(cells))
+        return "[" + "; ".join(rows) + "]"
+    if e.kind == "cases":
+        n = math.trunc(e.v)
+        out = ""
+        for i in range(n):
+            if i > 0:
+                out += "; "
+            out += render(e.kids[2 * i + 1], 0) + " if " + render(e.kids[2 * i], 0)
+        return "cases(" + out + "; else " + render(e.kids[2 * n], 0) + ")"
+    if e.kind == "rel":
+        return render(e.kids[0], 0) + " " + e.name + " " + render(e.kids[1], 0)
     return "?"
 
 def _render_sum(e: Expr, outer: int) -> str:
@@ -575,7 +727,56 @@ def simplify(e: Expr) -> Expr:
         return _mk_div(kids[0], kids[1])
     if e.kind == "fn":
         return _mk_fn(e.name, kids[0])
+    if _is_binder(e.kind):
+        return _with_kids(e, kids)
     return e
+
+# 是否是带绑定变量的节点
+def _is_binder(kind: str) -> bool:
+    if kind == "sum" or kind == "prod" or kind == "lim" or kind == "int":
+        return true
+    if kind == "matrix" or kind == "cases" or kind == "rel":
+        return true
+    return false
+
+# 用新的子节点重建一个绑定节点（名字、方向、片数这些附带信息保持不变）
+def _with_kids(e: Expr, kids: list[Expr]) -> Expr:
+    if e.kind == "lim":
+        return Expr("lim", e.name, e.v, kids, e.dom, e.smooth)
+    if e.kind == "cases":
+        return Expr("cases", e.name, e.v, kids, e.dom, e.smooth)
+    if e.kind == "matrix":
+        return Expr("matrix", "", 0.0, kids, e.dom, e.smooth)
+    return Expr(e.kind, e.name, 0.0, kids, e.dom, e.smooth)
+
+# 表达式里是否出现某个自由变量（绑定节点的被约束名字不算）
+def has_var(e: Expr, name: str) -> bool:
+    if e.kind == "var":
+        return e.name == name
+    if e.kind == "sum" or e.kind == "prod" or e.kind == "int":
+        if e.name == name:
+            # 被绑定的名字只在上下界里还算自由
+            if len(e.kids) == 3:
+                return has_var(e.kids[0], name) or has_var(e.kids[1], name)
+            return false
+        if len(e.kids) == 3:
+            return has_var(e.kids[0], name) or has_var(e.kids[1], name) or has_var(e.kids[2], name)
+        return has_var(e.kids[0], name)
+    if e.kind == "lim":
+        if e.name == name:
+            return has_var(e.kids[0], name)
+        return has_var(e.kids[0], name) or has_var(e.kids[1], name)
+    for k in e.kids:
+        if has_var(k, name):
+            return true
+    return false
+
+# 生成一个没被用过的变量名：x -> x_1 -> x_2 …
+def fresh_name(base: str, e: Expr) -> str:
+    i = 1
+    while has_var(e, base + "_" + str(i)):
+        i += 1
+    return base + "_" + str(i)
 
 # 展开：分配律 + 整数次幂展开 + 合并同类项，得到多项式的规范形式
 def expand(e: Expr) -> Expr:
@@ -618,6 +819,11 @@ def expand(e: Expr) -> Expr:
         return _mk_div(expand(e.kids[0]), expand(e.kids[1]))
     if e.kind == "fn":
         return _mk_fn(e.name, expand(e.kids[0]))
+    if _is_binder(e.kind):
+        kids: list[Expr] = []
+        for k in e.kids:
+            kids.append(expand(k))
+        return _with_kids(e, kids)
     return e
 
 def _distribute(acc: list[Expr], sum_expr: Expr) -> list[Expr]:
@@ -717,6 +923,59 @@ def _diff(e: Expr, x: str) -> Expr:
         u = e.kids[0]
         du = _diff(u, x)
         return _mk_mul([_fn_derivative(e.name, u), du])
+    if e.kind == "sum":
+        # 求和的导数 = 导数的求和（哑变量与 x 同名时整体与 x 无关）
+        if e.name == x or has_var(e.kids[2], x) == false:
+            return Expr("num", "", 0.0, [], INTEGER, true)
+        return sum_expr(e.name, e.kids[0], e.kids[1], _diff(e.kids[2], x))
+    if e.kind == "prod":
+        if e.name == x or has_var(e.kids[2], x) == false:
+            return Expr("num", "", 0.0, [], INTEGER, true)
+        # d(∏f) = ∏f · Σ f'/f（对数求导，要求各项不为 0）
+        body = e.kids[2]
+        ratio = _mk_div(_diff(body, x), body)
+        log_part = sum_expr(e.name, e.kids[0], e.kids[1], ratio)
+        return _mk_mul([e, log_part])
+    if e.kind == "int":
+        if len(e.kids) == 1:
+            # 不定积分：d/dx ∫f dx = f；对别的变量求导则进到积分号里面
+            if e.name == x:
+                return e.kids[0]
+            return indefinite(e.name, _diff(e.kids[0], x))
+        if e.name == x:
+            # 积分变量与求导变量同名：定积分与 x 无关
+            return Expr("num", "", 0.0, [], INTEGER, true)
+        # 莱布尼茨公式：d/dx ∫_a(x)^{b(x)} f dt = f(b)b' - f(a)a' + ∫ f_x dt
+        lo = e.kids[0]
+        hi = e.kids[1]
+        body = e.kids[2]
+        parts: list[Expr] = []
+        if has_var(hi, x):
+            mh: dict[str, Expr] = {}
+            mh[e.name] = hi
+            parts.append(_mk_mul([subs(body, mh), _diff(hi, x)]))
+        if has_var(lo, x):
+            ml: dict[str, Expr] = {}
+            ml[e.name] = lo
+            parts.append(neg(_mk_mul([subs(body, ml), _diff(lo, x)])))
+        if has_var(body, x):
+            parts.append(integral(e.name, lo, hi, _diff(body, x)))
+        if len(parts) == 0:
+            return Expr("num", "", 0.0, [], INTEGER, true)
+        return _mk_add(parts)
+    if e.kind == "lim":
+        if e.name == x or has_var(e.kids[1], x) == false:
+            return Expr("num", "", 0.0, [], INTEGER, true)
+        return lim_expr(e.name, e.kids[0], _diff(e.kids[1], x), math.trunc(e.v))
+    if e.kind == "matrix":
+        kids: list[Expr] = [e.kids[0], e.kids[1]]
+        i = 2
+        while i < len(e.kids):
+            kids.append(_diff(e.kids[i], x))
+            i += 1
+        return _with_kids(e, kids)
+    if e.kind == "rel" or e.kind == "cases":
+        raise TypeError("分段函数与比较节点不可微；请对每一段分别求导")
     return Expr("num", "", 0.0, [], INTEGER, true)
 
 # 常见函数的导数（外层导数，链式法则的内层由调用方乘上）
@@ -752,7 +1011,8 @@ def _fn_derivative(name: str, u: Expr) -> Expr:
 
 # ===== 代入与求值 =====
 
-# 把表达式中的变量替换为其它表达式
+# 把表达式中的变量替换为其它表达式。代入是「捕获避免」的：被绑定节点吃掉的
+# 名字在它自己的主体里不会被替换，代入式里恰好含这个名字时先把哑变量换名。
 def subs(e: Expr, values: dict[str, Expr]) -> Expr:
     if e.kind == "var":
         v = values.get(e.name)
@@ -761,10 +1021,46 @@ def subs(e: Expr, values: dict[str, Expr]) -> Expr:
         return e
     if e.kind == "num":
         return e
+    if e.kind == "sum" or e.kind == "prod" or e.kind == "int" or e.kind == "lim":
+        return _subs_binder(e, values)
     kids: list[Expr] = []
     for k in e.kids:
         kids.append(subs(k, values))
     return simplify(_rebuild(e, kids))
+
+# 绑定节点的代入：主体里被绑定的名字不替换，上下界照常替换
+def _subs_binder(e: Expr, values: dict[str, Expr]) -> Expr:
+    body = e.kids[len(e.kids) - 1]
+    name = e.name
+    b = body
+    # 只要任何一个代入式里含哑变量的名字，就必须先给哑变量换名，否则会把它捕获进去
+    must_rename = false
+    for kk in values.keys():
+        rep = values.get(kk)
+        if rep != null and has_var(rep, e.name):
+            must_rename = true
+            break
+    if must_rename:
+        nn = fresh_name(e.name, body)
+        b = _rename(body, e.name, nn)
+        name = nn
+    kids: list[Expr] = []
+    for i in range(len(e.kids) - 1):
+        kids.append(subs(e.kids[i], values))
+    kids.append(subs(b, values))
+    out = _with_kids(e, kids)
+    return Expr(out.kind, name, out.v, out.kids, out.dom, out.smooth)
+
+# 把变量 old 改名成 new（含嵌套，不做遮蔽检查）
+def _rename(e: Expr, old: str, new: str) -> Expr:
+    if e.kind == "var":
+        if e.name == old:
+            return var(new)
+        return e
+    kids: list[Expr] = []
+    for k in e.kids:
+        kids.append(_rename(k, old, new))
+    return _with_kids(e, kids)
 
 def _rebuild(e: Expr, kids: list[Expr]) -> Expr:
     if e.kind == "add":
@@ -777,6 +1073,8 @@ def _rebuild(e: Expr, kids: list[Expr]) -> Expr:
         return _mk_div(kids[0], kids[1])
     if e.kind == "fn":
         return _mk_fn(e.name, kids[0])
+    if _is_binder(e.kind):
+        return _with_kids(e, kids)
     return e
 
 # 用环境中的数值求值
@@ -804,7 +1102,120 @@ def evaluate(e: Expr, env: dict[str, float]) -> float:
         return evaluate(e.kids[0], env) / evaluate(e.kids[1], env)
     if e.kind == "fn":
         return _eval_fn(e.name, evaluate(e.kids[0], env))
+    if e.kind == "rel":
+        a = evaluate(e.kids[0], env)
+        b = evaluate(e.kids[1], env)
+        return 1.0 if _rel_holds(e.name, a, b) else 0.0
+    if e.kind == "cases":
+        n = math.trunc(e.v)
+        for i in range(n):
+            if evaluate(e.kids[2 * i], env) != 0.0:
+                return evaluate(e.kids[2 * i + 1], env)
+        return evaluate(e.kids[2 * n], env)
+    if e.kind == "sum":
+        return _eval_sum(e, env)
+    if e.kind == "prod":
+        return _eval_prod(e, env)
+    if e.kind == "int":
+        return _eval_integral(e, env)
+    if e.kind == "lim":
+        raise ValueError("极限节点要用 calc.limit 求值（sym 不替你猜收敛性）")
+    if e.kind == "matrix":
+        raise ValueError("矩阵不是标量；用 sym.matrix_values(矩阵, 环境) 取二维数值表")
     raise ValueError(f"无法求值的节点：{e.kind}")
+
+# 比较符在给定数值下是否成立
+def _rel_holds(op: str, a: float, b: float) -> bool:
+    if op == "<":
+        return a < b
+    if op == "<=":
+        return a <= b
+    if op == ">":
+        return a > b
+    if op == ">=":
+        return a >= b
+    if op == "=":
+        return math.fabs(a - b) < 1e-12
+    if op == "!=":
+        return math.fabs(a - b) >= 1e-12
+    return false
+
+# 环境加上一个绑定值（复制一份，避免污染调用方的字典）
+def _bind(env: dict[str, float], name: str, v: float) -> dict[str, float]:
+    out: dict[str, float] = {}
+    for k in env.keys():
+        out[k] = env[k]
+    out[name] = v
+    return out
+
+# 循环上限：防止 sum_{k=1}^{10^12} 把进程拖死
+const MAX_LOOP = 2000000
+
+# 求和的上下界必须是具体整数
+def _loop_bounds(e: Expr, env: dict[str, float]) -> (int, int):
+    lo = evaluate(e.kids[0], env)
+    hi = evaluate(e.kids[1], env)
+    if _is_integral(lo) == false or _is_integral(hi) == false:
+        raise ValueError(f"上下界必须是整数，得到 {fmt(lo)} 与 {fmt(hi)}；请先把它们代入成具体数值")
+    a = math.trunc(lo)
+    b = math.trunc(hi)
+    if b - a > MAX_LOOP:
+        raise ValueError(f"项数 {b - a + 1} 超过上限 {MAX_LOOP}，请改用闭式公式")
+    return (a, b)
+
+def _eval_sum(e: Expr, env: dict[str, float]) -> float:
+    a, b = _loop_bounds(e, env)
+    body = e.kids[2]
+    total = 0.0
+    i = a
+    while i <= b:
+        total += evaluate(body, _bind(env, e.name, float(i)))
+        i += 1
+    return total
+
+def _eval_prod(e: Expr, env: dict[str, float]) -> float:
+    a, b = _loop_bounds(e, env)
+    body = e.kids[2]
+    total = 1.0
+    i = a
+    while i <= b:
+        total *= evaluate(body, _bind(env, e.name, float(i)))
+        i += 1
+    return total
+
+# 定积分用复合辛普森法（1000 段）。不定积分没有数值。
+def _eval_integral(e: Expr, env: dict[str, float]) -> float:
+    if len(e.kids) == 1:
+        raise ValueError("不定积分没有数值；只有定积分能算，或者先求原函数再代入")
+    lo = evaluate(e.kids[0], env)
+    hi = evaluate(e.kids[1], env)
+    if math.isinf(lo) or math.isinf(hi) or math.isnan(lo) or math.isnan(hi):
+        raise ValueError("数值积分暂不支持无穷限；请先求符号原函数再取极限")
+    body = e.kids[2]
+    n = 1000
+    h = (hi - lo) / float(n)
+    total = evaluate(body, _bind(env, e.name, lo)) + evaluate(body, _bind(env, e.name, hi))
+    i = 1
+    while i < n:
+        x = lo + h * float(i)
+        y = evaluate(body, _bind(env, e.name, x))
+        if i % 2 == 1:
+            total += 4.0 * y
+        else:
+            total += 2.0 * y
+        i += 1
+    return total * h / 3.0
+
+# 矩阵按环境求值，返回二维表
+def matrix_values(m: Expr, env: dict[str, float]) -> list[list[float]]:
+    nr, nc = shape(m)
+    out: list[list[float]] = []
+    for i in range(nr):
+        row: list[float] = []
+        for j in range(nc):
+            row.append(evaluate(at(m, i, j), env))
+        out.append(row)
+    return out
 
 def _eval_fn(name: str, x: float) -> float:
     if name == "sin":
@@ -853,6 +1264,36 @@ def _build(e: Expr, index: dict[str, int]) -> fn(list[float]) -> float:
             raise ValueError(f"编译时没有提供变量 {e.name}")
         pos = i
         return (xs: list[float]) => xs[pos]
+    # 循环与条件节点要在展开子节点之前处理：求和主体的哑变量要多占一个参数槽
+    if e.kind == "sum" or e.kind == "prod":
+        if e.kids[0].kind != "num" or e.kids[1].kind != "num":
+            raise ValueError("编译求和/连乘时，上下界必须是常数")
+        lo_i = math.trunc(e.kids[0].v)
+        hi_i = math.trunc(e.kids[1].v)
+        slot = len(index)
+        inner: dict[str, int] = {}
+        for k in index.keys():
+            inner[k] = index[k]
+        inner[e.name] = slot
+        bodyf = _build(e.kids[2], inner)
+        is_sum = e.kind == "sum"
+        return (xs: list[float]) => _loop_run(bodyf, xs, lo_i, hi_i, is_sum)
+    if e.kind == "cases":
+        n = math.trunc(e.v)
+        conds: list[fn(list[float]) -> float] = []
+        vals: list[fn(list[float]) -> float] = []
+        for i in range(n):
+            conds.append(_build(e.kids[2 * i], index))
+            vals.append(_build(e.kids[2 * i + 1], index))
+        dflt = _build(e.kids[2 * n], index)
+        return (xs: list[float]) => _run_cases(conds, vals, dflt, xs)
+    if e.kind == "rel":
+        op = e.name
+        lf = _build(e.kids[0], index)
+        rt = _build(e.kids[1], index)
+        return (xs: list[float]) => 1.0 if _rel_holds(op, lf(xs), rt(xs)) else 0.0
+    if e.kind == "int" or e.kind == "lim" or e.kind == "matrix":
+        raise ValueError(f"{e.kind} 节点不能编译成单次求值的闭包树；请先算出结果或改用 evaluate")
     kids: list[fn(list[float]) -> float] = []
     for k in e.kids:
         kids.append(_build(k, index))
@@ -910,6 +1351,31 @@ def _prod_parts(parts: list[fn(list[float]) -> float], xs: list[float]) -> float
         s *= p(xs)
     return s
 
+# 编译后的求和/连乘：每轮把循环变量追加到参数表末尾
+def _loop_run(body: fn(list[float]) -> float, xs: list[float], a: int, b: int, is_sum: bool) -> float:
+    total = 0.0 if is_sum else 1.0
+    i = a
+    while i <= b:
+        ys: list[float] = []
+        for x in xs:
+            ys.append(x)
+        ys.append(float(i))
+        v = body(ys)
+        if is_sum:
+            total += v
+        else:
+            total *= v
+        i += 1
+    return total
+
+# 编译后的分段函数
+def _run_cases(conds: list[fn(list[float]) -> float], vals: list[fn(list[float]) -> float],
+               dflt: fn(list[float]) -> float, xs: list[float]) -> float:
+    for i in range(len(conds)):
+        if conds[i](xs) != 0.0:
+            return vals[i](xs)
+    return dflt(xs)
+
 # ===== 相等性检查 =====
 
 # 两侧都展开成规范形式，检查是否恒等。返回 (是否相等, 差值)
@@ -940,6 +1406,24 @@ def vars_of(e: Expr) -> list[str]:
 def _collect_vars(e: Expr, found: dict[str, bool]):
     if e.kind == "var":
         found[e.name] = true
+        return
+    # 绑定节点：上下界里的名字是自由的，主体里与哑变量同名的名字不算
+    if e.kind == "sum" or e.kind == "prod" or e.kind == "int":
+        for i in range(len(e.kids) - 1):
+            _collect_vars(e.kids[i], found)
+        sub: dict[str, bool] = {}
+        _collect_vars(e.kids[len(e.kids) - 1], sub)
+        for k in sub.keys():
+            if k != e.name:
+                found[k] = true
+        return
+    if e.kind == "lim":
+        _collect_vars(e.kids[0], found)
+        sub2: dict[str, bool] = {}
+        _collect_vars(e.kids[1], sub2)
+        for k in sub2.keys():
+            if k != e.name:
+                found[k] = true
         return
     for k in e.kids:
         _collect_vars(k, found)

@@ -378,6 +378,10 @@ print(g([3.0]))                             # 16.0
   再编译成原生可执行文件——同一份表达式既可符号推导，也可编译执行，结果由 `verify` 逐点比对。
 - 还有 `latex`：**直接读 LaTeX 源码**参与运算，结果再写回 LaTeX。论文里粘来一条公式就能求导、
   证明恒等（`latex.prove_equal_latex`）、求值、生成原生函数；从 PDF 复制的 `πr²`、`x³ − 2x` 也能读。
+- 还有 `calc`：在表达式树上做真正的计算——**求和/连乘的闭式公式**（`Σk² = n(n+1)(2n+1)/6`）、
+  **极限**（数值外推 + 左右极限判定 + `x→∞` 的倒数替换）、**符号积分**（表驱动 + 线性换元 + 分部积分）、
+  **矩阵**（行列式、逆、乘、转置、迹）。`\sum \prod \lim \int`、`\begin{pmatrix}…\end{pmatrix}`、
+  `\begin{cases}…\end{cases}` 这些 LaTeX 记号都能直接读进来算。
 
 ```python
 import latex
@@ -385,6 +389,11 @@ import latex
 latex.diff_latex(r"\exp\left(-\frac{x^2}{2}\right)", "x")          # -x \, \exp\left(-0.5x^{2}\right)
 latex.prove_equal_latex(r"(a+b)^3", r"a^3 + 3a^2b + 3ab^2 + b^3")     # true
 latex.to_latex(sym.expand(latex.parse(r"(x+y)^2")))                   # x^{2} + 2x \, y + y^{2}
+
+latex.sum_latex(r"\sum_{k=1}^{n} k^2")             # \frac{1}{6}n \, \left(2n + 1\right) \cdot \left(n + 1\right)
+latex.limit_latex(r"\lim_{x\to 0} \frac{\sin x}{x}")   # 1
+latex.integrate_latex(r"\int x e^x \, dx")            # x \, \exp\left(x\right) - \exp\left(x\right)
+latex.definite_latex(r"\int_0^{\pi} \sin x \, dx")    # 2.0
 ```
 
 见 [docs/数学库.md](docs/数学库.md)。

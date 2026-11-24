@@ -1,0 +1,897 @@
+# calc 模块：在 sym 的表达式树上做「真正的计算」
+#
+# sym 负责「表达式是什么」，calc 负责「它等于多少」：
+#
+#   - 求和 / 连乘的闭式公式（Σk^2 = n(n+1)(2n+1)/6 这种，不是逐项加）
+#   - 极限（数值外推 + 左右极限判定 + ∞ 的倒数替换）
+#   - 符号积分（表驱动 + 线性换元 + 分部积分的递推）
+#   - 矩阵（行列式、逆、乘、转置、迹）
+#
+#   import sym
+#   import calc
+#   e = sym.sum_expr("k", sym.num(1.0), sym.var("n"), sym.var("k") ** 2)
+#   print(calc.sum(e))                       # 0.166666666666667*n*(n + 1)*(2*n + 1)
+#   print(calc.limit_at(sym.div(sym.fn("sin", x), x), "x", sym.num(0.0)))   # 1.0
+#   print(calc.antiderivative(x ** 2, "x"))  # 0.333333333333333*x^3
+#
+# 所有算不出来的情况都抛 CalcError 并说明原因，不猜、不给错的结果。
+
+import math
+import sym
+
+# 算不出来（或者不该在这里算）时抛这个
+class CalcError(ValueError): pass
+
+# 逐项展开的最大项数
+const MAX_TERMS = 2000
+
+# ===== 小工具 =====
+
+def _zero() -> sym.Expr:
+    return sym.num(0.0)
+
+def _one() -> sym.Expr:
+    return sym.num(1.0)
+
+def _is_int_num(e: sym.Expr) -> bool:
+    if e.kind != "num":
+        return false
+    if math.isinf(e.v) or math.isnan(e.v):
+        return false
+    return e.v == math.trunc(e.v)
+
+# 项数 hi - lo + 1
+def _count(lo: sym.Expr, hi: sym.Expr) -> sym.Expr:
+    return sym.add(sym.add(hi, sym.neg(lo)), _one())
+
+# ===== 求和 / 连乘 =====
+
+# 幂和：Σ_{i=0}^{n} i^p，只做到 4 次（再高就用伯努利数生成，这里没必要）
+def power_sum(p: int, n: sym.Expr) -> sym.Expr:
+    n1 = sym.add(n, _one())
+    if p == 0:
+        return n1
+    if p == 1:
+        return sym.div(sym.mul(n, n1), sym.num(2.0))
+    if p == 2:
+        two_n1 = sym.add(sym.mul(sym.num(2.0), n), _one())
+        return sym.div(sym.mul(sym.mul(n, n1), two_n1), sym.num(6.0))
+    if p == 3:
+        return sym.div(sym.mul(sym.mul(n, n), sym.mul(n1, n1)), sym.num(4.0))
+    if p == 4:
+        q = sym.add(sym.add(sym.mul(sym.num(3.0), sym.mul(n, n)), sym.mul(sym.num(3.0), n)), sym.num(-1.0))
+        two_n1 = sym.add(sym.mul(sym.num(2.0), n), _one())
+        return sym.div(sym.mul(sym.mul(n, n1), sym.mul(two_n1, q)), sym.num(30.0))
+    raise CalcError(f"幂和只做到 4 次，这里要算 {p} 次")
+
+# Σ_{k=lo}^{hi} k = S1(hi) - S1(lo-1)
+def _sum_of_power(p: int, lo: sym.Expr, hi: sym.Expr) -> sym.Expr:
+    up = power_sum(p, hi)
+    low = power_sum(p, sym.add(lo, sym.num(-1.0)))
+    return sym.add(up, sym.neg(low))
+
+# 把表达式看成 k 的多项式，返回 {次数: 系数}。不是多项式就返回空字典。
+def poly(e: sym.Expr, k: str) -> dict[int, sym.Expr]:
+    out: dict[int, sym.Expr] = {}
+    if sym.has_var(e, k) == false:
+        out[0] = e
+        return out
+    if e.kind == "var":
+        out[1] = _one()
+        return out
+    if e.kind == "add":
+        acc: dict[int, sym.Expr] = {}
+        for t in e.kids:
+            p = poly(t, k)
+            if len(p) == 0:
+                return {}
+            for deg in p.keys():
+                cur = acc.get(deg)
+                if cur == null:
+                    acc[deg] = p[deg]
+                else:
+                    acc[deg] = sym.add(cur, p[deg])
+        return acc
+    if e.kind == "mul":
+        acc2: dict[int, sym.Expr] = {}
+        acc2[0] = _one()
+        for f in e.kids:
+            p = poly(f, k)
+            if len(p) == 0:
+                return {}
+            acc2 = _convolve(acc2, p)
+        return acc2
+    if e.kind == "pow":
+        base = e.kids[0]
+        ex = e.kids[1]
+        if base.kind == "var" and base.name == k and _is_int_num(ex) and ex.v >= 0 and ex.v <= 8:
+            dg = math.trunc(ex.v)
+            one_deg: dict[int, sym.Expr] = {}
+            one_deg[dg] = _one()
+            return one_deg
+        return {}
+    if e.kind == "div":
+        den = e.kids[1]
+        if sym.has_var(den, k) == false:
+            p = poly(e.kids[0], k)
+            if len(p) == 0:
+                return {}
+            scaled: dict[int, sym.Expr] = {}
+            for deg in p.keys():
+                scaled[deg] = sym.div(p[deg], den)
+            return scaled
+        return {}
+    return {}
+
+# 两个多项式系数表的卷积（相乘）
+def _convolve(a: dict[int, sym.Expr], b: dict[int, sym.Expr]) -> dict[int, sym.Expr]:
+    out: dict[int, sym.Expr] = {}
+    for da in a.keys():
+        for db in b.keys():
+            d = da + db
+            term = sym.mul(a[da], b[db])
+            cur = out.get(d)
+            if cur == null:
+                out[d] = term
+            else:
+                out[d] = sym.add(cur, term)
+    return out
+
+# 把 body 拆成 c * r^k（r 与 k 无关）。成功返回 (true, c, r)。
+def geometric(body: sym.Expr, k: str) -> (bool, sym.Expr, sym.Expr):
+    # 1/(c*r^k) = (1/c) * (1/r)^k
+    if body.kind == "div":
+        ok0, c0, r0 = geometric(body.kids[1], k)
+        if ok0 == false:
+            return (false, _one(), _one())
+        return (true, sym.div(_one(), c0), sym.div(_one(), r0))
+    factors: list[sym.Expr] = []
+    if body.kind == "mul":
+        factors = body.kids
+    else:
+        factors.append(body)
+    coef = _one()
+    r: sym.Expr? = null
+    for f in factors:
+        if sym.has_var(f, k) == false:
+            coef = sym.mul(coef, f)
+            continue
+        if f.kind != "pow":
+            return (false, _one(), _one())
+        base = f.kids[0]
+        ex = f.kids[1]
+        is_k = ex.kind == "var" and ex.name == k
+        if is_k == false:
+            return (false, _one(), _one())
+        if sym.has_var(base, k):
+            return (false, _one(), _one())
+        if r != null:
+            # 出现两个不同的底：不是单一等比
+            return (false, _one(), _one())
+        r = base
+    if r == null:
+        return (false, _one(), _one())
+    return (true, coef, r)
+
+# 逐项求和（上下界是具体的整数时用，结果精确）
+def _sum_terms(lo: sym.Expr, hi: sym.Expr, body: sym.Expr, k: str) -> sym.Expr:
+    a = math.trunc(lo.v)
+    b = math.trunc(hi.v)
+    if b < a:
+        return _zero()
+    if b - a > MAX_TERMS:
+        raise CalcError(f"要加的项数 {b - a + 1} 太多（上限 {MAX_TERMS}）")
+    total = _zero()
+    i = a
+    while i <= b:
+        m: dict[str, sym.Expr] = {}
+        m[k] = sym.num(float(i))
+        total = sym.add(total, sym.subs(body, m))
+        i += 1
+    return sym.simplify(total)
+
+# 求和的闭式。e 必须是 sym.sum_expr 构造的节点；算不出闭式时原样返回。
+def sum(e: sym.Expr) -> sym.Expr:
+    if e.kind != "sum":
+        raise CalcError("calc.sum 需要 sym.sum_expr 构造的求和节点")
+    k = e.name
+    lo = e.kids[0]
+    hi = e.kids[1]
+    body = e.kids[2]
+    # 通项与哑变量无关：body * 项数
+    if sym.has_var(body, k) == false:
+        return sym.simplify(sym.mul(body, _count(lo, hi)))
+    # 等比级数：Σ c*r^k = c*(r^lo - r^(hi+1))/(1 - r)
+    ok, c, r = geometric(sym.expand(body), k)
+    if ok:
+        p_lo = sym.power(r, lo)
+        p_hi = sym.power(r, sym.add(hi, _one()))
+        numer = sym.add(p_lo, sym.neg(p_hi))
+        denom = sym.add(_one(), sym.neg(r))
+        return sym.simplify(sym.mul(c, sym.div(numer, denom)))
+    # 无穷上界：只有等比级数能给出闭式
+    if hi.kind == "num" and math.isinf(hi.v) and hi.v > 0:
+        ok2, c2, r2 = geometric(sym.expand(body), k)
+        if ok2:
+            rv = sym.evaluate(r2, {})
+            if math.fabs(rv) < 1.0:
+                first = sym.mul(c2, sym.power(r2, lo))
+                return sym.simplify(sym.div(first, sym.add(_one(), sym.neg(r2))))
+        raise CalcError("无穷级数只有等比级数（|r|<1）能直接求和，这个算不出闭式")
+    # 多项式：逐次用幂和公式
+    p = poly(sym.expand(body), k)
+    if len(p) > 0:
+        total = _zero()
+        for deg in p.keys():
+            c2 = p[deg]
+            if deg == 0:
+                total = sym.add(total, sym.mul(c2, _count(lo, hi)))
+            else:
+                total = sym.add(total, sym.mul(c2, _sum_of_power(deg, lo, hi)))
+        return sym.simplify(total)
+    # 兜底：上下界都是具体整数时逐项加
+    if _is_int_num(lo) and _is_int_num(hi):
+        return _sum_terms(lo, hi, body, k)
+    return e
+
+# 连乘的闭式
+def product(e: sym.Expr) -> sym.Expr:
+    if e.kind != "prod":
+        raise CalcError("calc.product 需要 sym.prod_expr 构造的连乘节点")
+    k = e.name
+    lo = e.kids[0]
+    hi = e.kids[1]
+    body = e.kids[2]
+    if sym.has_var(body, k) == false:
+        return sym.simplify(sym.power(body, _count(lo, hi)))
+    # Π c*r^k = c^n * r^(Σk)
+    ok, c, r = geometric(sym.expand(body), k)
+    if ok:
+        n = _count(lo, hi)
+        exp_sum = _sum_of_power(1, lo, hi)
+        return sym.simplify(sym.mul(sym.power(c, n), sym.power(r, exp_sum)))
+    if _is_int_num(lo) and _is_int_num(hi):
+        a = math.trunc(lo.v)
+        b = math.trunc(hi.v)
+        if b < a:
+            return _one()
+        if b - a > MAX_TERMS:
+            raise CalcError(f"要乘的项数 {b - a + 1} 太多（上限 {MAX_TERMS}）")
+        total = _one()
+        i = a
+        while i <= b:
+            m: dict[str, sym.Expr] = {}
+            m[k] = sym.num(float(i))
+            total = sym.mul(total, sym.subs(body, m))
+            i += 1
+        return sym.simplify(total)
+    return e
+
+# 数值计算时把 pi、e 换成它们的值（符号运算时它们仍是变量）
+def _numeric(e: sym.Expr) -> sym.Expr:
+    m: dict[str, sym.Expr] = {}
+    m["pi"] = sym.num(math.pi)
+    m["e"] = sym.num(math.e)
+    return sym.subs(e, m)
+
+# ===== 极限 =====
+
+# 把值整理一下：接近整数的去掉浮点毛刺，极小的归零
+def _tidy(v: float) -> float:
+    if math.isnan(v) or math.isinf(v):
+        return v
+    if math.fabs(v) < 1e-13:
+        return 0.0
+    # 取最近整数（math.trunc 是向零取整，对 0.9999… 会得到 0，不能用）
+    nearest = math.floor(v + 0.5)
+    if v < 0:
+        nearest = math.ceil(v - 0.5)
+    rn = float(nearest)
+    if math.fabs(v - rn) < 1e-8 and math.fabs(rn) < 1e15:
+        return rn
+    # 也试试小分母分数：0.499999999 这种浮点噪声吸附成 1/2
+    q = 2
+    while q <= 12:
+        p = v * float(q)
+        r2 = float(math.floor(p + 0.5))
+        if r2 != 0.0 and math.fabs(p - r2) <= 1e-8 * (1.0 + math.fabs(p)):
+            return r2 / float(q)
+        q += 1
+    return v
+
+# 采样一个方向上的 f(a+h)
+def _sample(f: fn(list[float]) -> float, a: float, h: float, dir: int) -> float:
+    if dir > 0:
+        return f([a + h])
+    if dir < 0:
+        return f([a - h])
+    return 0.5 * (f([a + h]) + f([a - h]))
+
+# Neville 外推：把采样点按 h 做多项式插值并求 h=0 处的值。
+# 每上一层消掉一阶 h 的误差；相邻两层的值已经吻合就停手，免得过度外推放大舍入误差。
+def _richardson(vals: list[float]) -> float:
+    row = vals
+    best = vals[len(vals) - 1]
+    order = 1
+    while order < len(row):
+        fac = math.pow(2.0, float(order))
+        nxt: list[float] = []
+        i = 0
+        while i + 1 < len(row):
+            nxt.append((fac * row[i + 1] - row[i]) / (fac - 1.0))
+            i += 1
+        row = nxt
+        cand = row[len(row) - 1]
+        if math.isnan(cand) or math.isinf(cand):
+            return best
+        if math.fabs(cand - best) <= 1e-12 * (1.0 + math.fabs(cand)):
+            return cand
+        best = cand
+        order += 1
+    return best
+
+# 单侧极限
+def _limit_side(body: sym.Expr, x: str, a: float, dir: int) -> float:
+    f = sym.compile_expr(body, [x])
+    vals: list[float] = []
+    k = 0
+    last = 0.0
+    while k < 10:
+        h = 0.1 * math.pow(2.0, -float(k))
+        v = _sample(f, a, h, dir)
+        if math.isnan(v):
+            break
+        if math.isinf(v):
+            return v
+        vals.append(v)
+        last = v
+        k += 1
+    if len(vals) < 4:
+        raise CalcError(f"在 {sym.fmt(a)} 附近采样失败（函数值不是有限数）")
+    # 发散：|f| 一路涨且没有收敛迹象
+    if math.fabs(last) > 1e12:
+        return float("inf") if last > 0 else float("-inf")
+    m = len(vals)
+    a1 = math.fabs(vals[m - 1])
+    a2 = math.fabs(vals[m - 2])
+    a3 = math.fabs(vals[m - 3])
+    a4 = math.fabs(vals[m - 4])
+    if a1 > 1e3 and a1 > a2 and a2 > a3 and a3 > a4:
+        # 每减半一次 h 值翻倍以上，说明是 1/x 这类发散
+        if a1 / a2 > 1.3:
+            return float("inf") if vals[m - 1] > 0 else float("-inf")
+    return _tidy(_richardson(vals))
+
+# 极限：body 在 x -> to 时的值。dir 为 -1 左、0 双侧、1 右。
+# to 可以是 ±∞（会换成 t = 1/x，t -> 0 处理）。
+def limit_at(body: sym.Expr, x: str, to: sym.Expr, dir: int = 0) -> float:
+    body = _numeric(body)
+    a = sym.evaluate(_numeric(to), {})
+    if math.isinf(a):
+        # x -> ±∞：令 t = 1/x，化成 t -> 0±
+        t = sym.var("t")
+        g = sym.subs(body, {x: sym.div(_one(), t)})
+        side = 1 if a > 0 else -1
+        return limit_at(g, "t", _zero(), side)
+    if math.isnan(a):
+        raise CalcError("趋近值不是有限数")
+    if dir == 0:
+        left = _limit_side(body, x, a, -1)
+        right = _limit_side(body, x, a, 1)
+        if math.isinf(left) and math.isinf(right):
+            if (left > 0) == (right > 0):
+                return left
+            raise CalcError("左右极限一个是 +∞ 一个是 -∞，极限不存在")
+        if math.isinf(left) or math.isinf(right):
+            raise CalcError(f"一侧发散（左 {sym.fmt(left)}，右 {sym.fmt(right)}），极限不存在")
+        if math.fabs(left - right) > 1e-7 * (1.0 + math.fabs(left)):
+            raise CalcError(f"左右极限不相等（左 {sym.fmt(left)}，右 {sym.fmt(right)}），极限不存在")
+        return _tidy(0.5 * (left + right))
+    return _limit_side(body, x, a, dir)
+
+# 直接对一个 lim 节点求值
+def limit(e: sym.Expr) -> float:
+    if e.kind != "lim":
+        raise CalcError("calc.limit 需要 sym.lim_expr 构造的极限节点")
+    return limit_at(e.kids[1], e.name, e.kids[0], math.trunc(e.v))
+
+# 把极限结果写成便于阅读的字符串
+def fmt_limit(v: float) -> str:
+    if math.isnan(v):
+        return "不存在"
+    if math.isinf(v):
+        return "+\\infty" if v > 0 else "-\\infty"
+    return sym.fmt(v)
+
+# ===== 符号积分 =====
+
+# 如果 e 是 a*x + b（a、b 与 x 无关），返回 (true, a, b)
+def linear(e: sym.Expr, x: str) -> (bool, sym.Expr, sym.Expr):
+    p = poly(sym.expand(e), x)
+    if len(p) == 0:
+        return (false, _zero(), _zero())
+    a = _zero()
+    b = _zero()
+    for deg in p.keys():
+        if deg > 1:
+            return (false, _zero(), _zero())
+        if deg == 1:
+            a = p[deg]
+        else:
+            b = p[deg]
+    if sym.has_var(a, x):
+        return (false, _zero(), _zero())
+    return (true, a, b)
+
+# 原函数。算不出来抛 CalcError（提示改用数值积分或先做换元）。
+def antiderivative(e: sym.Expr, x: str) -> sym.Expr:
+    ex = sym.expand(e)
+    if sym.has_var(ex, x) == false:
+        return sym.mul(ex, sym.var(x))
+    if ex.kind == "var":
+        return sym.div(sym.power(sym.var(x), sym.num(2.0)), sym.num(2.0))
+    if ex.kind == "add":
+        terms: list[sym.Expr] = []
+        for t in ex.kids:
+            terms.append(antiderivative(t, x))
+        out = _zero()
+        for t in terms:
+            out = sym.add(out, t)
+        return sym.simplify(out)
+    if ex.kind == "mul":
+        return _antider_mul(ex, x)
+    if ex.kind == "div":
+        return _antider_div(ex, x)
+    if ex.kind == "pow":
+        return _antider_pow(ex, x)
+    if ex.kind == "fn":
+        return _antider_fn(ex, x)
+    # 多项式兜底：能拆成多项式就逐项积分
+    p = poly(ex, x)
+    if len(p) > 0:
+        out2 = _zero()
+        for deg in p.keys():
+            c = p[deg]
+            if deg == 0:
+                out2 = sym.add(out2, sym.mul(c, sym.var(x)))
+            else:
+                out2 = sym.add(out2, sym.div(sym.mul(c, sym.power(sym.var(x), sym.num(float(deg + 1)))),
+                                             sym.num(float(deg + 1))))
+        return sym.simplify(out2)
+    raise CalcError(f"不认识 {sym.render(ex, 0)} 的积分规则；可以改用数值积分")
+
+# x^n 这类幂
+def _antider_pow(ex: sym.Expr, x: str) -> sym.Expr:
+    base = ex.kids[0]
+    p = ex.kids[1]
+    if _is_int_num(p) == false:
+        # x^x 之类：不做
+        raise CalcError("指数不是常数时没有初等原函数")
+    n = p.v
+    ok, a, b = linear(base, x)
+    if ok == false:
+        raise CalcError(f"{sym.render(base, 0)} 不是 {x} 的一次式，这里不做一般换元")
+    if math.fabs(n + 1.0) < 1e-15:
+        # ∫ 1/(ax+b) dx = ln|ax+b|/a
+        return sym.div(sym.fn("log", sym.fn("abs", base)), a)
+    new_pow = sym.power(base, sym.num(n + 1.0))
+    denom = sym.mul(a, sym.num(n + 1.0))
+    return sym.div(new_pow, denom)
+
+# 三角、指数、对数这些
+def _antider_fn(ex: sym.Expr, x: str) -> sym.Expr:
+    name = ex.name
+    u = ex.kids[0]
+    ok, a, b = linear(u, x)
+    if ok == false:
+        raise CalcError(f"{name} 的自变量不是 {x} 的一次式")
+    if name == "sin":
+        return sym.div(sym.neg(sym.fn("cos", u)), a)
+    if name == "cos":
+        return sym.div(sym.fn("sin", u), a)
+    if name == "exp":
+        return sym.div(sym.fn("exp", u), a)
+    if name == "tan":
+        return sym.div(sym.neg(sym.fn("log", sym.fn("abs", sym.fn("cos", u)))), a)
+    if name == "sqrt":
+        # ∫ sqrt(u) du = (2/3) u^(3/2)
+        return sym.div(sym.mul(sym.num(2.0 / 3.0), sym.power(u, sym.num(1.5))), a)
+    if name == "log":
+        # ∫ ln u du = u ln u - u（对 u = x 成立；线性换元时除以 a）
+        return sym.div(sym.add(sym.mul(u, sym.fn("log", u)), sym.neg(u)), a)
+    if name == "sinh":
+        return sym.div(sym.fn("cosh", u), a)
+    if name == "cosh":
+        return sym.div(sym.fn("sinh", u), a)
+    if name == "atan":
+        # ∫ atan(u) du = u atan u - ln(1+u^2)/2
+        inner = sym.add(_one(), sym.power(u, sym.num(2.0)))
+        return sym.div(sym.add(sym.mul(u, sym.fn("atan", u)),
+                               sym.neg(sym.div(sym.fn("log", inner), sym.num(2.0)))), a)
+    raise CalcError(f"没有 {name} 的积分规则")
+
+# 乘积：先提常数因子，再处理 x^n * exp/sin/cos 的分部积分
+def _antider_mul(ex: sym.Expr, x: str) -> sym.Expr:
+    cf = _one()
+    rest: list[sym.Expr] = []
+    for f in ex.kids:
+        if sym.has_var(f, x) == false:
+            cf = sym.mul(cf, f)
+        else:
+            rest.append(f)
+    if len(rest) == 0:
+        return sym.mul(cf, sym.var(x))
+    r = _mul_list(rest)
+    # x^n * (exp|sin|cos)(a x)：分部积分递推
+    done = _antider_parts(r, x)
+    if done != null:
+        return sym.simplify(sym.mul(cf, done))
+    # 拆成多项式 × 多项式以外的情形：先试多项式
+    p = poly(sym.expand(r), x)
+    if len(p) > 0:
+        inner = sym.mul(_one(), cf)
+        # 把多项式逐项积分（乘以 cf 之后一起化简）
+        total = _zero()
+        for deg in p.keys():
+            c = p[deg]
+            total = sym.add(total, _poly_term(c, deg, x))
+        return sym.simplify(sym.mul(inner, total))
+    raise CalcError(f"不认识乘积 {sym.render(r, 0)} 的积分规则")
+
+# 单项 c*x^deg 的原函数
+def _poly_term(c: sym.Expr, deg: int, x: str) -> sym.Expr:
+    if deg == 0:
+        return sym.mul(c, sym.var(x))
+    return sym.div(sym.mul(c, sym.power(sym.var(x), sym.num(float(deg + 1)))), sym.num(float(deg + 1)))
+
+# x^n * exp(a x) 型：∫ x^n e^{ax} dx = x^n e^{ax}/a - (n/a)∫ x^{n-1} e^{ax} dx
+# 三角同理，交替用 sin/cos
+def _antider_parts(r: sym.Expr, x: str) -> sym.Expr?:
+    # 只认「多项式 × 一个 exp/sin/cos」这种两项乘积
+    if r.kind != "mul" or len(r.kids) != 2:
+        return null
+    poly_part: sym.Expr? = null
+    fn_part: sym.Expr? = null
+    for f in r.kids:
+        if f.kind == "fn":
+            fn_part = f
+        else:
+            poly_part = f
+    if poly_part == null or fn_part == null:
+        return null
+    if fn_part.name != "exp" and fn_part.name != "sin" and fn_part.name != "cos":
+        return null
+    pp = poly(poly_part, x)
+    if len(pp) == 0:
+        return null
+    if len(pp.keys()) != 1:
+        return null
+    deg = 0
+    coef = _one()
+    for d in pp.keys():
+        deg = d
+        coef = pp[d]
+    if deg > 4:
+        raise CalcError("分部积分的次数太深，先手动降幂")
+    ok, a, b = linear(fn_part.kids[0], x)
+    if ok == false:
+        return null
+    return _parts_rec(coef, deg, a, b, fn_part.name, x)
+
+def _parts_rec(coef: sym.Expr, deg: int, a: sym.Expr, b: sym.Expr, kind: str, x: str) -> sym.Expr:
+    u = sym.add(sym.mul(a, sym.var(x)), b)
+    xn = sym.power(sym.var(x), sym.num(float(deg)))
+    # I_n = x^n F(x)/a - (n/a) I_{n-1}，其中 F 是 fn 的原函数
+    F = sym.fn("exp", u)
+    if kind == "sin":
+        F = sym.neg(sym.fn("cos", u))
+    if kind == "cos":
+        F = sym.fn("sin", u)
+    if deg == 0:
+        return sym.div(sym.mul(coef, F), a)
+    head = sym.div(sym.mul(xn, F), a)
+    # 递推：I_n = x^n F/a - (n/a) * I_{n-1}
+    sub = _parts_rec(_one(), deg - 1, a, b, kind, x)
+    rest = sym.div(sym.mul(sym.num(float(deg)), sub), a)
+    return sym.mul(coef, sym.add(head, sym.neg(rest)))
+
+# 除法：常数/一次式、1/(1+x^2)、多项式除多项式
+def _antider_div(ex: sym.Expr, x: str) -> sym.Expr:
+    num_part = ex.kids[0]
+    den_part = ex.kids[1]
+    # 1/(1+x^2) -> atan(x)
+    if sym.has_var(num_part, x) == false and sym.has_var(den_part, x):
+        dp = poly(sym.expand(den_part), x)
+        if len(dp) == 2 and dp.get(0) != null and dp.get(2) != null:
+            c0 = dp[0]
+            c2 = dp[2]
+            if sym.has_var(c0, x) == false and sym.has_var(c2, x) == false:
+                # ∫ c/(c0 + c2 x^2) dx = c/sqrt(c0 c2) atan(x sqrt(c2/c0))
+                if c0.kind == "num" and c2.kind == "num" and c0.v > 0 and c2.v > 0:
+                    s = math.sqrt(c0.v * c2.v)
+                    k = sym.num(math.sqrt(c2.v / c0.v))
+                    arg = sym.mul(k, sym.var(x))
+                    return sym.div(sym.mul(num_part, sym.fn("atan", arg)), sym.num(s))
+        # 一般：分母是 x 的一次式 -> c*ln|ax+b|/a
+        ok, a, b = linear(den_part, x)
+        if ok:
+            return sym.div(sym.mul(num_part, sym.fn("log", sym.fn("abs", den_part))), a)
+    # 多项式除多项式：先做长除法
+    np_ = poly(sym.expand(num_part), x)
+    dp2 = poly(sym.expand(den_part), x)
+    if len(np_) > 0 and len(dp2) > 0:
+        q, rem = _poly_divmod(np_, dp2)
+        if q != null:
+            qq = q
+            total = _zero()
+            for deg in qq.keys():
+                total = sym.add(total, _poly_term(qq[deg], deg, x))
+            if _zero_poly(rem):
+                return sym.simplify(total)
+            # 余项是常数、分母是一次式时，剩下的是对数项
+            rem_expr = _poly_to_expr(rem, x)
+            ok2, a2, b2 = linear(den_part, x)
+            if ok2 and sym.has_var(rem_expr, x) == false:
+                log_term = sym.div(sym.mul(rem_expr, sym.fn("log", sym.fn("abs", den_part))), a2)
+                return sym.simplify(sym.add(total, log_term))
+            raise CalcError("多项式除法的余项还不是常数，这里不做部分分式分解")
+    if sym.has_var(den_part, x) == false:
+        return antiderivative(num_part, x)
+    raise CalcError(f"不认识 {sym.render(ex, 0)} 的积分规则")
+
+# 系数全是 0 的多项式
+def _zero_poly(p: dict[int, sym.Expr]) -> bool:
+    for d in p.keys():
+        c = p[d]
+        if c.kind != "num":
+            return false
+        if math.fabs(c.v) >= 1e-12:
+            return false
+    return true
+
+def _poly_to_expr(p: dict[int, sym.Expr], x: str) -> sym.Expr:
+    out = _zero()
+    for deg in p.keys():
+        c = p[deg]
+        if deg == 0:
+            out = sym.add(out, c)
+        else:
+            out = sym.add(out, sym.mul(c, sym.power(sym.var(x), sym.num(float(deg)))))
+    return out
+
+# 多项式长除法，返回 (商, 余)；除不尽时照样返回（余项交给调用方处理）
+def _poly_divmod(a: dict[int, sym.Expr], b: dict[int, sym.Expr]) -> (dict[int, sym.Expr]?, dict[int, sym.Expr]):
+    da = _deg(a)
+    db = _deg(b)
+    if db < 0:
+        return (null, {})
+    q: dict[int, sym.Expr] = {}
+    r: dict[int, sym.Expr] = {}
+    for d in a.keys():
+        r[d] = a[d]
+    # 只处理数值首项，避免符号除法越算越乱
+    lead_b = b[db]
+    guard = 0
+    while _deg(r) >= db and _deg(r) >= 0:
+        dr = _deg(r)
+        lead_r = r[dr]
+        if lead_r.kind != "num" or lead_b.kind != "num":
+            return (null, {})
+        qc = sym.num(lead_r.v / lead_b.v)
+        dq = dr - db
+        cur = q.get(dq)
+        if cur == null:
+            q[dq] = qc
+        else:
+            q[dq] = sym.add(cur, qc)
+        for db2 in b.keys():
+            rd = db2 + dq
+            term = sym.mul(sym.num(-1.0), sym.mul(qc, b[db2]))
+            cur2 = r.get(rd)
+            if cur2 == null:
+                r[rd] = term
+            else:
+                r[rd] = sym.add(cur2, term)
+        # 清掉首项的数值残渣
+        if r[dr].kind == "num" and math.fabs(r[dr].v) < 1e-12:
+            r[dr] = _zero()
+        guard += 1
+        if guard > 64:
+            return (null, {})
+    return (q, r)
+
+def _deg(p: dict[int, sym.Expr]) -> int:
+    best = -1
+    for d in p.keys():
+        c = p[d]
+        if c.kind == "num" and math.fabs(c.v) < 1e-15:
+            continue
+        if d > best:
+            best = d
+    return best
+
+def _mul_list(xs: list[sym.Expr]) -> sym.Expr:
+    if len(xs) == 0:
+        return _one()
+    out = xs[0]
+    i = 1
+    while i < len(xs):
+        out = sym.mul(out, xs[i])
+        i += 1
+    return out
+
+# 定积分：先求原函数再代入，失败就用辛普森法
+def definite(e: sym.Expr) -> float:
+    if e.kind != "int" or len(e.kids) != 3:
+        raise CalcError("definite 需要带上下界的积分节点")
+    x = e.name
+    node = _numeric(e)
+    lo = sym.evaluate(node.kids[0], {})
+    hi = sym.evaluate(node.kids[1], {})
+    try:
+        F = antiderivative(node.kids[2], x)
+        vh = sym.evaluate(F, {x: hi})
+        vl = sym.evaluate(F, {x: lo})
+        if math.isnan(vh) or math.isnan(vl) or math.isinf(vh) or math.isinf(vl):
+            raise CalcError("原函数在端点取不到有限值")
+        return _tidy(vh - vl)
+    except CalcError:
+        return sym.evaluate(e, {})
+
+# 不定积分的入口：e 是 int 节点（一个 kid），返回原函数
+def integrate(e: sym.Expr) -> sym.Expr:
+    if e.kind != "int":
+        raise CalcError("integrate 需要 sym.integral / sym.indefinite 构造的积分节点")
+    if len(e.kids) == 3:
+        F = antiderivative(e.kids[2], e.name)
+        return sym.add(sym.subs(F, {e.name: e.kids[1]}), sym.neg(sym.subs(F, {e.name: e.kids[0]})))
+    return antiderivative(e.kids[0], e.name)
+
+# ===== 矩阵 =====
+
+def identity(n: int) -> sym.Expr:
+    rows: list[list[sym.Expr]] = []
+    for i in range(n):
+        row: list[sym.Expr] = []
+        for j in range(n):
+            row.append(_one() if i == j else _zero())
+        rows.append(row)
+    return sym.matrix(rows)
+
+def transpose(m: sym.Expr) -> sym.Expr:
+    nr, nc = sym.shape(m)
+    rows: list[list[sym.Expr]] = []
+    for j in range(nc):
+        row: list[sym.Expr] = []
+        for i in range(nr):
+            row.append(sym.at(m, i, j))
+        rows.append(row)
+    return sym.matrix(rows)
+
+def matadd(a: sym.Expr, b: sym.Expr) -> sym.Expr:
+    ar, ac = sym.shape(a)
+    br, bc = sym.shape(b)
+    if ar != br or ac != bc:
+        raise CalcError(f"矩阵尺寸不同：{ar}x{ac} 与 {br}x{bc}")
+    rows: list[list[sym.Expr]] = []
+    for i in range(ar):
+        row: list[sym.Expr] = []
+        for j in range(ac):
+            row.append(sym.add(sym.at(a, i, j), sym.at(b, i, j)))
+        rows.append(row)
+    return sym.matrix(rows)
+
+def matmul(a: sym.Expr, b: sym.Expr) -> sym.Expr:
+    ar, ac = sym.shape(a)
+    br, bc = sym.shape(b)
+    if ac != br:
+        raise CalcError(f"不能相乘：左边 {ar}x{ac}，右边 {br}x{bc}（左列数要等于右行数）")
+    rows: list[list[sym.Expr]] = []
+    for i in range(ar):
+        row: list[sym.Expr] = []
+        for j in range(bc):
+            s = _zero()
+            k = 0
+            while k < ac:
+                s = sym.add(s, sym.mul(sym.at(a, i, k), sym.at(b, k, j)))
+                k += 1
+            row.append(s)
+        rows.append(row)
+    return sym.matrix(rows)
+
+def scale(k: sym.Expr, m: sym.Expr) -> sym.Expr:
+    nr, nc = sym.shape(m)
+    rows: list[list[sym.Expr]] = []
+    for i in range(nr):
+        row: list[sym.Expr] = []
+        for j in range(nc):
+            row.append(sym.mul(k, sym.at(m, i, j)))
+        rows.append(row)
+    return sym.matrix(rows)
+
+def trace(m: sym.Expr) -> sym.Expr:
+    nr, nc = sym.shape(m)
+    if nr != nc:
+        raise CalcError("只有方阵有迹")
+    s = _zero()
+    for i in range(nr):
+        s = sym.add(s, sym.at(m, i, i))
+    return s
+
+# 行列式（拉普拉斯展开，只做到 5 阶，再高就慢了）
+def determinant(m: sym.Expr) -> sym.Expr:
+    nr, nc = sym.shape(m)
+    if nr != nc:
+        raise CalcError("只有方阵有行列式")
+    if nr > 5:
+        raise CalcError(f"{nr} 阶行列式用符号展开太慢（上限 5 阶）")
+    return _det(m)
+
+def _det(m: sym.Expr) -> sym.Expr:
+    n, nc = sym.shape(m)
+    if n == 1:
+        return sym.at(m, 0, 0)
+    if n == 2:
+        a = sym.at(m, 0, 0)
+        b = sym.at(m, 0, 1)
+        c = sym.at(m, 1, 0)
+        d = sym.at(m, 1, 1)
+        return sym.add(sym.mul(a, d), sym.neg(sym.mul(b, c)))
+    total = _zero()
+    j = 0
+    while j < n:
+        minor: list[list[sym.Expr]] = []
+        i = 1
+        while i < n:
+            row: list[sym.Expr] = []
+            k = 0
+            while k < n:
+                if k != j:
+                    row.append(sym.at(m, i, k))
+                k += 1
+            minor.append(row)
+            i += 1
+        cof = sym.mul(sym.at(m, 0, j), _det(sym.matrix(minor)))
+        if j % 2 == 1:
+            cof = sym.neg(cof)
+        total = sym.add(total, cof)
+        j += 1
+    return sym.simplify(total)
+
+# 逆矩阵：伴随矩阵 / 行列式（只做到 4 阶）
+def inverse(m: sym.Expr) -> sym.Expr:
+    n, nc = sym.shape(m)
+    if n != nc:
+        raise CalcError("只有方阵可逆")
+    if n > 4:
+        raise CalcError(f"{n} 阶矩阵的符号逆太慢（上限 4 阶）")
+    d = _det(m)
+    if d.kind == "num" and math.fabs(d.v) < 1e-15:
+        raise CalcError("行列式为 0，矩阵不可逆")
+    rows: list[list[sym.Expr]] = []
+    i = 0
+    while i < n:
+        row: list[sym.Expr] = []
+        j = 0
+        while j < n:
+            # 伴随矩阵的 (i,j) 是余子式 (j,i) 的代数余子式
+            minor: list[list[sym.Expr]] = []
+            r = 0
+            while r < n:
+                if r != j:
+                    cells: list[sym.Expr] = []
+                    c = 0
+                    while c < n:
+                        if c != i:
+                            cells.append(sym.at(m, r, c))
+                        c += 1
+                    minor.append(cells)
+                r += 1
+            cof = _det(sym.matrix(minor))
+            if (i + j) % 2 == 1:
+                cof = sym.neg(cof)
+            row.append(sym.div(cof, d))
+            j += 1
+        rows.append(row)
+        i += 1
+    return sym.matrix(rows)

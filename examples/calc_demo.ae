@@ -1,0 +1,56 @@
+# 从 LaTeX 出发，把含求和/极限/积分/矩阵/分段的公式算出来
+import latex
+import calc
+import sym
+
+print("== 求和闭式 ==")
+for src in [
+    r"\sum_{k=1}^{n} k",
+    r"\sum_{k=1}^{n} k^2",
+    r"\sum_{k=1}^{n} \left(3k + 1\right)",
+    r"\sum_{k=0}^{n} 2^k",
+    r"\sum_{k=0}^{\infty} \frac{1}{2^k}",
+]:
+    print(src, " => ", latex.sum_latex(src))
+
+print("== 连乘 ==")
+print(latex.product_latex(r"\prod_{k=1}^{n} 2^k"))
+print(latex.product_latex(r"\prod_{k=1}^{5} k"))
+
+print("== 极限 ==")
+for src in [
+    r"\lim_{x \to 0} \frac{\sin x}{x}",
+    r"\lim_{x \to 0} \frac{1 - \cos x}{x^2}",
+    r"\lim_{x \to \infty} \frac{2x + 1}{x + 3}",
+    r"\lim_{x \to \infty} \left(1 + \frac{1}{x}\right)^x",
+    r"\lim_{x \to 0^{+}} \frac{1}{x}",
+]:
+    print(src, " => ", latex.limit_latex(src))
+
+print("== 积分 ==")
+for src in [
+    r"\int x^2 + 3x \, dx",
+    r"\int \frac{1}{x} \, dx",
+    r"\int e^{2x} \, dx",
+    r"\int x e^x \, dx",
+    r"\int \frac{1}{1 + x^2} \, dx",
+]:
+    print(src, " => ", latex.integrate_latex(src))
+print(r"\int_0^{\pi} \sin x \, dx", " => ", latex.definite_latex(r"\int_0^{\pi} \sin x \, dx"),
+      latex.definite_latex(r"\int_0^{\pi} \sin x \, dx") - 2.0)
+
+print("== 矩阵 ==")
+m = latex.parse(r"\begin{pmatrix} 2 & 1 \\ 1 & 3 \end{pmatrix}")
+print("A =", latex.to_latex(m))
+print("det A =", calc.determinant(m), " tr A =", calc.trace(m))
+print("A^-1 =", latex.to_latex(calc.inverse(m)))
+print("A A^-1 =", latex.to_latex(calc.matmul(m, calc.inverse(m))))
+
+print("== 分段 ==")
+f = latex.parse(r"\begin{cases} x^2 & x \ge 0 \\ -x & x < 0 \end{cases}")
+print(latex.to_latex(f))
+print("f(-3) =", sym.evaluate(f, {"x": -3.0}), " f(4) =", sym.evaluate(f, {"x": 4.0}))
+
+print("== 微积分基本定理 ==")
+F = latex.parse(r"\int_0^x t^2 \, dt")
+print("d/dx", latex.to_latex(F), " = ", latex.to_latex(sym.diff(F, "x")))

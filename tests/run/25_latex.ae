@@ -82,11 +82,11 @@ print(codegen.to_module(latex.parse(r"\sin x^2 + x^3"), ["x"], "f"))
 
 print("== 错误 ==")
 bad: list[str] = [
-    r"\sum_{i=1}^{n} x_i",
+    r"\frac{\partial f}{\partial x}",
     r"\frac{1}{}",
     r"(x+1",
     r"\foo x",
-    r"x + \infty",
+    r"\int x^2",
     r"x = 1",
     r"a \\ b",
 ]

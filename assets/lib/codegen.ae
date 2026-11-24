@@ -107,7 +107,7 @@ class Emitter:
             return self._pow(e, outer)
         if e.kind == "fn":
             return _math_call(e.name) + "(" + self.emit(e.kids[0], 0) + ")"
-        raise ValueError("无法生成代码的节点：" + e.kind)
+        raise ValueError("无法生成代码的节点：" + e.kind + "（求和/积分/极限/矩阵/分段请先用 calc 求值或展开）")
 
     # 和：把负项写成减法，读起来与教科书一致
     def _sum(self, e: sym.Expr) -> str:

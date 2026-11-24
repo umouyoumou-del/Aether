@@ -22,6 +22,7 @@
 import math
 import sym
 import egraph
+import calc
 
 # ===== 错误 =====
 
@@ -93,20 +94,16 @@ FUNCS: dict[str, str] = {
 
 # 明确不支持、但很常见的命令：给出针对性的提示，而不是笼统的「未知命令」
 def _unsupported_hint(name: str) -> str?:
-    if name == "sum" or name == "prod" or name == "int" or name == "iint" or name == "oint":
-        return "暂不支持求和/连乘/积分记号；请先展开成有限项再用 parse"
-    if name == "lim":
-        return "暂不支持极限；请先确定收敛形式再 parse"
     if name == "partial":
         return "暂不支持偏导记号；用 latex.diff_latex(公式, 变量) 求偏导"
-    if name == "infty":
-        return "暂不支持无穷大；它不能参与符号运算"
     if name == "cdot" or name == "times" or name == "div" or name == "ast":
         return "乘除运算符的位置不对（前面缺少运算对象）"
     if name == "quad" or name == "qquad":
         return "间距命令出现在不该出现的位置"
-    if name == "mid" or name == "vert" or name == "colon":
+    if name == "mid" or name == "colon":
         return "不支持条件概率/集合记号；它们没有代数含义，请先把公式改写成可计算的形式"
+    if name == "dd":
+        return "微分记号请写成 \\, dx（不带反斜杠的 d）"
     return null
 
 # 从 PDF / 网页复制公式时常见的 Unicode 数学字符：先归一成 LaTeX 命令，
@@ -273,11 +270,17 @@ class _Parser:
     src: str
     n: int
     i: int
+    # 积分主体解析到 _stop_at 就停（那个位置是 dx 的 d）
+    _stop_at: int
+    # 本层 \int 可以认领的 d<var> 列表，从尾部取（最外层拿最后一个）
+    _int_occ: list[(int, int, str)]
 
     def __init__(self, src: str):
         self.src = src
         self.n = len(src)
         self.i = 0
+        self._stop_at = -1
+        self._int_occ = []
 
     # 报错：带上位置和出错附近的一小段原文，方便定位
     def fail(self, msg: str):
@@ -372,6 +375,12 @@ class _Parser:
 
     # ---- 语法层 ----
 
+    # 是否已经走到积分主体的边界
+    def stopped(self) -> bool:
+        if self._stop_at < 0:
+            return false
+        return self.i >= self._stop_at
+
     def parse(self) -> sym.Expr:
         self.skip_ws()
         if self.i >= self.n:
@@ -387,6 +396,8 @@ class _Parser:
         e = self.parse_term(false)
         while true:
             self.skip_ws()
+            if self.stopped():
+                break
             c = self.peek()
             if c == null:
                 break
@@ -407,6 +418,8 @@ class _Parser:
         e = self.parse_unary()
         while true:
             self.skip_ws()
+            if self.stopped():
+                break
             c = self.peek()
             if c == null:
                 break
@@ -454,6 +467,10 @@ class _Parser:
             if c == '^':
                 self.i += 1
                 e = self.parse_unary()
+                # e^x 按自然指数理解（数学写法里 e 不是普通变量）
+                if base.kind == "var" and base.name == "e":
+                    base = sym.fn("exp", e)
+                    continue
                 base = sym.power(base, e)
                 continue
             if c == '_':
@@ -560,8 +577,295 @@ class _Parser:
         self.i = start + 1
         return sym.var(str(word[0]))
 
+    # ---- 大运算符、积分、极限、环境 ----
+
+    # 读一个参数：{...} 组，或者单个字符（\frac12 那种）
+    def read_arg_text(self) -> str:
+        self.skip_ws()
+        if self.peek() == '{':
+            return self.read_group_text()
+        c = self.peek()
+        if c == null:
+            self.fail("缺少参数")
+        self.i += 1
+        return str(c!)
+
+    # 上下标里的表达式
+    def parse_braced(self, what: str) -> sym.Expr:
+        self.skip_ws()
+        if self.group_is_empty():
+            self.fail(what + "不能为空")
+        if self.peek() == '{':
+            self.i += 1
+            e = self.parse_expr()
+            self.skip_ws()
+            self.expect("}", "花括号没有闭合")
+            return e
+        c = self.peek()
+        if c == null:
+            self.fail(what + "缺少内容")
+        # 不带花括号时只吃一个字符：\int_0^1 的 _0 就是 0，不能把 ^1 吸进来
+        if c!.isdigit():
+            self.i += 1
+            return sym.num(float(str(c!)))
+        return self.parse_atom()
+
+    # \sum_{k=1}^{n} body 与 \prod_{k=1}^{n} body
+    def parse_bigop(self, kind: str) -> sym.Expr:
+        svar = ""
+        lo: sym.Expr? = null
+        hi: sym.Expr? = null
+        while true:
+            self.skip_ws()
+            if self.eat("\\limits") or self.eat("\\nolimits"):
+                continue
+            c = self.peek()
+            if c == '_':
+                self.i += 1
+                txt = self.read_arg_text().strip()
+                eq = _find_top_level(txt, '=')
+                if eq >= 0:
+                    svar = _var_name_from(txt[:eq])
+                    lo = _parse_fragment(txt[eq + 1:])
+                else:
+                    svar = _var_name_from(txt)
+                    lo = sym.num(1.0)
+                continue
+            if c == '^':
+                self.i += 1
+                hi = self.parse_braced("上界")
+                continue
+            break
+        if svar == "":
+            self.fail(f"\\{kind} 的下标要写出哑变量，例如 \\{kind}_{{k=1}}^{{n}}")
+        if hi == null:
+            self.fail(f"\\{kind} 缺少上界")
+        if lo == null:
+            lo = sym.num(1.0)
+        body = self.parse_term(false)
+        if kind == "sum":
+            return sym.sum_expr(svar, lo!, hi!, body)
+        return sym.prod_expr(svar, lo!, hi!, body)
+
+    # \int_a^b f \, dx（上下标可只给一个或都不给）
+    def parse_integral(self) -> sym.Expr:
+        lo: sym.Expr? = null
+        hi: sym.Expr? = null
+        while true:
+            self.skip_ws()
+            if self.eat("\\limits") or self.eat("\\nolimits"):
+                continue
+            c = self.peek()
+            if c == '_':
+                self.i += 1
+                lo = self.parse_braced("积分下界")
+                continue
+            if c == '^':
+                self.i += 1
+                hi = self.parse_braced("积分上界")
+                continue
+            break
+        if len(self._int_occ) == 0:
+            self._int_occ = self.scan_dvars(self.i)
+        if len(self._int_occ) == 0:
+            self.fail("积分缺少微分记号：在末尾写 \\, dx")
+        occ = self._int_occ.pop()
+        stop = occ[0]
+        endp = occ[1]
+        var = occ[2]
+        save = self._stop_at
+        self._stop_at = stop
+        body = self.parse_expr()
+        self._stop_at = save
+        self.i = endp
+        self.skip_ws()
+        if lo != null and hi != null:
+            return sym.integral(var, lo, hi, body)
+        if lo == null and hi == null:
+            return sym.indefinite(var, body)
+        self.fail("\\int 的上下界要么都给，要么都不给")
+        return body
+
+    # \lim_{x \to a} body
+    def parse_limit(self) -> sym.Expr:
+        self.skip_ws()
+        if self.eat("\\limits"):
+            self.skip_ws()
+        if self.peek() != '_':
+            self.fail("\\lim 后面要写下标，例如 \\lim_{x \\to 0}")
+        self.i += 1
+        txt = self.read_arg_text()
+        ok, left, right = _split_to(txt)
+        if ok == false:
+            self.fail("\\lim 的下标里要有 \\to，例如 \\lim_{x \\to 0}")
+        var = _var_name_from(left)
+        if var == "":
+            self.fail("\\lim 的下标里没有趋近变量")
+        target = right.strip()
+        dir = 0
+        if target.endswith("^{+}") or target.endswith("{+}"):
+            dir = 1
+        elif target.endswith("^{-}") or target.endswith("{-}"):
+            dir = -1
+        elif target.endswith("+"):
+            dir = 1
+        elif target.endswith("-"):
+            dir = -1
+        if dir == 1:
+            if target.endswith("^{+}"):
+                target = target[:len(target) - 4]
+            elif target.endswith("{+}"):
+                target = target[:len(target) - 3]
+            else:
+                target = target[:len(target) - 1]
+        if dir == -1:
+            if target.endswith("^{-}"):
+                target = target[:len(target) - 4]
+            elif target.endswith("{-}"):
+                target = target[:len(target) - 3]
+            else:
+                target = target[:len(target) - 1]
+        if target.strip() == "":
+            self.fail("\\lim 缺少趋近值")
+        to = _parse_fragment(target)
+        body = self.parse_term(false)
+        return sym.lim_expr(var, to, body, dir)
+
+    # \begin{...} ... \end{...}
+    def parse_env(self) -> sym.Expr:
+        self.skip_ws()
+        env = self.read_group_text().strip()
+        body = self.read_env_body(env)
+        if env == "cases" or env == "dcases":
+            return _parse_cases(body)
+        if env == "array" or env == "aligned" or env == "align" or env == "gathered" or env == "split":
+            # 这类环境前面还有列格式说明 {ll}，先把它剥掉
+            t = body.strip()
+            if t.startswith("{"):
+                k = t.find("}")
+                if k > 0:
+                    t = t[k + 1:]
+            return _parse_matrix(t)
+        if env == "matrix" or env == "pmatrix" or env == "bmatrix" or env == "Bmatrix":
+            return _parse_matrix(body)
+        if env == "vmatrix" or env == "Vmatrix":
+            # 行列式环境：解析成矩阵，需要数值时用 calc.determinant
+            return _parse_matrix(body)
+        self.fail(f"不支持的 LaTeX 环境 {env}")
+        return sym.num(0.0)
+
+    # 读环境体：直到配对的 \end{env}
+    def read_env_body(self, env: str) -> str:
+        endtag = "\\end{" + env + "}"
+        start = self.i
+        depth = 0
+        while self.i < self.n:
+            if depth == 0 and _at(self.src, self.i, endtag):
+                text = self.src[start:self.i]
+                self.i += len(endtag)
+                return text
+            c = self.src[self.i]
+            if c == '\\':
+                if _at(self.src, self.i, "\\begin{"):
+                    depth += 1
+                    self.i += 7
+                    continue
+                if _at(self.src, self.i, "\\end{"):
+                    depth -= 1
+                    self.i += 5
+                    continue
+                self.i += 1
+                while self.i < self.n and self.src[self.i].isalpha():
+                    self.i += 1
+                continue
+            self.i += 1
+        self.fail(f"\\begin{{{env}}} 没有配对的 \\end")
+        return ""
+
+    # 扫描 from 之后、花括号与圆括号之外出现的 d<var>，返回 (起点, 终点, 变量名)
+    def scan_dvars(self, from_pos: int) -> list[(int, int, str)]:
+        out: list[(int, int, str)] = []
+        j = from_pos
+        brace = 0
+        paren = 0
+        while j < self.n:
+            c = self.src[j]
+            if c == '\\':
+                k = j + 1
+                st = k
+                while k < self.n and self.src[k].isalpha():
+                    k += 1
+                name = self.src[st:k]
+                if name == "left":
+                    paren += 1
+                    j = k
+                    continue
+                if name == "right":
+                    paren -= 1
+                    j = k
+                    continue
+                if name == "mathrm" or name == "text" or name == "operatorname":
+                    if brace == 0 and paren == 0:
+                        g = self.src[k:k + 3]
+                        if g == "{d}":
+                            v = self.read_var_at(k + 3)
+                            if v != "":
+                                out.append((j, k + 3 + len(v), _greek_name(v)))
+                                j = k + 3 + len(v)
+                                continue
+                j = k
+                continue
+            if c == '{':
+                brace += 1
+            elif c == '}':
+                brace -= 1
+            elif c == '(':
+                paren += 1
+            elif c == ')':
+                paren -= 1
+            elif c == 'd' and brace == 0 and paren == 0:
+                v = self.read_var_at(j + 1)
+                if v != "":
+                    out.append((j, j + 1 + len(v), _greek_name(v)))
+                    j = j + 1 + len(v)
+                    continue
+            j += 1
+        return out
+
+    # pos 处是不是一个变量名（单字母或希腊命令），且后面不再接字母
+    def read_var_at(self, pos: int) -> str:
+        if pos >= self.n:
+            return ""
+        c = self.src[pos]
+        if c == '\\':
+            k = pos + 1
+            st = k
+            while k < self.n and self.src[k].isalpha():
+                k += 1
+            name = self.src[st:k]
+            if GREEK.get(name) == null:
+                return ""
+            return "\\" + name
+        if c.isalpha() == false:
+            return ""
+        if pos + 1 < self.n and self.src[pos + 1].isalpha():
+            return ""
+        return str(c)
+
     def parse_command(self) -> sym.Expr:
         name = self.read_cmd()
+        if name == "sum" or name == "prod":
+            return self.parse_bigop(name)
+        if name == "int" or name == "iint" or name == "iiint" or name == "oint":
+            return self.parse_integral()
+        if name == "lim":
+            return self.parse_limit()
+        if name == "begin":
+            return self.parse_env()
+        if name == "infty":
+            return sym.num(math.inf)
+        if name == "limits" or name == "nolimits":
+            return self.parse_atom()
         if name == "frac" or name == "dfrac" or name == "tfrac" or name == "cfrac":
             a = self.parse_frac_arg()
             b = self.parse_frac_arg()
@@ -779,6 +1083,269 @@ def _name_from_text(text: str) -> str:
         raise LatexError("\\mathrm{} 里的名字为空", 0)
     return clean
 
+# ===== 环境、上下标与条件的小工具 =====
+
+# "\sum_{k=1}" 里的 "k"（或 "\mathrm{i}"、"k_1"）取成变量名
+def _var_name_from(txt: str) -> str:
+    t = txt.strip()
+    while len(t) >= 2 and t.startswith("{") and t.endswith("}"):
+        t = t[1:len(t) - 1].strip()
+    if t.startswith("\\mathrm{") or t.startswith("\\text{") or t.startswith("\\operatorname{"):
+        k = t.find("{")
+        j = t.find("}", k)
+        if j > 0:
+            return t[k + 1:j].strip()
+        return ""
+    if t.startswith("\\"):
+        name = t[1:]
+        if GREEK.get(name) != null:
+            return name
+        return ""
+    if _is_plain_name(t):
+        return t
+    return ""
+
+# 扫描时读到的变量记号 -> sym 里的名字（"\theta" -> "theta"）
+def _greek_name(v: str) -> str:
+    if v.startswith("\\"):
+        return v[1:]
+    return v
+
+# 把一小段 LaTeX 单独解析成表达式
+def _parse_fragment(txt: str) -> sym.Expr:
+    src = _normalize(txt.strip())
+    if src == "":
+        raise LatexError("这里需要一个表达式", 0)
+    p = _Parser(src)
+    return p.parse()
+
+# 在花括号之外找一段子串
+# src 从 pos 起是不是 tag
+def _at(src: str, pos: int, tag: str) -> bool:
+    n = len(tag)
+    if pos + n > len(src):
+        return false
+    return src[pos:pos + n] == tag
+
+def _find_top_level_str(src: str, tag: str) -> int:
+    depth = 0
+    i = 0
+    n = len(src)
+    while i < n:
+        if depth == 0 and _at(src, i, tag):
+            return i
+        c = src[i]
+        if c == '\\':
+            i += 1
+            while i < n and src[i].isalpha():
+                i += 1
+            continue
+        if c == '{':
+            depth += 1
+        elif c == '}':
+            depth -= 1
+        i += 1
+    return -1
+
+# 把 "\lim_{x \to 0}" 的下标切成 (变量, 趋近值)
+def _split_to(txt: str) -> (bool, str, str):
+    tags: list[str] = ["\\longrightarrow", "\\rightarrow", "\\to"]
+    for tag in tags:
+        k = _find_top_level_str(txt, tag)
+        if k >= 0:
+            return (true, txt[:k], txt[k + len(tag):])
+    return (false, "", "")
+
+# 按 \\ 切行（只在花括号之外切；\\[2pt] 的行距留给调用方处理）
+def _split_rows(text: str) -> list[str]:
+    out: list[str] = []
+    cur = ""
+    depth = 0
+    i = 0
+    n = len(text)
+    while i < n:
+        c = text[i]
+        if c == '\\':
+            if i + 1 < n and text[i + 1] == '\\' and depth == 0:
+                out.append(cur)
+                cur = ""
+                i += 2
+                continue
+            st = i
+            i += 1
+            while i < n and text[i].isalpha():
+                i += 1
+            if i == st + 1 and i < n:
+                i += 1
+            cur += text[st:i]
+            continue
+        if c == '{':
+            depth += 1
+        elif c == '}':
+            depth -= 1
+        cur += str(c)
+        i += 1
+    out.append(cur)
+    return out
+
+# 按 & 切列
+def _split_cells(text: str) -> list[str]:
+    out: list[str] = []
+    cur = ""
+    depth = 0
+    i = 0
+    n = len(text)
+    while i < n:
+        c = text[i]
+        if c == '\\':
+            if i + 1 < n and text[i + 1] == '&' and depth == 0:
+                # \& 是字面量，不当分隔符
+                cur += "&"
+                i += 2
+                continue
+            st = i
+            i += 1
+            while i < n and text[i].isalpha():
+                i += 1
+            if i == st + 1 and i < n:
+                i += 1
+            cur += text[st:i]
+            continue
+        if c == '{':
+            depth += 1
+        elif c == '}':
+            depth -= 1
+        elif c == '&' and depth == 0:
+            out.append(cur)
+            cur = ""
+            i += 1
+            continue
+        cur += str(c)
+        i += 1
+    out.append(cur)
+    return out
+
+# 矩阵环境的主体 -> sym.matrix
+def _parse_matrix(body: str) -> sym.Expr:
+    rows: list[list[sym.Expr]] = []
+    for r in _split_rows(body):
+        t = r.strip()
+        # 去掉行距参数 [2pt]
+        if t.startswith("["):
+            k = t.find("]")
+            if k > 0:
+                t = t[k + 1:].strip()
+        if t == "":
+            continue
+        row: list[sym.Expr] = []
+        for cell in _split_cells(t):
+            row.append(_parse_fragment(cell))
+        rows.append(row)
+    if len(rows) == 0:
+        raise LatexError("矩阵里没有任何元素", 0)
+    return sym.matrix(rows)
+
+# cases 环境的主体 -> sym.cases
+def _parse_cases(body: str) -> sym.Expr:
+    pairs: list[(sym.Expr, sym.Expr)] = []
+    dflt: sym.Expr = sym.num(0.0)
+    for r in _split_rows(body):
+        t = r.strip()
+        if t.startswith("["):
+            k = t.find("]")
+            if k > 0:
+                t = t[k + 1:].strip()
+        if t == "":
+            continue
+        cells = _split_cells(t)
+        if len(cells) < 2:
+            dflt = _parse_fragment(cells[0])
+            continue
+        val = _parse_fragment(cells[0])
+        cond = _strip_text_prefix(cells[1])
+        if cond == "" or cond.find("otherwise") >= 0 or cond.find("else") >= 0:
+            dflt = val
+            continue
+        pairs.append((_parse_cond(cond), val))
+    return sym.cases(pairs, dflt)
+
+# 去掉 "\text{if }" 这类前缀，返回剩下的条件文本
+def _strip_text_prefix(txt: str) -> str:
+    s = txt.strip()
+    while s.startswith("\\text{") or s.startswith("\\textrm{") or s.startswith("\\mbox{"):
+        k = s.find("{")
+        depth = 0
+        j = k
+        while j < len(s):
+            if s[j] == '{':
+                depth += 1
+            elif s[j] == '}':
+                depth -= 1
+                if depth == 0:
+                    break
+            j += 1
+        s = s[j + 1:].strip()
+    if s.find("otherwise") >= 0 or s.find("else") >= 0:
+        return ""
+    return s
+
+# 在花括号之外找比较符，返回 (位置, 规范化符号, 长度)
+def _find_rel_op(src: str) -> (int, str, int):
+    depth = 0
+    i = 0
+    n = len(src)
+    while i < n:
+        c = src[i]
+        if c == '\\':
+            if depth == 0:
+                if _at(src, i, "\\geq"):
+                    return (i, ">=", 4)
+                if _at(src, i, "\\leq"):
+                    return (i, "<=", 4)
+                if _at(src, i, "\\neq"):
+                    return (i, "!=", 4)
+                if _at(src, i, "\\ge"):
+                    return (i, ">=", 3)
+                if _at(src, i, "\\le"):
+                    return (i, "<=", 3)
+                if _at(src, i, "\\ne"):
+                    return (i, "!=", 3)
+                if _at(src, i, "\\gt"):
+                    return (i, ">", 3)
+                if _at(src, i, "\\lt"):
+                    return (i, "<", 3)
+            i += 1
+            while i < n and src[i].isalpha():
+                i += 1
+            continue
+        if c == '{':
+            depth += 1
+        elif c == '}':
+            depth -= 1
+        elif depth == 0:
+            if c == '<':
+                if i + 1 < n and src[i + 1] == '=':
+                    return (i, "<=", 2)
+                return (i, "<", 1)
+            if c == '>':
+                if i + 1 < n and src[i + 1] == '=':
+                    return (i, ">=", 2)
+                return (i, ">", 1)
+            if c == '=':
+                return (i, "=", 1)
+        i += 1
+    return (-1, "", 0)
+
+# 条件文本 -> sym.rel 节点
+def _parse_cond(txt: str) -> sym.Expr:
+    src = _normalize(txt.strip())
+    pos, op, oplen = _find_rel_op(src)
+    if pos < 0:
+        raise LatexError(f"分段的条件下需要比较符（<、>、\\le、\\ge、=），这里是「{txt.strip()}」", 0)
+    left = _parse_fragment(src[:pos])
+    right = _parse_fragment(src[pos + oplen:])
+    return sym.rel(op, left, right)
+
 # ===== 渲染回 LaTeX =====
 
 const _PREC_ADD = 1
@@ -788,7 +1355,7 @@ const _PREC_POW = 3
 # 把表达式渲染成 LaTeX 源码
 def to_latex(e: sym.Expr, outer: int = 0) -> str:
     if e.kind == "num":
-        s = sym.fmt(e.v)
+        s = _num_latex(e.v)
         if e.v < 0 and outer > _PREC_MUL:
             return "\\left(" + s + "\\right)"
         return s
@@ -807,7 +1374,128 @@ def to_latex(e: sym.Expr, outer: int = 0) -> str:
         return base + "^{" + to_latex(e.kids[1], 0) + "}"
     if e.kind == "fn":
         return _latex_fn(e)
+    if e.kind == "sum" or e.kind == "prod":
+        return _latex_bigop(e, outer)
+    if e.kind == "lim":
+        return _latex_lim(e, outer)
+    if e.kind == "int":
+        return _latex_integral(e, outer)
+    if e.kind == "matrix":
+        return _latex_matrix(e)
+    if e.kind == "cases":
+        return _latex_cases(e)
+    if e.kind == "rel":
+        return to_latex(e.kids[0], _PREC_ADD) + " " + _rel_latex(e.name) + " " + to_latex(e.kids[1], _PREC_ADD)
     return "?"
+
+# 数值：无穷写成 \infty，接近简单分数的写成 \frac{p}{q}
+def _num_latex(v: float) -> str:
+    if math.isnan(v):
+        return "\\mathrm{NaN}"
+    if math.isinf(v):
+        return "\\infty" if v > 0 else "-\\infty"
+    if v == math.trunc(v) and math.fabs(v) < 1e16:
+        return str(math.trunc(v))
+    fr = _as_fraction(v)
+    if fr != "":
+        return fr
+    return sym.fmt(v)
+
+# 把浮点数近似成小分母分数（1/3、5/6 这些）；不像就返回空串
+def _as_fraction(v: float) -> str:
+    if math.fabs(v) > 1e6:
+        return ""
+    sign = ""
+    a = v
+    if a < 0:
+        sign = "-"
+        a = -a
+    q = 1
+    while q <= 60:
+        p = a * float(q)
+        r = float(math.floor(p + 0.5))
+        if r > 0 and math.fabs(p - r) <= 1e-9 * (1.0 + p):
+            pi = math.trunc(r)
+            if q == 1:
+                return sign + str(pi)
+            return sign + "\\frac{" + str(pi) + "}{" + str(q) + "}"
+        q += 1
+    return ""
+
+# 大运算符：\sum_{k=1}^{n} 与 \prod_{k=1}^{n}
+def _latex_bigop(e: sym.Expr, outer: int) -> str:
+    cmd = "\\sum"
+    if e.kind == "prod":
+        cmd = "\\prod"
+    head = cmd + "_{" + _var_latex(e.name) + "=" + to_latex(e.kids[0], 0) + "}^{" + to_latex(e.kids[1], 0) + "}"
+    s = head + " " + to_latex(e.kids[2], _PREC_MUL)
+    if outer > _PREC_MUL:
+        return "\\left(" + s + "\\right)"
+    return s
+
+# 极限：\lim_{x \to a^{+}}
+def _latex_lim(e: sym.Expr, outer: int) -> str:
+    tail = ""
+    if e.v > 0:
+        tail = "^{+}"
+    elif e.v < 0:
+        tail = "^{-}"
+    head = "\\lim_{" + _var_latex(e.name) + " \\to " + to_latex(e.kids[0], 0) + tail + "}"
+    s = head + " " + to_latex(e.kids[1], _PREC_MUL)
+    if outer > _PREC_MUL:
+        return "\\left(" + s + "\\right)"
+    return s
+
+# 积分：\int_{a}^{b} f \, dx
+def _latex_integral(e: sym.Expr, outer: int) -> str:
+    head = "\\int"
+    if len(e.kids) == 3:
+        head += "_{" + to_latex(e.kids[0], 0) + "}^{" + to_latex(e.kids[1], 0) + "}"
+        body = to_latex(e.kids[2], _PREC_MUL)
+    else:
+        body = to_latex(e.kids[0], _PREC_MUL)
+    s = head + " " + body + " \\, d" + _var_latex(e.name)
+    if outer > _PREC_MUL:
+        return "\\left(" + s + "\\right)"
+    return s
+
+# 矩阵
+def _latex_matrix(e: sym.Expr) -> str:
+    nr, nc = sym.shape(e)
+    out = "\\begin{pmatrix}"
+    for i in range(nr):
+        if i > 0:
+            out += " \\\\ "
+        for j in range(nc):
+            if j > 0:
+                out += " & "
+            out += to_latex(sym.at(e, i, j), 0)
+    return out + "\\end{pmatrix}"
+
+# 分段函数
+def _latex_cases(e: sym.Expr) -> str:
+    n = math.trunc(e.v)
+    out = "\\begin{cases}"
+    for i in range(n):
+        if i > 0:
+            out += " \\\\ "
+        out += to_latex(e.kids[2 * i + 1], 0) + " & " + to_latex(e.kids[2 * i], 0)
+    dflt = e.kids[2 * n]
+    if dflt.kind != "num" or math.fabs(dflt.v) > 1e-15:
+        if n > 0:
+            out += " \\\\ "
+        out += to_latex(dflt, 0) + " & \\text{otherwise}"
+    return out + "\\end{cases}"
+
+# 比较符的 LaTeX
+def _rel_latex(op: str) -> str:
+    if op == "<=":
+        return "\\le"
+    if op == ">=":
+        return "\\ge"
+    if op == "!=":
+        return "\\ne"
+    return op
 
 # 变量名 -> LaTeX。希腊字母还原成命令，带下标的名字还原成 x_{1}，
 # 多字母的普通名字用 \mathrm 包起来免得被当成多个变量相乘。
@@ -892,7 +1580,7 @@ def _latex_product(e: sym.Expr, outer: int) -> str:
         coef = -coef
     numer = ""
     if math.fabs(coef - 1.0) > 1e-15:
-        numer = sym.fmt(coef)
+        numer = _num_latex(coef)
         rest = _join_factors(num_parts)
         if rest == "":
             return sign + numer
@@ -993,3 +1681,25 @@ def equals_latex(a: str, b: str) -> bool:
 # 用 e-graph 证明两条 LaTeX 恒等（比 equals 更强：允许绕路的重写）
 def prove_equal_latex(a: str, b: str, iterations: int = 40) -> bool:
     return egraph.prove_equal(parse(a), parse(b), iterations)
+
+# ===== 直接算出来 =====
+
+# 解析求和并把闭式写回 LaTeX
+def sum_latex(text: str) -> str:
+    return to_latex(calc.sum(parse(text)))
+
+# 连乘的闭式
+def product_latex(text: str) -> str:
+    return to_latex(calc.product(parse(text)))
+
+# 极限的数值结果（字符串，因为可能是 \pm\infty 或不存在）
+def limit_latex(text: str) -> str:
+    return calc.fmt_limit(calc.limit(parse(text)))
+
+# 不定积分：返回原函数的 LaTeX
+def integrate_latex(text: str) -> str:
+    return to_latex(calc.integrate(parse(text)))
+
+# 定积分：返回数值
+def definite_latex(text: str) -> float:
+    return calc.definite(parse(text))
