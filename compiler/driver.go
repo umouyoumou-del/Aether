@@ -17,7 +17,7 @@ import (
 )
 
 // Version 是编译器版本。
-const Version = "0.1.0"
+const Version = "0.2.0"
 
 // Program 是加载并检查后的程序。
 type Program struct {

@@ -65,7 +65,7 @@ Aether 把 `.ae` 源码翻译成 Go，再由 Go 编译为原生程序。
 
 ### Windows（PowerShell）
 
-**方式一：MSI 安装包（推荐）**——下载 Release 中的 `Aether-0.1.0-x64.msi`，双击安装。
+**方式一：MSI 安装包（推荐）**——下载 Release 中的 `Aether-0.2.0-x64.msi`，双击安装。
 它会把编译器装到 `Program Files\Aether`、自动加入系统 PATH、并创建开始菜单快捷方式。
 安装后打开任意终端即可使用 `aether run hello.ae`（编译程序仍需本机有 Go 工具链）。
 

@@ -2,7 +2,7 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Package Name="Aether (五行)"
            Manufacturer="Aether contributors"
-           Version="0.1.0"
+           Version="0.2.0"
            UpgradeCode="{B8F3C2A1-5D47-4E9B-9A31-7C2E8F5D6401}"
            Scope="perMachine"
            Language="2052">
@@ -85,6 +85,7 @@
       <File Id="ex_wordfreq" Source="$(sys.SOURCEFILEDIR)..\examples\wordfreq.ae" />
       <File Id="ex_codegen_demo" Source="$(sys.SOURCEFILEDIR)..\examples\codegen_demo.ae" />
       <File Id="ex_latex_demo" Source="$(sys.SOURCEFILEDIR)..\examples\latex_demo.ae" />
+      <File Id="ex_calc_demo" Source="$(sys.SOURCEFILEDIR)..\examples\calc_demo.ae" />
     </Component>
 
     <Component Id="MiniJevFiles" Guid="{2F196099-3925-549C-93ED-AFB7CD9FB5CC}" Directory="MiniJevFolder">
