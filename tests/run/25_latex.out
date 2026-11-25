@@ -55,8 +55,19 @@ def f(x: float) -> float:
 def f_dx(x: float) -> float:
     _t0 = x * x
     return 3.0 * _t0 + 2.0 * x * math.cos(_t0)
+== 偏导与微分算子 ==
+2x \, y
+6x
+\cos\left(x\right)
+6x \, y^{2}
+== 泰勒展开 ==
+\frac{1}{24}x^{4} + \frac{1}{6}x^{3} + \frac{1}{2}x^{2} + x + 1
+x + \frac{1}{3}\left(x - 1\right)^{3} - \frac{1}{2}\left(x - 1\right)^{2} - 1
+== 解方程 ==
+x = -2, x = 2
+x = -2, x = 1
 == 错误 ==
-[\frac{\partial f}{\partial x}] 暂不支持偏导记号；用 latex.diff_latex(公式, 变量) 求偏导（位置 14，附近：rac{\partial f}{\partial）
+[\overline{x}] 不支持的 LaTeX 命令 \overline（位置 9，附近：\overline{x}）
 [\frac{1}{}] \frac 的参数不能为空（位置 8，附近：\frac{1}{}）
 [(x+1] 圆括号没有闭合（位置 4，附近：(x+1）
 [\foo x] 不支持的 LaTeX 命令 \foo（位置 4，附近：\foo x）

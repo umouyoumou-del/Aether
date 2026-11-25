@@ -1,4 +1,4 @@
-# 从 LaTeX 出发，把含求和/极限/积分/矩阵/分段的公式算出来
+# 从 LaTeX 出发，把含求和/极限/积分/矩阵/分段/泰勒/解方程的公式算出来
 import latex
 import calc
 import sym
@@ -10,6 +10,9 @@ for src in [
     r"\sum_{k=1}^{n} \left(3k + 1\right)",
     r"\sum_{k=0}^{n} 2^k",
     r"\sum_{k=0}^{\infty} \frac{1}{2^k}",
+    r"\sum_{k=1}^{n} k^6",
+    r"\sum_{k=0}^{n} k 2^k",
+    r"\sum_{k=0}^{\infty} k \left(\frac{1}{2}\right)^k",
 ]:
     print(src, " => ", latex.sum_latex(src))
 
@@ -24,6 +27,9 @@ for src in [
     r"\lim_{x \to \infty} \frac{2x + 1}{x + 3}",
     r"\lim_{x \to \infty} \left(1 + \frac{1}{x}\right)^x",
     r"\lim_{x \to 0^{+}} \frac{1}{x}",
+    r"\lim_{x \to 0} \frac{e^x - 1 - x}{x^2}",
+    r"\lim_{x \to 0} \frac{\tan x - x}{x^3}",
+    r"\lim_{x \to 1} \frac{x^3 - 1}{x^2 - 1}",
 ]:
     print(src, " => ", latex.limit_latex(src))
 
@@ -34,6 +40,13 @@ for src in [
     r"\int e^{2x} \, dx",
     r"\int x e^x \, dx",
     r"\int \frac{1}{1 + x^2} \, dx",
+    r"\int \sin^3 x \, dx",
+    r"\int \sin^2 x \cos^3 x \, dx",
+    r"\int \cos^4 x \, dx",
+    r"\int x e^{x^2} \, dx",
+    r"\int x \ln x \, dx",
+    r"\int \frac{1}{\sqrt{1-x^2}} \, dx",
+    r"\int \frac{1}{x^2 + 2x + 5} \, dx",
 ]:
     print(src, " => ", latex.integrate_latex(src))
 print(r"\int_0^{\pi} \sin x \, dx", " => ", latex.definite_latex(r"\int_0^{\pi} \sin x \, dx"),
@@ -54,3 +67,37 @@ print("f(-3) =", sym.evaluate(f, {"x": -3.0}), " f(4) =", sym.evaluate(f, {"x": 
 print("== 微积分基本定理 ==")
 F = latex.parse(r"\int_0^x t^2 \, dt")
 print("d/dx", latex.to_latex(F), " = ", latex.to_latex(sym.diff(F, "x")))
+
+print("== 振荡的极限会明确报错 ==")
+try:
+    print(latex.limit_latex(r"\lim_{x \to 0} \sin\left(\frac{1}{x}\right)"))
+except calc.CalcError as e:
+    print("CalcError:", e)
+
+print("== 泰勒展开 ==")
+print("sin x ≈", latex.taylor_latex(r"\sin x", "x", 0.0, 7))
+print("ln x @1 ≈", latex.taylor_latex(r"\ln x", "x", 1.0, 3))
+print("1/(1-x) ≈", latex.taylor_latex(r"\frac{1}{1-x}", "x", 0.0, 4))
+
+print("== 偏导 ==")
+print("∂/∂x (x²y) =", latex.to_latex(latex.parse(r"\frac{\partial}{\partial x} x^2 y")))
+print("∂²/∂x∂y (x²y³) =", latex.to_latex(latex.parse(r"\frac{\partial^2}{\partial x \partial y} x^2 y^3")))
+print("d/dx sin x =", latex.to_latex(latex.parse(r"\frac{d}{dx} \sin x")))
+
+print("== 解方程 ==")
+x = sym.var("x")
+print("x² = 4        ->", calc.roots(sym.add(x ** 2, sym.num(-4.0)), "x"))
+print("x³ - 3x + 2 = 0 ->", latex.solve_latex(r"x^3 - 3x + 2 = 0", "x"))
+print("x⁴ - 5x² + 4 = 0 ->", latex.solve_latex(r"x^4 - 5x^2 + 4 = 0", "x"))
+print("x² + 1 = 0    ->", latex.solve_latex(r"x^2 + 1 = 0", "x"))
+
+print("== 线性方程组 ==")
+a = sym.matrix([[sym.num(2.0), sym.num(1.0), sym.num(-1.0)],
+                [sym.num(-3.0), sym.num(-1.0), sym.num(2.0)],
+                [sym.num(-2.0), sym.num(1.0), sym.num(2.0)]])
+b = sym.matrix([[sym.num(8.0)], [sym.num(-11.0)], [sym.num(-3.0)]])
+print("x, y, z =", calc.solve_linear(a, b))
+
+print("== 数值行列式（6 阶） ==")
+big = latex.parse(r"\begin{pmatrix} 2 & 0 & 0 & 0 & 0 & 1 \\ 0 & 3 & 0 & 0 & 0 & 2 \\ 0 & 0 & 4 & 0 & 0 & 3 \\ 0 & 0 & 0 & 5 & 0 & 4 \\ 0 & 0 & 0 & 0 & 6 & 5 \\ 1 & 1 & 1 & 1 & 1 & 1 \end{pmatrix}")
+print("det =", calc.determinant(big))

@@ -80,9 +80,23 @@ print("== 交给 codegen ==")
 print(codegen.expr_code(latex.parse(r"\frac{x}{2} + 1")))
 print(codegen.to_module(latex.parse(r"\sin x^2 + x^3"), ["x"], "f"))
 
+print("== 偏导与微分算子 ==")
+print(latex.to_latex(latex.parse(r"\frac{\partial}{\partial x} x^2 y")))
+print(latex.to_latex(latex.parse(r"\frac{\partial^2}{\partial x^2} x^3")))
+print(latex.to_latex(latex.parse(r"\frac{d}{dx} \sin x")))
+print(latex.to_latex(latex.parse(r"\frac{\partial^2}{\partial x \partial y} x^2 y^3")))
+
+print("== 泰勒展开 ==")
+print(latex.taylor_latex(r"e^x", "x", 0.0, 4))
+print(latex.taylor_latex(r"\ln x", "x", 1.0, 3))
+
+print("== 解方程 ==")
+print(latex.solve_latex(r"x^2 - 4 = 0", "x"))
+print(latex.solve_latex(r"x^3 - 3x + 2 = 0", "x"))
+
 print("== 错误 ==")
 bad: list[str] = [
-    r"\frac{\partial f}{\partial x}",
+    r"\overline{x}",
     r"\frac{1}{}",
     r"(x+1",
     r"\foo x",

@@ -74,3 +74,63 @@ print(latex.to_latex(sym.subs(latex.parse(r"\sum_{k=1}^{n} x k"), {"x": sym.var(
 print(sym.vars_of(latex.parse(r"\sum_{k=1}^{n} x k")))
 g = sym.compile_expr(latex.parse(r"\sum_{k=1}^{4} x k"), ["x"])
 print(g([3.0]))
+
+print("== 高次幂和与等差乘等比 ==")
+print(latex.sum_latex(r"\sum_{k=1}^{n} k^5"))
+print(latex.sum_latex(r"\sum_{k=0}^{n} k 2^k"))
+print(latex.sum_latex(r"\sum_{k=0}^{\infty} k \left(\frac{1}{2}\right)^k"))
+print(sym.evaluate(calc.sum(sym.sum_expr("k", sym.num(0.0), sym.num(5.0),
+      sym.mul(sym.var("k"), sym.power(sym.num(2.0), sym.var("k"))))), {}))
+
+print("== 泰勒展开 ==")
+print(latex.taylor_latex(r"e^x", "x", 0.0, 5))
+print(latex.taylor_latex(r"\sin x", "x", 0.0, 7))
+print(latex.taylor_latex(r"\frac{1}{x}", "x", 1.0, 3))
+print(latex.taylor_latex(r"\sqrt{1+x}", "x", 0.0, 3))
+
+print("== 洛必达与振荡 ==")
+print(latex.limit_latex(r"\lim_{x \to 0} \frac{e^x - 1 - x}{x^2}"))
+print(latex.limit_latex(r"\lim_{x \to 0} \frac{\tan x - x}{x^3}"))
+print(latex.limit_latex(r"\lim_{x \to 1} \frac{x^3 - 1}{x^2 - 1}"))
+try:
+    latex.limit_latex(r"\lim_{x \to 0} \sin\left(\frac{1}{x}\right)")
+    print("振荡没有被发现")
+except calc.CalcError:
+    print("振荡：极限不存在")
+
+print("== 三角幂与换元积分 ==")
+print(latex.integrate_latex(r"\int \sin^3 x \, dx"))
+print(latex.integrate_latex(r"\int \sin^2 x \cos^3 x \, dx"))
+print(latex.integrate_latex(r"\int \cos^4 x \, dx"))
+print(latex.integrate_latex(r"\int x e^{x^2} \, dx"))
+print(latex.integrate_latex(r"\int \frac{x}{1+x^2} \, dx"))
+print(latex.integrate_latex(r"\int x \ln x \, dx"))
+print(latex.integrate_latex(r"\int \frac{1}{\sqrt{1-x^2}} \, dx"))
+print(latex.integrate_latex(r"\int \frac{1}{x^2+2x+5} \, dx"))
+print(latex.definite_latex(r"\int_0^{\pi/2} \sin^3 x \, dx"))
+print(latex.definite_latex(r"\int_0^1 x \ln x \, dx"))
+
+print("== 偏导 ==")
+print(latex.to_latex(latex.parse(r"\frac{\partial}{\partial x} x^2 y")))
+print(latex.to_latex(latex.parse(r"\frac{\partial^2}{\partial x \partial y} x^2 y^3")))
+print(latex.to_latex(latex.parse(r"\frac{d}{dx} \sin x")))
+
+print("== 解方程 ==")
+print(calc.roots(sym.add(x ** 2, sym.num(-4.0)), "x"))
+print(calc.roots(sym.add(sym.power(x, sym.num(3.0)), sym.add(sym.mul(sym.num(-3.0), x), sym.num(2.0))), "x"))
+print(calc.roots(sym.add(x ** 2, sym.num(1.0)), "x"))
+print(latex.solve_latex(r"x^4 - 5x^2 + 4 = 0", "x"))
+print(calc.solve_linear(
+    sym.matrix([[sym.num(2.0), sym.num(1.0), sym.num(-1.0)],
+                [sym.num(-3.0), sym.num(-1.0), sym.num(2.0)],
+                [sym.num(-2.0), sym.num(1.0), sym.num(2.0)]]),
+    sym.matrix([[sym.num(8.0)], [sym.num(-11.0)], [sym.num(-3.0)]])))
+
+print("== 大矩阵数值行列式 ==")
+big = sym.matrix([[sym.num(2.0), sym.num(0.0), sym.num(0.0), sym.num(0.0), sym.num(0.0), sym.num(1.0)],
+                  [sym.num(0.0), sym.num(3.0), sym.num(0.0), sym.num(0.0), sym.num(0.0), sym.num(2.0)],
+                  [sym.num(0.0), sym.num(0.0), sym.num(4.0), sym.num(0.0), sym.num(0.0), sym.num(3.0)],
+                  [sym.num(0.0), sym.num(0.0), sym.num(0.0), sym.num(5.0), sym.num(0.0), sym.num(4.0)],
+                  [sym.num(0.0), sym.num(0.0), sym.num(0.0), sym.num(0.0), sym.num(6.0), sym.num(5.0)],
+                  [sym.num(1.0), sym.num(1.0), sym.num(1.0), sym.num(1.0), sym.num(1.0), sym.num(1.0)]])
+print(calc.determinant(big))

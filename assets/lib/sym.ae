@@ -1397,6 +1397,21 @@ def _is_zero(e: Expr) -> bool:
 def difference(a: Expr, b: Expr) -> Expr:
     return expand(_mk_add([a, neg(b)]))
 
+# 结构完全相同（不看数学等价，只比节点形状）。换元的模式匹配要用它。
+def identical(a: Expr, b: Expr) -> bool:
+    return _key(a) == _key(b)
+
+# 把 e 中所有与 target 结构相同的子节点换成 atom。用于「把内层函数抽成变量」。
+def abstract_sub(e: Expr, target: Expr, atom: Expr) -> Expr:
+    if identical(e, target):
+        return atom
+    if len(e.kids) == 0:
+        return e
+    kids: list[Expr] = []
+    for k in e.kids:
+        kids.append(abstract_sub(k, target, atom))
+    return _rebuild(e, kids)
+
 # 表达式中出现的变量（按字典序）
 def vars_of(e: Expr) -> list[str]:
     found: dict[str, bool] = {}

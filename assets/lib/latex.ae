@@ -852,6 +852,103 @@ class _Parser:
             return ""
         return str(c)
 
+    # 从 j（指向 '{'）读一个组的原文，但不动 self.i
+    def peek_group(self, j: int) -> (str, int):
+        if j >= self.n or self.src[j] != '{':
+            return ("", j)
+        depth = 1
+        start = j + 1
+        k = start
+        while k < self.n:
+            c = self.src[k]
+            if c == '{':
+                depth += 1
+            elif c == '}':
+                depth -= 1
+                if depth == 0:
+                    return (self.src[start:k], k + 1)
+            k += 1
+        return ("", j)
+
+    # 向前看：这个 \frac 是不是微分算子
+    def diff_frac_ahead(self) -> bool:
+        j = self.i
+        while j < self.n and (self.src[j] == ' ' or self.src[j] == '\t'):
+            j += 1
+        if j >= self.n or self.src[j] != '{':
+            return false
+        ntxt, e1 = self.peek_group(j)
+        j2 = e1
+        while j2 < self.n and (self.src[j2] == ' ' or self.src[j2] == '\t'):
+            j2 += 1
+        if j2 >= self.n or self.src[j2] != '{':
+            return false
+        dtxt, e2 = self.peek_group(j2)
+        nt = ntxt.strip()
+        dt = dtxt.strip()
+        if _at(nt, 0, "\\partial"):
+            return _at(dt, 0, "\\partial")
+        if _at(nt, 0, "\\mathrm{d}") or _at(nt, 0, "\\text{d}"):
+            return _at(dt, 0, "\\mathrm{d}") or _at(dt, 0, "\\text{d}") or _at(dt, 0, "d")
+        if _at(nt, 0, "d") and len(nt) > 0:
+            # 纯 d：\frac{d}{dx}、\frac{df}{dx}
+            if _at(dt, 0, "d") or _at(dt, 0, "\\mathrm{d}") or _at(dt, 0, "\\text{d}"):
+                return len(dt) > 1
+        return false
+
+    # \frac{\partial f}{\partial x}、\frac{\partial^2 f}{\partial x \partial y}、
+    # \frac{d f}{d x}、\frac{\partial}{\partial x} f —— 统一化成 sym.diff
+    def parse_diff_frac(self) -> sym.Expr:
+        ntxt = self.read_group_text()
+        dtxt = self.read_group_text()
+        nt = ntxt.strip()
+        rest = ""
+        if _at(nt, 0, "\\partial"):
+            rest = nt[8:]
+        elif _at(nt, 0, "\\mathrm{d}"):
+            rest = nt[10:]
+        elif _at(nt, 0, "\\text{d}"):
+            rest = nt[8:]
+        else:
+            rest = nt[1:]
+        rest = rest.strip()
+        order = 1
+        if _at(rest, 0, "^"):
+            r2 = rest[1:].strip()
+            if _at(r2, 0, "{"):
+                j = 1
+                while j < len(r2) and r2[j] != '}':
+                    j += 1
+                order = int(r2[1:j])
+                rest = r2[j + 1:].strip()
+            else:
+                order = int(r2[0:1])
+                rest = r2[1:].strip()
+        body: sym.Expr
+        if rest == "":
+            self.skip_ws()
+            if self.i >= self.n:
+                self.fail("微分算子后面缺少被求导的表达式")
+            # 作用到「后面这一项」：x^2 y 整项、\sin x + 1 只到 sin x
+            body = self.parse_term(false)
+        else:
+            body = _parse_fragment(rest)
+        vs = _diff_var_list(dtxt.strip())
+        if len(vs) == 0:
+            self.fail("微分算子的分母里没有变量")
+        out = body
+        idx = 0
+        while idx < len(vs):
+            out = sym.diff(out, vs[idx])
+            idx += 1
+        # 阶数比变量多出来的部分，补在第一个变量上
+        extra = order - len(vs)
+        k = 0
+        while k < extra:
+            out = sym.diff(out, vs[0])
+            k += 1
+        return out
+
     def parse_command(self) -> sym.Expr:
         name = self.read_cmd()
         if name == "sum" or name == "prod":
@@ -867,6 +964,8 @@ class _Parser:
         if name == "limits" or name == "nolimits":
             return self.parse_atom()
         if name == "frac" or name == "dfrac" or name == "tfrac" or name == "cfrac":
+            if self.diff_frac_ahead():
+                return self.parse_diff_frac()
             a = self.parse_frac_arg()
             b = self.parse_frac_arg()
             return sym.div(a, b)
@@ -1126,6 +1225,90 @@ def _at(src: str, pos: int, tag: str) -> bool:
     if pos + n > len(src):
         return false
     return src[pos:pos + n] == tag
+
+# 微分算子分母里的变量列表：\partial x \partial y、dx\,dy、d x 都认
+def _diff_var_list(t: str) -> list[str]:
+    out: list[str] = []
+    i = 0
+    n = len(t)
+    while i < n:
+        c = t[i]
+        if c == ' ' or c == '\t':
+            i += 1
+            continue
+        if _at(t, i, "\\partial"):
+            i += 8
+            continue
+        if _at(t, i, "\\mathrm{d}"):
+            i += 10
+            continue
+        if _at(t, i, "\\text{d}"):
+            i += 8
+            continue
+        if _at(t, i, "\\,") or _at(t, i, "\\;") or _at(t, i, "\\:"):
+            i += 2
+            continue
+        if _at(t, i, "\\quad"):
+            i += 5
+            continue
+        if _at(t, i, "\\cdot") or _at(t, i, "\\times"):
+            i += 5
+            continue
+        if c == '^':
+            # 阶数记号（\partial^2 里的 ^2），忽略
+            i += 1
+            if _at(t, i, "{"):
+                j = i + 1
+                while j < n and t[j] != '}':
+                    j += 1
+                i = j + 1
+            else:
+                i += 1
+            continue
+        if c == 'd':
+            # 微分记号 d：dx、d x 都去掉 d
+            if i + 1 >= n:
+                i += 1
+                continue
+            nxt = t[i + 1]
+            if nxt == ' ' or nxt == '\t' or nxt == '\\' or nxt.isalpha():
+                i += 1
+                continue
+        name = ""
+        if c == '\\':
+            j = i + 1
+            while j < n and t[j].isalpha():
+                j += 1
+            name = _greek_name(t[i:j])
+            i = j
+        elif c.isalpha():
+            name = str(c)
+            i += 1
+        else:
+            i += 1
+            continue
+        # 变量后面可能跟 ^k（\partial x^2 表示对 x 两次）
+        times = 1
+        j = i
+        while j < n and (t[j] == ' ' or t[j] == '\t'):
+            j += 1
+        if j < n and t[j] == '^':
+            j += 1
+            if j < n and t[j] == '{':
+                j += 1
+                st = j
+                while j < n and t[j] != '}':
+                    j += 1
+                times = int(t[st:j])
+                j += 1
+            else:
+                times = int(t[j:j + 1])
+                j += 1
+            i = j
+        while times > 0:
+            out.append(name)
+            times -= 1
+    return out
 
 def _find_top_level_str(src: str, tag: str) -> int:
     depth = 0
@@ -1401,7 +1584,8 @@ def _num_latex(v: float) -> str:
         return fr
     return sym.fmt(v)
 
-# 把浮点数近似成小分母分数（1/3、5/6 这些）；不像就返回空串
+# 把浮点数近似成分数（1/3、5/6、1/120 这些）；不像就返回空串。
+# 用连分数展开找分母不超过 1000 的最佳逼近，比逐个试分母准得多。
 def _as_fraction(v: float) -> str:
     if math.fabs(v) > 1e6:
         return ""
@@ -1410,16 +1594,36 @@ def _as_fraction(v: float) -> str:
     if a < 0:
         sign = "-"
         a = -a
-    q = 1
-    while q <= 60:
-        p = a * float(q)
-        r = float(math.floor(p + 0.5))
-        if r > 0 and math.fabs(p - r) <= 1e-9 * (1.0 + p):
-            pi = math.trunc(r)
-            if q == 1:
-                return sign + str(pi)
-            return sign + "\\frac{" + str(pi) + "}{" + str(q) + "}"
-        q += 1
+    if a < 1e-12:
+        return "0"
+    p0 = 0.0
+    q0 = 1.0
+    p1 = 1.0
+    q1 = 0.0
+    x = a
+    k = 0
+    while k < 24:
+        ai = float(math.floor(x + 1e-12))
+        p2 = ai * p1 + p0
+        q2 = ai * q1 + q0
+        if q2 > 0.0:
+            if math.fabs(p2 / q2 - a) <= 1e-10 * (1.0 + a):
+                pi = math.trunc(p2 + 0.5)
+                qi = math.trunc(q2 + 0.5)
+                if qi > 10000:
+                    break
+                if qi == 1:
+                    return sign + str(pi)
+                return sign + "\\frac{" + str(pi) + "}{" + str(qi) + "}"
+        frac = x - ai
+        if frac < 1e-12:
+            break
+        x = 1.0 / frac
+        p0 = p1
+        q0 = q1
+        p1 = p2
+        q1 = q2
+        k += 1
     return ""
 
 # 大运算符：\sum_{k=1}^{n} 与 \prod_{k=1}^{n}
@@ -1703,3 +1907,25 @@ def integrate_latex(text: str) -> str:
 # 定积分：返回数值
 def definite_latex(text: str) -> float:
     return calc.definite(parse(text))
+
+# 泰勒展开（在 x = a 处展开到 n 阶），返回 LaTeX
+def taylor_latex(text: str, x: str, a: float, n: int) -> str:
+    return to_latex(calc.series(parse(text), x, a, n))
+
+# 解方程：text 里要有等号，返回 "x = 1, x = -2" 这样的字符串
+def solve_latex(text: str, x: str) -> str:
+    lhs, rhs = parse_equation(text)
+    rs = calc.solve(lhs, rhs, x)
+    if len(rs) == 0:
+        return "无实根"
+    parts: list[str] = []
+    for v in rs:
+        parts.append(x + " = " + sym.fmt(v))
+    return ", ".join(parts)
+
+# 解方程，返回实根列表（text 可以是 "x^2 - 4 = 0"，也可以只写左边）
+def roots_latex(text: str, x: str) -> list[float]:
+    if _find_top_level_str(text, "=") >= 0:
+        lhs, rhs = parse_equation(text)
+        return calc.solve(lhs, rhs, x)
+    return calc.roots(parse(text), x)

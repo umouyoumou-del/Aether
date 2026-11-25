@@ -378,9 +378,12 @@ print(g([3.0]))                             # 16.0
   再编译成原生可执行文件——同一份表达式既可符号推导，也可编译执行，结果由 `verify` 逐点比对。
 - 还有 `latex`：**直接读 LaTeX 源码**参与运算，结果再写回 LaTeX。论文里粘来一条公式就能求导、
   证明恒等（`latex.prove_equal_latex`）、求值、生成原生函数；从 PDF 复制的 `πr²`、`x³ − 2x` 也能读。
-- 还有 `calc`：在表达式树上做真正的计算——**求和/连乘的闭式公式**（`Σk² = n(n+1)(2n+1)/6`）、
-  **极限**（数值外推 + 左右极限判定 + `x→∞` 的倒数替换）、**符号积分**（表驱动 + 线性换元 + 分部积分）、
-  **矩阵**（行列式、逆、乘、转置、迹）。`\sum \prod \lim \int`、`\begin{pmatrix}…\end{pmatrix}`、
+- 还有 `calc`：在表达式树上做真正的计算——**求和/连乘的闭式公式**（`Σk² = n(n+1)(2n+1)/6`，
+  任意次幂和走 Faulhaber + 伯努利数，`Σk·2^k` 这类「多项式乘等比」也有闭式）、
+  **极限**（洛必达 + 数值外推 + 左右极限判定 + 振荡检测）、**符号积分**（规则表 + 三角幂 + 一般换元 +
+  分部积分 + 二次不可约分式，定积分自动处理瑕点）、**泰勒展开**、**解方程**（三次 Cardano、四次 Ferrari、
+  更高次数值求根）、**线性方程组**、**矩阵**（行列式、逆、乘、转置、迹，数值行列式不限阶）。
+  `\sum \prod \lim \int`、`\frac{\partial}{\partial x}`、`\begin{pmatrix}…\end{pmatrix}`、
   `\begin{cases}…\end{cases}` 这些 LaTeX 记号都能直接读进来算。
 
 ```python
@@ -391,9 +394,15 @@ latex.prove_equal_latex(r"(a+b)^3", r"a^3 + 3a^2b + 3ab^2 + b^3")     # true
 latex.to_latex(sym.expand(latex.parse(r"(x+y)^2")))                   # x^{2} + 2x \, y + y^{2}
 
 latex.sum_latex(r"\sum_{k=1}^{n} k^2")             # \frac{1}{6}n \, \left(2n + 1\right) \cdot \left(n + 1\right)
-latex.limit_latex(r"\lim_{x\to 0} \frac{\sin x}{x}")   # 1
+latex.sum_latex(r"\sum_{k=0}^{\infty} k \left(\frac{1}{2}\right)^k")   # 2
+latex.limit_latex(r"\lim_{x\to 0} \frac{e^x - 1 - x}{x^2}")   # 0.5（洛必达）
+latex.limit_latex(r"\lim_{x\to 0} \sin\left(\frac{1}{x}\right)")  # 抛错：振荡，极限不存在
 latex.integrate_latex(r"\int x e^x \, dx")            # x \, \exp\left(x\right) - \exp\left(x\right)
+latex.integrate_latex(r"\int x e^{x^2} \, dx")        # \frac{1}{2}\exp\left(x^{2}\right)（换元）
+latex.integrate_latex(r"\int \sin^2 x \cos^3 x \, dx")  # \frac{1}{5}\sin\left(x\right)^{5} + \frac{1}{3}\sin\left(x\right)^{3}
 latex.definite_latex(r"\int_0^{\pi} \sin x \, dx")    # 2.0
+latex.taylor_latex(r"\sin x", "x", 0.0, 7)            # -\frac{1}{5040}x^{7} + \frac{1}{120}x^{5} - \frac{1}{6}x^{3} + x
+latex.solve_latex(r"x^3 - 3x + 2 = 0", "x")            # x = -2, x = 1
 ```
 
 见 [docs/数学库.md](docs/数学库.md)。
