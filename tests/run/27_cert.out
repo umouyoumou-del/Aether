@@ -1,0 +1,35 @@
+== 展开证书 ==
+aethercert 1
+vars x
+start (pow (add (var x) (num 1)) 2)
+same (add (pow (var x) 2) (add (mul (num 2) (var x)) (num 1)))
+claim (add (pow (var x) 2) (add (mul (num 2) (var x)) (num 1)))
+end
+
+== 求导证书 ==
+aethercert 1
+vars x
+start (add (pow (var x) 3) (mul (num 2) (var x)))
+diff x (add (mul (num 3) (pow (var x) 2)) (num 2))
+claim (add (mul (num 3) (pow (var x) 2)) (num 2))
+end
+
+== 链式法则 ==
+aethercert 1
+vars x
+start (fn sin (pow (var x) 2))
+diff x (mul (num 2) (mul (var x) (fn cos (pow (var x) 2))))
+claim (mul (num 2) (mul (var x) (fn cos (pow (var x) 2))))
+end
+
+== 判等证书 ==
+aethercert 1
+vars x
+start (pow (add (var x) (num 1)) 2)
+claim (add (pow (var x) 2) (add (mul (num 2) (var x)) (num 1)))
+end
+
+== 精度：超出 double 的整数应被拒绝 ==
+拒绝: 整数 1e+17 超出 double 精确范围，证书无法如实表示
+== 精度：非证书白名单函数应被拒绝（abs 不在证书支持的 12 个函数里）==
+拒绝: 函数 abs 不在证书白名单内

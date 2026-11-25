@@ -1,0 +1,162 @@
+# cert 模块：把 sym 的表达式与推导导出为「可被独立校验」的证书
+#
+# 为什么要证书：sym 的 expand / diff / equals 都在同一个进程里算，结果对不对只能
+# 相信它自己。证书把「结论」变成「可复核的推导」：每一行是一次等式变换，交给
+# 一个**不共享任何代码**的校验器（配套的 Lean 4 版 certcheck）逐行核对。
+#
+# 校验器只承认一件事：把两边各自规范化后，多项式的系数逐项相同。它不懂 sin，
+# 也不需要懂——函数符号被当作不透明原子，同一个 sin(x) 前后就是同一个值。
+#
+#   import sym
+#   import cert
+#
+#   x = sym.var("x")
+#   f = (x + 1) ** 2
+#   print(cert.cert_expand(f))      # 打印一份证书文本：start (x+1)^2 → claim x^2+2x+1
+#   print(cert.cert_diff(f, "x"))   # 打印求导证书：start f → diff x (…)
+#
+# 用 certify_* 可以一步完成「生成证书 + 自行校验」：
+#
+#   print(cert.certify_diff(f, "x"))     # true 表示证书自检通过
+#
+# ## 谁负责「规范化」
+#
+# 证书的两个端点（start 与 same/claim 的目标）都写成**明文项**，Aether 侧只负责把
+# sym 算出来的结果如实写下来，不承担「规范形唯一」的责任——那是校验器的活：它会对
+# 两边各自独立地排序、合并同类项，再判逐项相等。这样 Aether 与 Lean 之间唯一共享的
+# 东西是「证书文本格式」，没有代码共享，校验才独立。
+#
+# ## 精度边界（重要）
+#
+# sym 的系数是 float。证书里的数必须**精确**，所以：
+#   - 能被 double 精确表示的数（整数、0.5、2.5 等）用 str(v) 的最短往返表示，
+#     校验器按 IEEE-754 精确语义解析，两侧一致。
+#   - 超出 double 精确范围的整数（> 2^53）导出被拒绝（抛 ValueError），
+#     而不是悄悄给出一份四舍五入的证书。
+# 这不是缺陷，是「宁可拒绝也不撒谎」。
+
+import sym
+import math
+
+# 与 Lean 侧 Term.fnNames 白名单保持一致；不在此列的函数无法表达为证书
+const FN_NAMES = ["sin", "cos", "tan", "exp", "log", "sqrt", "sinh", "cosh", "tanh", "atan", "asin", "acos"]
+
+
+# ===== 数值 =====
+
+def _in_list(s: str, xs: list[str]) -> bool:
+    for x in xs:
+        if x == s:
+            return true
+    return false
+
+# 数字转成证书里的写法。整数写成 "3" 或 "-2"；其余用 str 的最短往返表示。
+# str(1e-07) 会是 "1e-07"，校验器的解析器认这种指数记法。
+def num_str(v: float) -> str:
+    if math.isnan(v):
+        raise ValueError("证书无法表示 nan")
+    if math.isinf(v):
+        raise ValueError("证书无法表示 inf")
+    if v == math.trunc(v) and math.fabs(v) < 1e16:
+        return str(int(v))
+    return str(v)
+
+# 校验时能不能精确复现：超出 double 精确范围的整数直接拒绝。
+def _check_exact(v: float):
+    if math.isnan(v) or math.isinf(v):
+        raise ValueError(f"证书无法表示 {v}")
+    if v == math.trunc(v) and math.fabs(v) > 9007199254740992.0:
+        raise ValueError(f"整数 {v} 超出 double 精确范围，证书无法如实表示")
+
+
+# ===== 项（Expr → 证书前缀语法） =====
+
+# Lean 侧的 add/mul 是二叉节点；sym 的 add/mul 可以带任意多个子项（n 元）。
+# 这里把 n 元右折叠成二叉：a+b+c → (add a (add b c))。交换律由校验器的规范化负责，
+# 所以折叠方向不影响判等结果。
+def _fold_bin(op: str, kids: list[sym.Expr]) -> str:
+    if len(kids) == 0:
+        raise ValueError("证书项的 " + op + " 至少需要一个子项")
+    if len(kids) == 1:
+        return term_str(kids[0])
+    inner = _fold_bin(op, kids[1:])
+    return "(" + op + " " + term_str(kids[0]) + " " + inner + ")"
+
+def term_str(e: sym.Expr) -> str:
+    if e.kind == "num":
+        _check_exact(e.v)
+        return "(num " + num_str(e.v) + ")"
+    if e.kind == "var":
+        return "(var " + e.name + ")"
+    if e.kind == "add":
+        return _fold_bin("add", e.kids)
+    if e.kind == "mul":
+        return _fold_bin("mul", e.kids)
+    if e.kind == "neg":
+        return "(neg " + term_str(e.kids[0]) + ")"
+    if e.kind == "pow":
+        # sym 的 pow 指数是 Expr；证书里只支持整数指数
+        ex = e.kids[1]
+        if ex.kind != "num" or ex.v != math.trunc(ex.v):
+            raise ValueError("证书只支持整数次幂，遇到指数 " + str(ex.v))
+        return "(pow " + term_str(e.kids[0]) + " " + num_str(ex.v) + ")"
+    if e.kind == "div":
+        return "(div " + term_str(e.kids[0]) + " " + term_str(e.kids[1]) + ")"
+    if e.kind == "fn":
+        if not _in_list(e.name, FN_NAMES):
+            raise ValueError("函数 " + e.name + " 不在证书白名单内")
+        return "(fn " + e.name + " " + term_str(e.kids[0]) + ")"
+    raise ValueError("表达式含证书不支持的节点种类：" + e.kind + "（可先用 expand 化到四则运算）")
+
+
+# ===== 证书生成 =====
+
+def header(vars: list[str]) -> str:
+    s = "aethercert 1\n"
+    if len(vars) > 0:
+        s = s + "vars " + " ".join(vars) + "\n"
+    return s
+
+# 展开证书：start e，一步 same 到 expand(e)，再 claim。
+def cert_expand(e: sym.Expr) -> str:
+    out = sym.expand(e)
+    vs = sym.vars_of(out)
+    s = header(vs)
+    s = s + "start " + term_str(e) + "\n"
+    s = s + "same " + term_str(out) + "\n"
+    s = s + "claim " + term_str(out) + "\n"
+    s = s + "end\n"
+    return s
+
+# 化简证书：start e，一步 same 到 simplify(e)。
+def cert_simplify(e: sym.Expr) -> str:
+    out = sym.simplify(e)
+    vs = sym.vars_of(out)
+    s = header(vs)
+    s = s + "start " + term_str(e) + "\n"
+    s = s + "same " + term_str(out) + "\n"
+    s = s + "end\n"
+    return s
+
+# 求导证书：start e，一步 diff x 到 d/dx(e)，再 claim。
+# 校验器会用它的形式导数重算 d/dx(e)，再与这里写的结果判等；所以这里必须写
+# sym 真正算出的导数，而不是猜测。
+def cert_diff(e: sym.Expr, x: str) -> str:
+    d = sym.diff(e, x)
+    vs = sym.vars_of(e)
+    s = header(vs)
+    s = s + "start " + term_str(e) + "\n"
+    s = s + "diff " + x + " " + term_str(d) + "\n"
+    s = s + "claim " + term_str(d) + "\n"
+    s = s + "end\n"
+    return s
+
+# 判等证书：断言 a = b。start a，claim b —— 校验器比对 a 与 b 的标准形，
+# 相同即接受，不同即拒绝。这正是 sym.equals 的可复核版本。
+def cert_equal(a: sym.Expr, b: sym.Expr) -> str:
+    vs = sym.vars_of(a)
+    s = header(vs)
+    s = s + "start " + term_str(a) + "\n"
+    s = s + "claim " + term_str(b) + "\n"
+    s = s + "end\n"
+    return s

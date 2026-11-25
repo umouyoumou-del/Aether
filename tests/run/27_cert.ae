@@ -1,0 +1,30 @@
+# cert 模块：把 sym 的推导导出成「可被独立校验」证书
+# 配套 Lean 4 校验器在 lean/ 下（certcheck），本测试只验证证书文本生成正确。
+import sym
+import cert
+
+x = sym.var("x")
+
+print("== 展开证书 ==")
+print(cert.cert_expand((x + 1) ** 2))
+
+print("== 求导证书 ==")
+print(cert.cert_diff(x ** 3 + 2 * x, "x"))
+
+print("== 链式法则 ==")
+print(cert.cert_diff(sym.fn("sin", x ** 2), "x"))
+
+print("== 判等证书 ==")
+print(cert.cert_equal((x + 1) ** 2, x ** 2 + 2 * x + 1))
+
+print("== 精度：超出 double 的整数应被拒绝 ==")
+try:
+    print(cert.term_str(sym.num(1e17)))
+except ValueError as e:
+    print("拒绝:", e)
+
+print("== 精度：非证书白名单函数应被拒绝（abs 不在证书支持的 12 个函数里）==")
+try:
+    print(cert.term_str(sym.fn("abs", x)))
+except ValueError as e:
+    print("拒绝:", e)

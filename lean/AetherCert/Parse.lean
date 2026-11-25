@@ -87,7 +87,28 @@ def tenPow : Nat → Nat
   | 0 => 1
   | k + 1 => 10 * tenPow k
 
-/-- 把一个不带符号的串按整数、`分子 / 分母` 或 `整数 . 小数` 精确转成有理数。 -/
+/-- 指数记法 `d.ddd[eE][+-]k` → `(有效数字串, 指数)`。
+
+    例如 `1.5e-3` → `("15", -4)`（因为 `1.5e-3 = 15 × 10⁻⁴`）。
+    接收科学计数法是必要的：`str(1e-7)` 会输出 `1e-07`，若不认这种写法，
+    Aether 导出的证书会在解析阶段就失败。 -/
+def splitExp (s : String) : String × Int :=
+  let parts := s.splitOn "e"
+  let parts := match parts with
+    | [a] => a.splitOn "E"
+    | _ => parts
+  match parts with
+  | [mant, ex] =>
+      match ex.toInt? with
+      | some e => (mant, e)
+      | none => (s, 0)
+  | _ => (s, 0)
+
+/-- 把一个不带符号的串精确转成有理数。
+
+    支持：整数、`分子/分母`、`整数.小数`、以及带 `e/E` 指数的科学计数法。
+    全部走 `Int`/`Nat` 精确运算，不经过浮点，所以 `0.1` 严格等于 `1/10`
+    而不是二进制近似值 —— 这是「证书里的数必须精确」的底线。 -/
 def parseRatBody (s : String) : Option Rat :=
   match s.splitOn "/" with
   | [a, b] => do
@@ -95,16 +116,23 @@ def parseRatBody (s : String) : Option Rat :=
       let nb ← b.toInt?
       if nb = 0 then none else some (Rat.divInt na nb)
   | _ =>
-      match s.splitOn "." with
+      let (mant, ex) := splitExp s
+      let frac := mant.splitOn "."
+      match frac with
       | [a, b] => do
           let ip ← if a = "" then some (0 : Int) else a.toInt?
           let fp ← b.toNat?
           let d := tenPow b.length
-          let signedNum := if ip < 0 then ip * (d : Int) - (fp : Int) else ip * (d : Int) + (fp : Int)
-          some (Rat.divInt signedNum (d : Int))
+          let digits := (if ip < 0 then ip * (d : Int) - (fp : Int) else ip * (d : Int) + (fp : Int))
+          -- 值 = digits/d × 10^ex：正指数进分子，负指数进分母
+          let nn := if ex ≥ 0 then digits * (tenPow ex.toNat : Int) else digits
+          let dd := if ex ≥ 0 then d else d * tenPow (-ex).toNat
+          some (Rat.divInt nn (dd : Int))
       | _ => do
-          let n ← s.toInt?
-          some (Rat.divInt n 1)
+          let n ← mant.toInt?
+          let nn := if ex ≥ 0 then n * (tenPow ex.toNat : Int) else n
+          let dd := if ex ≥ 0 then 1 else tenPow (-ex).toNat
+          some (Rat.divInt nn (dd : Int))
 
 /-- 有理数字面量：可选负号，其余交给 `parseRatBody`。 -/
 def parseRatStr (s : String) : Option Rat :=

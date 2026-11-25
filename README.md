@@ -388,6 +388,11 @@ print(g([3.0]))                             # 16.0
 - **不定函数的符号微分**：`f(x)`、`g(x, y)`、`f'(x)`、`f^{(3)}(x)`、`f_{1,2}(x, y)` 都是不带定义的记号，
   求导按链式法则得到偏导记号（`d/dx f(g(x)) = f'(g(x))·g'(x)`，混合偏导 `g_{12} = g_{21}` 是同一个节点）；
   `subs_fn` 再把函数换成具体表达式，偏导记号自动换成相应的偏导。
+- **证书与独立校验**：`cert` 把 `sym` 的展开、求导、判等推导导出成纯文本「证书」（`.cert`），交给
+  `lean/` 下一个**独立的 Lean 4 校验器**（`certcheck`）核对。校验器不复用 Aether 的代码、也不相信证书里
+  写的结论——它只按证书声明的每一步自己重推一遍，因此推导被篡改时会精确报到出错的第几行、内核实算得什么。
+  信任边界只有一张 12 行的初等导数表；`same` 声明更是零假设（只有两侧独立规范化后完全一致才算通过）。
+  详见 [lean/README.md](lean/README.md) 与 [数学库第 15 节](docs/数学库.md)。
 
 ```python
 import latex
@@ -450,6 +455,7 @@ examples/minijev/   MiniJev 与 QwenJev：完整的训练与推理示例
 tests/run/          黄金测试（程序 + 期望输出）
 tests/errors/       编译错误测试
 docs/               语言参考、标准库、深度学习、实现原理
+lean/               独立的 Lean 4 证书校验器（certcheck），核对 cert 模块导出的 .cert
 editors/vscode/     VS Code 插件（语法高亮 + 语言服务器客户端）
 ```
 
@@ -472,7 +478,8 @@ cd compiler && go test .
 | [标准库](docs/标准库.md) | 内置函数与所有标准库模块的 API |
 | [深度学习](docs/深度学习.md) | 张量、自动求导、nn / optim、GPU 与性能 |
 | [实现原理](docs/实现原理.md) | 编译器管线、运行时与代码生成 |
-| [数学库](docs/数学库.md) | 符号表达式、化简展开、求导、e-graph 相等饱和、生成原生代码、LaTeX 读写 |
+| [数学库](docs/数学库.md) | 符号表达式、化简展开、求导、e-graph 相等饱和、生成原生代码、LaTeX 读写、证书导出与校验 |
+| [Lean 证书校验器](lean/README.md) | 独立校验 `cert` 导出的推导证书：用法、证书格式、信任边界 |
 | [MiniJev / QwenJev](examples/minijev/README.md) | 用 Aether 从零训练决策模型与微调 Qwen3 |
 
 ## 当前限制
