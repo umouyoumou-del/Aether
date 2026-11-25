@@ -392,6 +392,8 @@ print(g([3.0]))                             # 16.0
   `lean/` 下一个**独立的 Lean 4 校验器**（`certcheck`）核对。校验器不复用 Aether 的代码、也不相信证书里
   写的结论——它只按证书声明的每一步自己重推一遍，因此推导被篡改时会精确报到出错的第几行、内核实算得什么。
   信任边界只有一张 12 行的初等导数表；`same` 声明更是零假设（只有两侧独立规范化后完全一致才算通过）。
+  为避免「自己证自己」，`cert2lean` 还能把每一步翻成 **Mathlib** 命题（`ring` / `deriv`），
+  由完全无关的数学库做**第二见证人**——见 `lean-mathlib/`。
   详见 [lean/README.md](lean/README.md) 与 [数学库第 15 节](docs/数学库.md)。
 
 ```python
@@ -456,6 +458,7 @@ tests/run/          黄金测试（程序 + 期望输出）
 tests/errors/       编译错误测试
 docs/               语言参考、标准库、深度学习、实现原理
 lean/               独立的 Lean 4 证书校验器（certcheck），核对 cert 模块导出的 .cert
+lean-mathlib/       用 Mathlib 独立交叉验证证书的示例工程（可选，需拉 Mathlib）
 editors/vscode/     VS Code 插件（语法高亮 + 语言服务器客户端）
 ```
 

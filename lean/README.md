@@ -16,6 +16,27 @@
       certcheck -              # 从 stdin 读
       echo "0"                 # 退出码：0 通过 / 1 拒绝 / 2 用法或读取错误
 
+      cert2lean my.cert        # 把证书翻译成一份可由 Mathlib 独立核对的 .lean 源码
+      cert2lean - < my.cert    # 同样支持 stdin
+
+  ## 与 Mathlib 的交叉验证（第二见证人）
+
+  本包的 `certcheck` 是「自己证自己」——它和生成证书的代码出自同一批人，
+  万一某条引理写错，它会自洽地错。为补上这一点，`cert2lean` 把证书的每一步
+  翻译成一条 **Mathlib** 命题：
+
+      same 步  →  example (x : ℚ) : lhs = rhs := by ring
+      diff 步  →  example (x : ℝ) : deriv (fun t => lhs) x = rhs := by simp <;> ring
+
+  `ring` / `deriv` 来自 Mathlib，不认识本仓库的 `canonical`、手写引理或
+  `dtable`。把这些 example 编译通过，就等于「一个完全无关的实现也认为它们成立」。
+  现成的校验工程在 `../lean-mathlib/`（见其 `README.md`，一条 `lake exe cache get`
+  + `lake env lean Examples.lean` 即可）。
+
+  > 注意：`cert2lean` 本身**不依赖 Mathlib**（本包编译不需要它），只有它生成
+  > 的 `.lean` 文件才 `import Mathlib`。所以没装 Mathlib 也能在本机跑翻译、
+  > 检查生成的源码。
+
   ## 证书格式（前缀式，逐行）
 
       aethercert 1                      # 魔数 + 版本
@@ -59,7 +80,10 @@
       AetherCert/Parse.lean   证书文本解析（前缀语法）
       AetherCert/Deriv.lean   形式导数 + 12 行导数表 dtable
       AetherCert/Check.lean   逐步校验、runSteps、checkCert
+      AetherCert/ToMathlib.lean  项 → Lean/Mathlib 表达式文本（不依赖 Mathlib）
+      AetherCert/Gen.lean     证书 → Mathlib 证明源码
       Main.lean               certcheck 命令行入口
+      GenMainCert.lean        cert2lean 命令行入口
 
   ## 设计取舍（为什么这么小）
 

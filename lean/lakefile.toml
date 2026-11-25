@@ -7,3 +7,7 @@ name = "AetherCert"
 [[lean_exe]]
 name = "certcheck"
 root = "Main"
+
+[[lean_exe]]
+name = "cert2lean"
+root = "GenMainCert"
