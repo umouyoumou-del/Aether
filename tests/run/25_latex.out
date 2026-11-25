@@ -60,6 +60,39 @@ def f_dx(x: float) -> float:
 6x
 \cos\left(x\right)
 6x \, y^{2}
+== 不定函数 ==
+f(x) | g(x, y) + h(x) | phi(t)
+f_1(x) | f_1_1(x) | f_1_1_1(x) | f_1_1_1_1(x)
+f_1_1(x) | f_1_2(x, y) | f(x^2) | f(x)^2
+x*(x + 1) | f(x + 1)
+f'\left(x\right) \cdot \sin\left(x\right) + \cos\left(x\right) \cdot f\left(x\right)
+f'\left(g\left(x\right)\right) \cdot g'\left(x\right)
+2x \, f_{1}\left(x^{2}, y\right)
+f'\left(x\right)
+f''\left(x\right)
+f_{1,2}\left(x, y\right)
+2t \, f'\left(t^{2}\right)
+f''\left(x\right) + f^{(5)}\left(x\right) + f_{1,1,2}\left(x, y\right)
+f_2(x, y)*g(x)/g(x)^2
+\cos\left(x\right)
+2g'\left(x\right) \cdot g\left(x\right)
+f'\left(\sin\left(x\right)\right) \cdot \cos\left(x\right)
+# 由 Aether codegen 生成，请勿手工编辑。
+# 表达式：x*g(x, y) + g(x, y)^2
+import math
+
+def e(x: float, y: float) -> float:
+    _t0 = g(x, y)
+    return x * _t0 + _t0 * _t0
+
+def e_dx(x: float, y: float) -> float:
+    _t0 = g_d1(x, y)
+    _t1 = g(x, y)
+    return x * _t0 + 2.0 * _t0 * _t1 + _t1
+
+def e_dy(x: float, y: float) -> float:
+    _t0 = g_d2(x, y)
+    return x * _t0 + 2.0 * _t0 * g(x, y)
 == 泰勒展开 ==
 \frac{1}{24}x^{4} + \frac{1}{6}x^{3} + \frac{1}{2}x^{2} + x + 1
 x + \frac{1}{3}\left(x - 1\right)^{3} - \frac{1}{2}\left(x - 1\right)^{2} - 1

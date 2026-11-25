@@ -107,7 +107,19 @@ class Emitter:
             return self._pow(e, outer)
         if e.kind == "fn":
             return _math_call(e.name) + "(" + self.emit(e.kids[0], 0) + ")"
+        if e.kind == "ufunc" or e.kind == "df":
+            # 不定函数：生成对同名函数的调用；偏导 f_{1,2}(x, y) 调用 f_d1_d2(x, y)，由用户提供定义
+            if e.kind == "df":
+                return _df_name(e.name, _df_indices(e)) + "(" + self._args(e, _df_nargs(e)) + ")"
+            return _ufunc_call(e.name) + "(" + self._args(e, _df_nargs(e)) + ")"
         raise ValueError("无法生成代码的节点：" + e.kind + "（求和/积分/极限/矩阵/分段请先用 calc 求值或展开）")
+
+    # 第 start 个起的自变量列表
+    def _args(self, e: sym.Expr, nargs: int) -> str:
+        parts: list[str] = []
+        for i in range(nargs):
+            parts.append(self.emit(e.kids[i], 0))
+        return ", ".join(parts)
 
     # 和：把负项写成减法，读起来与教科书一致
     def _sum(self, e: sym.Expr) -> str:
@@ -177,6 +189,29 @@ def _paren(s: str, outer: int, prec: int) -> str:
         return "(" + s + ")"
     return s
 
+# 不定函数调用在生成代码里的名字：f(x, y) → f，f_{1,2}(x, y) → f_d1_d2
+def _ufunc_call(name: str) -> str:
+    return _ident(name)
+
+def _df_name(name: str, idx: list[float]) -> str:
+    out = _ident(name)
+    for i in idx:
+        out += "_d" + str(math.trunc(i) + 1)
+    return out
+
+# 偏导节点的自变量个数（其余子节点是指标）
+def _df_nargs(e: sym.Expr) -> int:
+    if e.kind == "ufunc":
+        return len(e.kids)
+    return len(e.kids) - math.trunc(e.v)
+
+def _df_indices(e: sym.Expr) -> list[float]:
+    out: list[float] = []
+    n = math.trunc(e.v)
+    for i in range(len(e.kids) - n, len(e.kids)):
+        out.append(e.kids[i].v)
+    return out
+
 def _math_call(name: str) -> str:
     if name == "abs":
         return "math.fabs"
@@ -191,6 +226,11 @@ def _sig(e: sym.Expr) -> str:
         return "v:" + e.name
     if e.kind == "fn":
         return "f:" + e.name + "(" + _sig(e.kids[0]) + ")"
+    if e.kind == "ufunc" or e.kind == "df":
+        parts0: list[str] = []
+        for k in e.kids:
+            parts0.append(_sig(k))
+        return e.kind + ":" + e.name + "(" + ",".join(parts0) + ")"
     parts: list[str] = []
     for k in e.kids:
         parts.append(_sig(k))
@@ -198,7 +238,7 @@ def _sig(e: sym.Expr) -> str:
 
 # 子树里是否含有函数调用或除法：这类节点重复展开会让代码与耗时同时膨胀
 def _has_call(e: sym.Expr) -> bool:
-    if e.kind == "fn" or e.kind == "div":
+    if e.kind == "fn" or e.kind == "div" or e.kind == "ufunc" or e.kind == "df":
         return true
     for k in e.kids:
         if _has_call(k):
@@ -216,7 +256,7 @@ def _cost(e: sym.Expr) -> int:
 
 # 只有「省下来的计算量大于一次赋值」时才提变量，避免生成一堆 x*x 的临时变量
 def _worth_hoisting(e: sym.Expr) -> bool:
-    if e.kind == "fn" or e.kind == "div":
+    if e.kind == "fn" or e.kind == "div" or e.kind == "ufunc" or e.kind == "df":
         return true
     return _cost(e) >= 3
 

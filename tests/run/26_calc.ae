@@ -134,3 +134,22 @@ big = sym.matrix([[sym.num(2.0), sym.num(0.0), sym.num(0.0), sym.num(0.0), sym.n
                   [sym.num(0.0), sym.num(0.0), sym.num(0.0), sym.num(0.0), sym.num(6.0), sym.num(5.0)],
                   [sym.num(1.0), sym.num(1.0), sym.num(1.0), sym.num(1.0), sym.num(1.0), sym.num(1.0)]])
 print(calc.determinant(big))
+
+print("== 不定函数：链式法则与数值核对 ==")
+# 把 f 换成具体函数后，符号导数与数值导数一致（f(e^x) 对 x 求导）
+fe = latex.parse(r"f'(e^x) e^x")
+concrete = sym.subs_fn(fe, "f", sym.fn("sin", sym.var("u")), ["u"])
+hh = 1e-6
+num = (math.sin(math.exp(0.7 + hh)) - math.sin(math.exp(0.7 - hh))) / (2.0 * hh)
+print(latex.to_latex(concrete), "|", sym.evaluate(concrete, {"x": 0.7}), "|", num)
+# 多元链式法则：d/dt f(x(t), y(t)) = f_1 x'(t) + f_2 y'(t)，x = t^2、y = sin t，f = u v
+chain = latex.parse(r"\frac{d}{dt} f(t^2, \sin t)")
+chain = sym.subs_fn(chain, "f", sym.var("u") * sym.var("v"), ["u", "v"])
+num2 = ((0.7 + hh) ** 2 * math.sin(0.7 + hh) - (0.7 - hh) ** 2 * math.sin(0.7 - hh)) / (2.0 * hh)
+print(latex.to_latex(chain), "|", sym.evaluate(chain, {"t": 0.7}), "|", num2)
+# 二元：f(x y) 对 x 的偏导 = f_1(x y)·y，换成 f = u^2 得 2 x y^2
+fe2 = latex.parse(r"\frac{\partial f(x y)}{\partial x}")
+print(latex.to_latex(sym.subs_fn(fe2, "f", sym.var("u") ** 2, ["u"])))
+# 不定函数的极限：f(x)/x 在 x -> 0 处由 f'(0) 决定；换成 f = sin u 后是 cos(0) = 1
+quo = latex.parse(r"\frac{f(x)}{x}")
+print(calc.limit_at(sym.subs_fn(quo, "f", sym.fn("sin", sym.var("u")), ["u"]), "x", sym.num(0.0)))

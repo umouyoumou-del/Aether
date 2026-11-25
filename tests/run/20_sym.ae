@@ -43,7 +43,64 @@ try:
 except TypeError as e:
     print("拒绝求导：", e)
 
+# ===== 不定函数的符号微分 =====
+uf = sym.ufunc("f", [x])
+ug = sym.ufunc("g", [x, y])
+print("== 不定函数 ==")
+print(sym.diff(uf, "x"), "|", sym.diff(uf, "y"))
+print(sym.diff(ug, "x"), "|", sym.diff(ug, "y"))
+# 混合偏导与求导顺序无关：指标按升序存放，所以两者是同一个节点
+print(sym.diff(sym.diff(ug, "x"), "y"), "|", sym.diff(sym.diff(ug, "y"), "x"))
+print(sym.equals(sym.diff(sym.diff(ug, "x"), "y"), sym.diff(sym.diff(ug, "y"), "x")))
+# 链式法则、乘积法则、商法则
+print(sym.diff(uf * uf, "x"))
+print(sym.diff(uf / ug, "x"))
+print(sym.diff(sym.ufunc("f", [x ** 2 + y]), "x"))
+print(sym.diff(sym.ufunc("h", [x, y, a]), "y"))
+print(sym.diff(x * ug + uf, "x"))
+print(sym.expand(sym.diff((uf + ug) ** 2, "x")))
+# 高阶
+print(sym.diff(sym.diff(uf, "x"), "x"))
+print(sym.diff(sym.diff(sym.diff(uf, "x"), "x"), "x"))
+# 偏导记号再对自变量求导
+print(sym.diff(sym.df_expr("g", [x, y], [0.0]), "x"))
+# 代入：自变量换掉、指标不动
+print(sym.subs(sym.diff(ug, "x"), {"x": sym.num(3.0)}))
+print(sym.subs(sym.diff(ug, "x"), {"x": y, "y": x}))
+print(sym.vars_of(sym.diff(ug, "x") + uf))
+# 把函数换成具体表达式：偏导记号自动换成相应偏导
+print(sym.subs_fn(uf * uf + sym.diff(uf, "x"), "f", x ** 3, ["x"]))
+print(sym.subs_fn(sym.diff(ug, "x") + sym.diff(ug, "y"), "g", x * sym.fn("sin", y), ["x", "y"]))
+print(sym.subs_fn(sym.diff(uf, "x"), "f", sym.fn("exp", x), ["x"]))
+# 哑变量捕获避免：函数式里的 t 与外面求和的 t 同名时，求和变量换名
+kk = sym.var("k")
+s2 = sym.sum_expr("t", sym.num(1.0), sym.num(3.0), sym.ufunc("h", [kk]) * sym.var("t"))
+print(sym.subs_fn(s2, "h", sym.var("t") + x, ["t"]))
+# 不定函数没有定义，不能数值求值或编译
+try:
+    sym.evaluate(uf, {"x": 1.0})
+except ValueError as e:
+    print(e.message)
+try:
+    sym.compile_expr(uf, ["x"])
+except ValueError as e:
+    print(e.message)
+# 构造时的检查
+try:
+    sym.ufunc("sin", [x, y])
+except ValueError as e:
+    print(e.message)
+try:
+    sym.ufunc("f(x)", [x])
+except ValueError as e:
+    print(e.message)
+try:
+    sym.df_expr("f", [x], [1.0])
+except ValueError as e:
+    print(e.message)
+
 # ===== 恒等检查 =====
+
 print(sym.equals((a + b) ** 2, a ** 2 + 2 * a * b + b ** 2))
 print(sym.equals((a + b) * (a - b), a ** 2 - b ** 2))
 print(sym.equals(sym.fn("sin", x) ** 2 + sym.fn("cos", x) ** 2, sym.num(1.0)))

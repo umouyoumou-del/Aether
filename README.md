@@ -385,6 +385,9 @@ print(g([3.0]))                             # 16.0
   更高次数值求根）、**线性方程组**、**矩阵**（行列式、逆、乘、转置、迹，数值行列式不限阶）。
   `\sum \prod \lim \int`、`\frac{\partial}{\partial x}`、`\begin{pmatrix}…\end{pmatrix}`、
   `\begin{cases}…\end{cases}` 这些 LaTeX 记号都能直接读进来算。
+- **不定函数的符号微分**：`f(x)`、`g(x, y)`、`f'(x)`、`f^{(3)}(x)`、`f_{1,2}(x, y)` 都是不带定义的记号，
+  求导按链式法则得到偏导记号（`d/dx f(g(x)) = f'(g(x))·g'(x)`，混合偏导 `g_{12} = g_{21}` 是同一个节点）；
+  `subs_fn` 再把函数换成具体表达式，偏导记号自动换成相应的偏导。
 
 ```python
 import latex
@@ -398,6 +401,8 @@ latex.sum_latex(r"\sum_{k=0}^{\infty} k \left(\frac{1}{2}\right)^k")   # 2
 latex.limit_latex(r"\lim_{x\to 0} \frac{e^x - 1 - x}{x^2}")   # 0.5（洛必达）
 latex.limit_latex(r"\lim_{x\to 0} \sin\left(\frac{1}{x}\right)")  # 抛错：振荡，极限不存在
 latex.integrate_latex(r"\int x e^x \, dx")            # x \, \exp\left(x\right) - \exp\left(x\right)
+latex.diff_latex(r"f(g(x))", "x")                     # f'\left(g\left(x\right)\right) \cdot g'\left(x\right)
+latex.subs_fn_latex(r"f'(x) + f(x)", "f", r"\sin u", ["u"])   # \cos\left(x\right) + \sin\left(x\right)
 latex.integrate_latex(r"\int x e^{x^2} \, dx")        # \frac{1}{2}\exp\left(x^{2}\right)（换元）
 latex.integrate_latex(r"\int \sin^2 x \cos^3 x \, dx")  # \frac{1}{5}\sin\left(x\right)^{5} + \frac{1}{3}\sin\left(x\right)^{3}
 latex.definite_latex(r"\int_0^{\pi} \sin x \, dx")    # 2.0

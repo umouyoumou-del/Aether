@@ -95,7 +95,7 @@ FUNCS: dict[str, str] = {
 # 明确不支持、但很常见的命令：给出针对性的提示，而不是笼统的「未知命令」
 def _unsupported_hint(name: str) -> str?:
     if name == "partial":
-        return "暂不支持偏导记号；用 latex.diff_latex(公式, 变量) 求偏导"
+        return "\\partial 只能写在 \\frac{\\partial f}{\\partial x} 这种微分算子里；单独的 \\partial f 没有含义"
     if name == "cdot" or name == "times" or name == "div" or name == "ast":
         return "乘除运算符的位置不对（前面缺少运算对象）"
     if name == "quad" or name == "qquad":
@@ -142,6 +142,9 @@ UNICODE: dict[str, str] = {
     "Ψ": "\\Psi ",
     "Ω": "\\Omega ",
     "∞": "\\infty ",
+    "′": "'",
+    "″": "''",
+    "‴": "'''",
 }
 
 SUP: dict[str, str] = {
@@ -461,11 +464,34 @@ class _Parser:
     # 幂与下标：右结合，x^2^3 是 x^(2^3)
     def parse_power(self) -> sym.Expr:
         base = self.parse_atom()
+        # 导数记号先记下来（f'、f^{(3)}、f_{1,2}），等读到自变量括号再一起构成偏导节点
+        pending: list[float] = []
+        has_pending = false
         while true:
             self.skip_ws()
             c = self.peek()
+            if c == '\'':
+                # 导数记号：f'(x)、f''(x)。只对一元函数有意义，指标都落在第 1 个自变量上
+                primes = 0
+                while self.peek() == '\'':
+                    primes += 1
+                    self.i += 1
+                base = self._mark_fn(base)
+                k = 0
+                while k < primes:
+                    pending.append(0.0)
+                    k += 1
+                has_pending = true
+                continue
             if c == '^':
                 self.i += 1
+                # f^{(3)}(x)、f^{\prime\prime}(x) 是导数阶数，不是幂：先把花括号组里的原文取出来判断
+                dv = self._sup_deriv_ahead(base)
+                if dv != null:
+                    for q in dv:
+                        pending.append(q)
+                    has_pending = true
+                    continue
                 e = self.parse_unary()
                 # e^x 按自然指数理解（数学写法里 e 不是普通变量）
                 if base.kind == "var" and base.name == "e":
@@ -476,11 +502,55 @@ class _Parser:
             if c == '_':
                 self.i += 1
                 sub = self.read_subscript()
+                idx2 = _sub_indices(sub)
+                if idx2 != null and base.kind == "var" and _is_fn_letter(base.name):
+                    for q in idx2:
+                        pending.append(q)
+                    has_pending = true
+                    continue
                 if base.kind != "var":
                     self.fail("下标只能跟变量名连用（例如 x_1）")
                 base = sym.var(base.name + "_" + sub)
                 continue
+            # f(x, y)：约定用作函数名的字母紧跟括号，是函数调用而不是 f*(x, y)。
+            # f^2(x) 是 [f(x)]^2（与 \sin^2 x 同一个惯例）；读完括号后继续看后面还有没有 ^、'
+            name = _fn_name_of(base)
+            if name != "" and self.call_ahead():
+                exp_back: sym.Expr? = null
+                if base.kind == "pow":
+                    exp_back = base.kids[1]
+                base = self.parse_call(name, pending)
+                pending = []
+                has_pending = false
+                if exp_back != null:
+                    base = sym.power(base, exp_back)
+                continue
+            if has_pending:
+                self.fail(f"{name} 的导数记号后面要紧跟自变量，例如 {name}'(x)")
             break
+        return base
+
+    # 刚吃过 ^，看上标是不是导数阶数：{(3)}、{\prime\prime}、{\prime 2}。是就消费掉并返回指标，否则不动。
+    def _sup_deriv_ahead(self, base: sym.Expr) -> list[float]?:
+        if _fn_name_of(base) == "":
+            return null
+        self.skip_ws()
+        if self.peek() != '{':
+            return null
+        ntxt, end = self.peek_group(self.i)
+        dv = _sup_deriv_text(ntxt.strip())
+        if dv == null:
+            return null
+        self.i = end
+        return dv
+
+    # 读到导数记号时确认它确实写在一个函数名上；不是就报错
+    def _mark_fn(self, base: sym.Expr) -> sym.Expr:
+        if base.kind == "pow" and _fn_name_of(base.kids[0]) != "":
+            # f^2'(x) 这种写法含糊，不猜
+            self.fail("导数记号与幂写在一起含糊；请写成 f''(x) 或 (f(x))^2")
+        if base.kind != "var" or _fn_name_of(base) == "":
+            self.fail("导数记号只能写在函数名上，例如 f'(x)")
         return base
 
     # 读下标：x_1 得到 "1"，x_{i+1} 得到 "{i+1}"（后者作为整体变量名的后缀保留）
@@ -574,8 +644,58 @@ class _Parser:
             return sym.var(word)
         # LaTeX 里一个字母就是一个变量：ab 是 a*b。这里只吃第一个字母，
         # 剩下的交给外面的乘法循环，这样 ab^2 是 a*b^2（幂只作用于 b）。
+        # 函数调用 f(x, y) 由 parse_power 统一识别（它还要处理 f'、f_{1,2} 这些记号）。
         self.i = start + 1
         return sym.var(str(word[0]))
+
+    # 这个位置起是不是函数调用的括号：f(…) 或 f\left(…)（不消费字符）
+    def call_ahead(self) -> bool:
+        j = self.i
+        while j < self.n and (self.src[j] == ' ' or self.src[j] == '\t'):
+            j += 1
+        if j >= self.n:
+            return false
+        if self.src[j] == '(':
+            return true
+        return self.src[j:j + 5] == "\\left"
+
+    # 前面已经取到函数名 fname，这里读 (参数, 参数, …)。idx 是偏导指标（f' 是 [0]，f_{1,2} 是 [0, 1]）。
+    def parse_call(self, fname: str, idx: list[float]) -> sym.Expr:
+        self.skip_ws()
+        open_delim = "("
+        if self.slice(5) == "\\left":
+            self.i += 5
+            open_delim = self.read_delim()
+            if open_delim != "(" and open_delim != "[":
+                self.fail("函数的自变量要用圆括号（或方括号）")
+        else:
+            self.i += 1
+        close_delim = ")" if open_delim == "(" else "]"
+        args: list[sym.Expr] = []
+        while true:
+            args.append(self.parse_expr())
+            self.skip_ws()
+            if self.eat(","):
+                self.skip_ws()
+                continue
+            break
+        if open_delim == "(":
+            if self.slice(6) == "\\right":
+                self.i += 6
+                got = self.read_delim()
+                if got != close_delim:
+                    self.fail(f"括号不配对：左边是 {open_delim}，右边是 {got}")
+            else:
+                self.expect(")", "函数的括号没有闭合")
+        else:
+            if self.slice(6) == "\\right":
+                self.i += 6
+                got2 = self.read_delim()
+                if got2 != "]":
+                    self.fail(f"括号不配对：左边是 [，右边是 {got2}")
+            else:
+                self.expect("]", "方括号没有闭合")
+        return sym.df_expr(fname, args, idx)
 
     # ---- 大运算符、积分、极限、环境 ----
 
@@ -937,6 +1057,18 @@ class _Parser:
         if len(vs) == 0:
             self.fail("微分算子的分母里没有变量")
         out = body
+        # \frac{\partial f}{\partial x}：f 是没有定义的函数名时，把它读成以微分变量为自变量的函数 f(x)，
+        # 这样求导得到偏导记号 f_1(x)，而不是把 f 当普通变量得到 0
+        if body.kind == "var" and _is_fn_name(body.name) and rest != "" and self.call_ahead() == false:
+            fargs: list[sym.Expr] = []
+            for v in vs:
+                dup = false
+                for q in fargs:
+                    if q.kind == "var" and q.name == v:
+                        dup = true
+                if dup == false:
+                    fargs.append(sym.var(v))
+            out = sym.ufunc(body.name, fargs)
         idx = 0
         while idx < len(vs):
             out = sym.diff(out, vs[idx])
@@ -1009,6 +1141,9 @@ class _Parser:
         greek = GREEK.get(name)
         if greek != null:
             return sym.var(name)
+        if name == "prime":
+            # 导数记号 \prime，只在函数名的上标里有意义（由 parse_power 识别）
+            return sym.var("prime")
         fname = FUNCS.get(name)
         if fname != null:
             return self.parse_fn_body(fname)
@@ -1163,6 +1298,108 @@ def _matching_delim(open_delim: str) -> str:
     if open_delim == "L":
         return "R"
     return open_delim   # | 与不可见括号 .
+
+# ===== 不定函数 =====
+
+# 约定用作函数名的字母。只有这些字母（以及希腊字母）后面紧跟括号时才读成函数调用，
+# x(x+1) 仍然是乘法 x*(x+1)。要表示别的函数，用 \phi(t) 这样的希腊字母或 sym.ufunc。
+FN_LETTERS = "fghuvwFGHUVW"
+
+def _is_fn_letter(name: str) -> bool:
+    if len(name) != 1:
+        return false
+    return FN_LETTERS.find(name) >= 0
+
+# 希腊字母也常当函数用：\phi(t)、\theta(t)。pi 是常量，e 是自然对数的底，都不算。
+def _is_fn_name(name: str) -> bool:
+    if name == "pi" or name == "e":
+        return false
+    return _is_fn_letter(name) or GREEK.get(name) != null
+
+# base 是不是「函数名 + 可选的幂」：是就返回函数名，否则返回空串
+def _fn_name_of(base: sym.Expr) -> str:
+    if base.kind == "var" and _is_fn_name(base.name):
+        return base.name
+    if base.kind == "pow" and base.kids[0].kind == "var" and _is_fn_name(base.kids[0].name):
+        return base.kids[0].name
+    return ""
+
+# 上标原文是不是导数阶数：(3)、\prime\prime、\prime 2、连续的撇号都算；
+# 不是（例如 x^2 的 2）就返回 null。
+def _sup_deriv_text(txt: str) -> list[float]?:
+    t = txt.strip()
+    # (3)：括号里是一个正整数
+    if len(t) >= 3 and t.startswith("(") and t.endswith(")"):
+        inner = t[1:len(t) - 1].strip()
+        if _is_digits(inner):
+            return _rep_deriv(int(inner))
+        return null
+    # 撇号：连续的 ' 或 \prime，后面可以跟一个数字表示重复次数
+    n = 0
+    i = 0
+    while i < len(t):
+        if _at(t, i, "'"):
+            n += 1
+            i += 1
+            continue
+        if _at(t, i, "\\prime"):
+            n += 1
+            i += 6
+            continue
+        if t[i] == ' ' or _at(t, i, "\\ ") or _at(t, i, "\\,"):
+            i += 1 if t[i] == ' ' else 2
+            continue
+        break
+    if n == 0:
+        return null
+    rest = t[i:].strip()
+    if rest.startswith("^"):
+        rest = rest[1:].strip()
+        if len(rest) >= 2 and rest.startswith("{") and rest.endswith("}"):
+            rest = rest[1:len(rest) - 1].strip()
+    if rest == "":
+        return _rep_deriv(n)
+    if _is_digits(rest):
+        return _rep_deriv(n * int(rest))
+    return null
+
+def _is_digits(t: str) -> bool:
+    if t == "":
+        return false
+    for c in t:
+        if c.isdigit() == false:
+            return false
+    return true
+
+# n 阶导数的指标：一元函数的指标全是 0（第 1 个自变量）
+def _rep_deriv(n: int) -> list[float]:
+    out: list[float] = []
+    k = 0
+    while k < n:
+        out.append(0.0)
+        k += 1
+    return out
+
+# 下标是不是偏导指标：{1,2}、{12} 都读成「对第 1、2 个自变量求导」；不是就返回 null
+def _sub_indices(sub: str) -> list[float]?:
+    t = sub
+    while len(t) >= 2 and t.startswith("{") and t.endswith("}"):
+        t = t[1:len(t) - 1]
+    if t == "":
+        return null
+    out: list[float] = []
+    for part in t.split(","):
+        p = part.strip()
+        if p == "":
+            return null
+        for c in p:
+            if c.isdigit() == false:
+                return null
+        n = int(p)
+        if n < 1:
+            return null
+        out.append(float(n - 1))
+    return out
 
 # 下标或 \mathrm 里的名字是否只由字母数字组成
 def _is_plain_name(text: str) -> bool:
@@ -1557,6 +1794,10 @@ def to_latex(e: sym.Expr, outer: int = 0) -> str:
         return base + "^{" + to_latex(e.kids[1], 0) + "}"
     if e.kind == "fn":
         return _latex_fn(e)
+    if e.kind == "ufunc":
+        return _latex_ufunc(e)
+    if e.kind == "df":
+        return _latex_df(e)
     if e.kind == "sum" or e.kind == "prod":
         return _latex_bigop(e, outer)
     if e.kind == "lim":
@@ -1728,6 +1969,45 @@ def _latex_fn(e: sym.Expr) -> str:
         return "\\left|" + to_latex(e.kids[0], 0) + "\\right|"
     return _func_cmd(e.name) + "\\left(" + to_latex(e.kids[0], 0) + "\\right)"
 
+# 不定函数：f\left(x, y\right)
+def _latex_ufunc(e: sym.Expr) -> str:
+    return _var_latex(e.name) + _latex_args(e, len(e.kids))
+
+# 自变量列表：\left(a, b\right)
+def _latex_args(e: sym.Expr, nargs: int) -> str:
+    parts: list[str] = []
+    for i in range(nargs):
+        parts.append(to_latex(e.kids[i], 0))
+    return "\\left(" + ", ".join(parts) + "\\right)"
+
+# 不定函数的偏导。一元函数用撇号（f'(x)、f''(x)，四阶以上写成 f^{(4)}(x)），
+# 多元函数用下标记号 f_{1,2}(x, y)，下标是从 1 起的自变量序号。两种写法都能再解析回来。
+def _latex_df(e: sym.Expr) -> str:
+    nargs, idx = _df_index_list(e)
+    head = _var_latex(e.name)
+    if nargs == 1:
+        n = len(idx)
+        if n <= 3:
+            primes = ""
+            k = 0
+            while k < n:
+                primes += "'"
+                k += 1
+            return head + primes + _latex_args(e, 1)
+        return head + "^{(" + str(n) + ")}" + _latex_args(e, 1)
+    marks: list[str] = []
+    for i in idx:
+        marks.append(str(math.trunc(i) + 1))
+    return head + "_{" + ",".join(marks) + "}" + _latex_args(e, nargs)
+
+# 从偏导节点取出 (自变量个数, 升序的指标列表)
+def _df_index_list(e: sym.Expr) -> (int, list[float]):
+    n = math.trunc(e.v)
+    idx: list[float] = []
+    for i in range(len(e.kids) - n, len(e.kids)):
+        idx.append(e.kids[i].v)
+    return (len(e.kids) - n, idx)
+
 def _latex_sum(e: sym.Expr, outer: int) -> str:
     terms: list[sym.Expr] = []
     for k in e.kids:
@@ -1866,6 +2146,12 @@ def expand_latex(text: str) -> str:
 # 求导，返回 LaTeX
 def diff_latex(text: str, x: str) -> str:
     return to_latex(sym.diff(parse(text), x))
+
+# 把公式里的不定函数换成具体表达式。argnames 是 f 的自变量名，按顺序对应：
+# subs_fn_latex(r"f'(x) + f(x)", "f", r"\sin u", ["u"]) 得到 cos(x) + sin(x)。
+# 偏导记号会一起换掉：f' 换成函数式对第一个自变量的导数，再代入自变量。
+def subs_fn_latex(text: str, fname: str, body: str, argnames: list[str]) -> str:
+    return to_latex(sym.subs_fn(parse(text), fname, parse(body), argnames))
 
 # 代入（值也是 LaTeX），返回 LaTeX
 def subs_latex(text: str, values: dict[str, str]) -> str:

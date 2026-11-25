@@ -37,6 +37,11 @@ const MAX_EXPAND_EXPONENT = 64
 #   "pow"  幂（kids[0] 是底，kids[1] 是指数）
 #   "div"  商（kids[0] 是分子，kids[1] 是分母）
 #   "fn"   函数调用（name 是函数名，kids[0] 是自变量）
+#   "ufunc" 不定函数（任意元）：name 是函数名，kids 是各个自变量，v 是自变量个数
+#   "df"   不定函数的偏导 ∂^n f/∂…：name 是函数名，v 是指标个数，
+#          kids = [自变量…, 指标…]（每个指标是 num，指明对第几个自变量求导，从 0 起）。
+#          例如 f_1(x, y) 的 kids = [x, y, num(0)]；f_12 的 kids = [x, y, num(0), num(1)]。
+#          指标按升序存放，所以 f_12 与 f_21 是同一个节点。
 #
 #   —— 下面几种节点带「绑定变量」，即某个名字在子树里被吃掉了 ——
 #   "sum"  求和（name 是哑变量，kids = [下界, 上界, 通项]）
@@ -181,6 +186,39 @@ def fn(name: str, a: Expr) -> Expr:
     smooth = a.smooth and name != "abs"
     return Expr("fn", name, 0.0, [a], REAL, smooth)
 
+# 不定函数调用 f(x, y, …)：函数本身没有定义，只当作一个处处光滑的记号。
+# 对它求导会得到偏导记号 df（∂f/∂x），而不是报错或得到 0。
+def ufunc(name: str, args: list[Expr]) -> Expr:
+    if _is_known_fn(name):
+        if len(args) == 1:
+            return fn(name, args[0])
+        raise ValueError(f"{name} 是一元函数，却给了 {len(args)} 个自变量")
+    if _is_valid_name(name) == false:
+        raise ValueError(f"函数名「{name}」不合法：只能由字母、数字、下划线组成，且不能以数字开头")
+    if name == "e" or name == "pi":
+        raise ValueError(f"{name} 是常量名，不能当函数名")
+    if len(args) == 0:
+        raise ValueError(f"函数 {name} 至少要有一个自变量")
+    for a in args:
+        if a.smooth == false:
+            raise TypeError("不定函数的自变量必须是处处可微的（含有 abs 等运算）")
+    return Expr("ufunc", name, float(len(args)), args, REAL, true)
+
+# 不定函数的偏导记号 f_{i j …}(args)：idx 是各自变量的序号（从 0 起，可重复，重复即高阶）。
+# 例如 df_expr("f", [x, y], [0]) 是 ∂f/∂x，df_expr("f", [x], [0, 0]) 是 f''(x)。
+def df_expr(name: str, args: list[Expr], idx: list[float]) -> Expr:
+    return _mk_df(name, args, idx)
+
+def _is_valid_name(name: str) -> bool:
+    if name == "":
+        return false
+    for i in range(len(name)):
+        c = name[i]
+        if c.isalpha() or c == '_' or (i > 0 and c.isdigit()):
+            continue
+        return false
+    return true
+
 # ===== 绑定变量节点的构造 =====
 
 # 求和 sum_{k=lo}^{hi} body
@@ -291,6 +329,10 @@ def _key(e: Expr) -> str:
         return "v:" + e.name
     if e.kind == "fn":
         return "f:" + e.name + "(" + _key(e.kids[0]) + ")"
+    if e.kind == "ufunc":
+        return "u:" + e.name + "(" + _key_tail(e, 0) + ")"
+    if e.kind == "df":
+        return "d:" + e.name + "(" + _key_tail(e, 0) + ")"
     # 带绑定变量的节点必须把绑定的名字也放进键里，否则 sum(k,…) 与 sum(j,…) 会撞车
     if e.kind == "sum" or e.kind == "prod":
         return e.kind + ":" + e.name + "(" + _key(e.kids[0]) + "," + _key(e.kids[1]) + "," + _key(e.kids[2]) + ")"
@@ -381,6 +423,11 @@ def render(e: Expr, outer: int) -> str:
         return "(" + s + ")" if outer > 2 else s
     if e.kind == "fn":
         return e.name + "(" + render(e.kids[0], 0) + ")"
+    if e.kind == "ufunc":
+        return _render_call(e.name, e, 0, math.trunc(e.v))
+    if e.kind == "df":
+        nd = math.trunc(e.v)
+        return _render_call(_df_name(e.name, e), e, 0, len(e.kids) - nd)
     if e.kind == "sum" or e.kind == "prod":
         lo = render(e.kids[0], 0)
         hi = render(e.kids[1], 0)
@@ -418,6 +465,24 @@ def render(e: Expr, outer: int) -> str:
     if e.kind == "rel":
         return render(e.kids[0], 0) + " " + e.name + " " + render(e.kids[1], 0)
     return "?"
+
+def _render_call(name: str, e: Expr, start: int, stop: int) -> str:
+    parts: list[str] = []
+    i = start
+    while i < stop:
+        parts.append(render(e.kids[i], 0))
+        i += 1
+    return name + "(" + ", ".join(parts) + ")"
+
+# 偏导记号的名字：f_1、f_12（下标是各自变量的序号，从 1 起，按升序）
+def _df_name(fname: str, e: Expr) -> str:
+    n = math.trunc(e.v)
+    out = fname
+    i = len(e.kids) - n
+    while i < len(e.kids):
+        out += "_" + fmt(e.kids[i].v + 1.0)
+        i += 1
+    return out
 
 def _render_sum(e: Expr, outer: int) -> str:
     terms: list[Expr] = []
@@ -638,7 +703,7 @@ def _mk_div(a: Expr, b: Expr) -> Expr:
 def _factor_order(k: str, base: Expr) -> str:
     if base.kind == "var":
         return "0" + k
-    if base.kind == "fn":
+    if base.kind == "fn" or base.kind == "ufunc" or base.kind == "df":
         return "1" + k
     return "2" + k
 
@@ -727,6 +792,11 @@ def simplify(e: Expr) -> Expr:
         return _mk_div(kids[0], kids[1])
     if e.kind == "fn":
         return _mk_fn(e.name, kids[0])
+    if e.kind == "ufunc":
+        return Expr("ufunc", e.name, e.v, kids, REAL, true)
+    if e.kind == "df":
+        da, di = _df_parts2(e, kids)
+        return _mk_df(e.name, da, di)
     if _is_binder(e.kind):
         return _with_kids(e, kids)
     return e
@@ -819,6 +889,17 @@ def expand(e: Expr) -> Expr:
         return _mk_div(expand(e.kids[0]), expand(e.kids[1]))
     if e.kind == "fn":
         return _mk_fn(e.name, expand(e.kids[0]))
+    if e.kind == "ufunc":
+        uk: list[Expr] = []
+        for k in e.kids:
+            uk.append(expand(k))
+        return Expr("ufunc", e.name, e.v, uk, REAL, true)
+    if e.kind == "df":
+        ek: list[Expr] = []
+        for k in e.kids:
+            ek.append(expand(k))
+        ea, ei = _df_parts2(e, ek)
+        return _mk_df(e.name, ea, ei)
     if _is_binder(e.kind):
         kids: list[Expr] = []
         for k in e.kids:
@@ -923,6 +1004,13 @@ def _diff(e: Expr, x: str) -> Expr:
         u = e.kids[0]
         du = _diff(u, x)
         return _mk_mul([_fn_derivative(e.name, u), du])
+    if e.kind == "ufunc":
+        # 链式法则：d f(u, v) = f_1(u, v) du + f_2(u, v) dv（du 为 0 的项省略）
+        return _diff_call(e.name, e.kids, x)
+    if e.kind == "df":
+        # 高阶：d f_i(u, v) = f_i1 du + f_i2 dv，指标并入后按升序存放，所以 f_12 与 f_21 是同一个节点
+        args, idx = _df_parts(e)
+        return _diff_call(e.name, args, x, idx)
     if e.kind == "sum":
         # 求和的导数 = 导数的求和（哑变量与 x 同名时整体与 x 无关）
         if e.name == x or has_var(e.kids[2], x) == false:
@@ -1009,10 +1097,55 @@ def _fn_derivative(name: str, u: Expr) -> Expr:
                            _mk_fn("sqrt", _mk_add([Expr("num", "", 1.0, [], INTEGER, true), neg(_mk_pow(u, num(2.0)))]))))
     raise TypeError(f"函数 {name} 没有导数规则")
 
-# ===== 代入与求值 =====
+# 不定函数对 x 求导：Σ_i ∂f/∂u_i · du_i/dx。extra 是已经求过的指标（求高阶导时用）。
+def _diff_call(name: str, args: list[Expr], x: str, extra: list[float] = []) -> Expr:
+    terms: list[Expr] = []
+    for i in range(len(args)):
+        du = _diff(args[i], x)
+        if du.kind == "num" and du.v == 0.0:
+            continue
+        idx: list[float] = []
+        for k in extra:
+            idx.append(k)
+        idx.append(float(i))
+        terms.append(_mk_mul([_mk_df(name, args, idx), du]))
+    return _mk_add(terms)
+
+# 构造偏导节点 f_{i j …}(args)：kids = [自变量…, 指标…]，指标排序后存放，
+# 所以 f_12 与 f_21 是同一个节点。指标为空时就是函数本身。
+def _mk_df(name: str, args: list[Expr], idx: list[float]) -> Expr:
+    order = sorted(idx)
+    if len(order) == 0:
+        return ufunc(name, args)
+    for i in order:
+        if _is_integral(i) == false or i < 0.0 or i >= float(len(args)):
+            raise ValueError("偏导的指标必须是自变量的序号（从 0 起）")
+    kids: list[Expr] = []
+    for a in args:
+        kids.append(a)
+    for i in order:
+        kids.append(num(i))
+    return Expr("df", name, float(len(order)), kids, REAL, true)
+
+# 从偏导节点取出 (自变量列表, 指标列表)
+def _df_parts(e: Expr) -> (list[Expr], list[float]):
+    return _df_parts2(e, e.kids)
+
+# 同上，但子节点用给定的新列表（重建时用）
+def _df_parts2(e: Expr, kids: list[Expr]) -> (list[Expr], list[float]):
+    n = math.trunc(e.v)
+    args: list[Expr] = []
+    for i in range(len(kids) - n):
+        args.append(kids[i])
+    idx: list[float] = []
+    for i in range(len(kids) - n, len(kids)):
+        idx.append(kids[i].v)
+    return (args, idx)
+
 
 # 把表达式中的变量替换为其它表达式。代入是「捕获避免」的：被绑定节点吃掉的
 # 名字在它自己的主体里不会被替换，代入式里恰好含这个名字时先把哑变量换名。
+# values 的键也可以是不定函数的名字（见 subs_fn）：此时值是 (函数式, 自变量名列表)。
 def subs(e: Expr, values: dict[str, Expr]) -> Expr:
     if e.kind == "var":
         v = values.get(e.name)
@@ -1021,12 +1154,67 @@ def subs(e: Expr, values: dict[str, Expr]) -> Expr:
         return e
     if e.kind == "num":
         return e
+    if e.kind == "ufunc" or e.kind == "df":
+        got = values.get(e.name)
+        if got != null:
+            return _apply_fn(e, got, values)
     if e.kind == "sum" or e.kind == "prod" or e.kind == "int" or e.kind == "lim":
         return _subs_binder(e, values)
     kids: list[Expr] = []
     for k in e.kids:
         kids.append(subs(k, values))
     return simplify(_rebuild(e, kids))
+
+# 把不定函数 f 换成具体表达式：body 是函数式，argnames 是各自变量对应的名字，
+# 例如 subs_fn(f(x)*g(y), "f", x^2, ["x"]) 得到 x^2*g(y)；
+# 偏导记号会自动换成 body 的相应偏导：f_1(x, y) 换成 d body / d argnames[0]。
+def subs_fn(e: Expr, name: str, body: Expr, argnames: list[str]) -> Expr:
+    slot: Expr = _fn_slot(body, argnames)
+    values: dict[str, Expr] = {}
+    values[name] = slot
+    return subs(e, values)
+
+# 函数式打包成一个 ufunc 节点当「值」用：名字固定，kids = [body, argnames[0], …]。
+# 只在 subs 内部当载体，不会出现在结果里。
+const _SLOT = "__fn__"
+
+def _fn_slot(body: Expr, argnames: list[str]) -> Expr:
+    kids: list[Expr] = [body]
+    for a in argnames:
+        if _is_valid_name(a) == false:
+            raise ValueError(f"自变量名「{a}」不合法")
+        kids.append(var(a))
+    return Expr("ufunc", _SLOT, float(len(argnames) + 1), kids, REAL, true)
+
+# 把 f(…) 或 f_i(…) 节点按函数式展开
+def _apply_fn(e: Expr, slot: Expr, values: dict[str, Expr]) -> Expr:
+    if e.kind == "df":
+        args, idx = _df_parts2(e, e.kids)
+    else:
+        args = e.kids
+        idx = []
+    body = slot.kids[0]
+    names: list[str] = []
+    for i in range(1, len(slot.kids)):
+        names.append(slot.kids[i].name)
+    if len(names) != len(args):
+        raise ValueError(f"函数 {e.name} 有 {len(names)} 个自变量，却以 {len(args)} 个自变量调用")
+    # 先替换掉节点里的自变量，再对函数式求相应的偏导
+    m: dict[str, Expr] = {}
+    for i in range(len(args)):
+        m[names[i]] = args[i]
+    out = body
+    for i in idx:
+        out = diff(out, names[math.trunc(i)])
+    inner = subs(out, m)
+    # 自变量表达式里如果还有别的不定函数要替换，再走一遍（values 里其它的键）
+    rest: dict[str, Expr] = {}
+    for kk in values.keys():
+        if kk != e.name:
+            rest[kk] = values.get(kk)!
+    if len(rest) == 0:
+        return inner
+    return subs(inner, rest)
 
 # 绑定节点的代入：主体里被绑定的名字不替换，上下界照常替换
 def _subs_binder(e: Expr, values: dict[str, Expr]) -> Expr:
@@ -1073,6 +1261,11 @@ def _rebuild(e: Expr, kids: list[Expr]) -> Expr:
         return _mk_div(kids[0], kids[1])
     if e.kind == "fn":
         return _mk_fn(e.name, kids[0])
+    if e.kind == "ufunc":
+        return ufunc(e.name, kids)
+    if e.kind == "df":
+        ra, ri = _df_parts2(e, kids)
+        return _mk_df(e.name, ra, ri)
     if _is_binder(e.kind):
         return _with_kids(e, kids)
     return e
@@ -1120,6 +1313,8 @@ def evaluate(e: Expr, env: dict[str, float]) -> float:
         return _eval_integral(e, env)
     if e.kind == "lim":
         raise ValueError("极限节点要用 calc.limit 求值（sym 不替你猜收敛性）")
+    if e.kind == "ufunc" or e.kind == "df":
+        raise ValueError(f"不定函数 {e.name} 没有定义，不能数值求值；请先用 subs 换成具体表达式")
     if e.kind == "matrix":
         raise ValueError("矩阵不是标量；用 sym.matrix_values(矩阵, 环境) 取二维数值表")
     raise ValueError(f"无法求值的节点：{e.kind}")
@@ -1294,6 +1489,8 @@ def _build(e: Expr, index: dict[str, int]) -> fn(list[float]) -> float:
         return (xs: list[float]) => 1.0 if _rel_holds(op, lf(xs), rt(xs)) else 0.0
     if e.kind == "int" or e.kind == "lim" or e.kind == "matrix":
         raise ValueError(f"{e.kind} 节点不能编译成单次求值的闭包树；请先算出结果或改用 evaluate")
+    if e.kind == "ufunc" or e.kind == "df":
+        raise ValueError(f"不定函数 {e.name} 没有定义，不能编译；请先用 subs 换成具体表达式")
     kids: list[fn(list[float]) -> float] = []
     for k in e.kids:
         kids.append(_build(k, index))

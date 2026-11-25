@@ -108,7 +108,9 @@ class EGraph:
         kids: list[int] = []
         for k in e.kids:
             kids.append(self.add(k))
-        return self._intern(e.kind, kids, e.name, 0.0)
+        # 不定函数的偏导靠 v（指标个数）区分自变量与指标，要原样带上
+        fv = e.v if e.kind == "df" else 0.0
+        return self._intern(e.kind, kids, e.name, fv)
 
     # ===== 查询辅助 =====
 
@@ -549,6 +551,17 @@ def _build(g: EGraph, cid: int, best: list[ENode?], memo: dict[int, sym.Expr]) -
             kids.append(_build(g, g.find(k), best, memo))
         if node.op == "fn":
             result = sym.fn(node.name, kids[0])
+        elif node.op == "ufunc":
+            result = sym.ufunc(node.name, kids)
+        elif node.op == "df":
+            na = len(kids) - math.trunc(node.v)
+            args: list[sym.Expr] = []
+            for i in range(na):
+                args.append(kids[i])
+            idx: list[float] = []
+            for i in range(na, len(kids)):
+                idx.append(kids[i].v)
+            result = sym.df_expr(node.name, args, idx)
         elif node.op == "pow":
             result = sym.power(kids[0], kids[1])
         elif node.op == "div":
