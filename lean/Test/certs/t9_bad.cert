@@ -1,0 +1,6 @@
+# 商的导数写错成 3/2，应被拒（正确值是 1/2）
+aethercert 1
+vars x
+start (div (var x) (num 2))
+diff x (div (num 3) (num 2))
+end

@@ -1,0 +1,6 @@
+# 商法则正确：d/dx (x/2) = 1/2
+aethercert 1
+vars x
+start (div (var x) (num 2))
+diff x (div (num 1) (num 2))
+end

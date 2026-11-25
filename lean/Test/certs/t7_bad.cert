@@ -1,0 +1,6 @@
+# 漏链式法则：d/dx sin(x^2) = cos(x^2) 少了内层 2x
+aethercert 1
+vars x
+start (fn sin (pow (var x) 2))
+diff x (fn cos (pow (var x) 2))
+end

@@ -1,0 +1,6 @@
+# 符号错：cos 的导数应带负号，写成正的应被拒
+aethercert 1
+vars x
+start (fn cos (var x))
+diff x (fn sin (var x))
+end

@@ -1,0 +1,6 @@
+# 带链式法则：d/dx sin(x^2) = cos(x^2) * 2x
+aethercert 1
+vars x
+start (fn sin (pow (var x) 2))
+diff x (mul (fn cos (pow (var x) 2)) (mul (num 2) (var x)))
+end

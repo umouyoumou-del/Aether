@@ -1,0 +1,7 @@
+# 求导证书：d/dx (x^2 + 3*x) = 2*x + 3
+aethercert 1
+vars x
+start (add (pow (var x) 2) (mul (num 3) (var x)))
+diff x (add (mul (num 2) (var x)) (num 3))
+claim (add (mul (num 2) (var x)) (num 3))
+end

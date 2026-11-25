@@ -1,0 +1,6 @@
+# 用了白名单之外的函数 errf，解析阶段就应被拒（与「求导不等」是两条不同的失败路径）
+aethercert 1
+vars x
+start (fn errf (var x))
+diff x (var x)
+end

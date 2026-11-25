@@ -1,0 +1,6 @@
+# cos 的导数确实是 -sin
+aethercert 1
+vars x
+start (fn cos (var x))
+diff x (neg (fn sin (var x)))
+end

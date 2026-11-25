@@ -1,0 +1,8 @@
+# 多步证书：x(x+2) → x^2+2x → 交换成 2x+x^2，三步都成立
+aethercert 1
+vars x
+start (mul (var x) (add (var x) (num 2)))
+same (add (pow (var x) 2) (mul (num 2) (var x)))
+same (add (mul (num 2) (var x)) (pow (var x) 2))
+claim (add (mul (num 2) (var x)) (pow (var x) 2))
+end

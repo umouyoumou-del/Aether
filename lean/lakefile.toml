@@ -1,0 +1,9 @@
+name = "aether-cert"
+defaultTargets = ["AetherCert"]
+
+[[lean_lib]]
+name = "AetherCert"
+
+[[lean_exe]]
+name = "certcheck"
+root = "Main"

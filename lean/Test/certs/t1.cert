@@ -1,0 +1,7 @@
+# 手工证书：验证 (x+1)^2 = x^2 + 2x + 1
+aethercert 1
+vars x
+start (pow (add (var x) (num 1)) 2)
+same (add (add (pow (var x) 2) (mul (num 2) (var x))) (num 1))
+claim (add (add (pow (var x) 2) (mul (num 2) (var x))) (num 1))
+end
