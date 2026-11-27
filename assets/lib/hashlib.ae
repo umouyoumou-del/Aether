@@ -1,8 +1,9 @@
-# hashlib 模块：消息摘要（MD5、SHA-1、SHA-2）
+# hashlib 模块：消息摘要（MD5、SHA-1、SHA-2、BLAKE2b）
 #     hashlib.sha256("abc").hexdigest()
 #     h = hashlib.md5()
 #     h.update("第一部分")
 #     h.update("第二部分")
+#     hashlib.blake2b("abc", digest_size=8).digest()
 # 字符串按 UTF-8 编码；二进制数据用 update_bytes。
 
 @go("*rtenc.Hash")
@@ -20,3 +21,11 @@ class Hash:
 @go("rtenc.NewSHA512") def sha512(data: str = "") -> Hash
 # 按名字创建：md5、sha1、sha224、sha256、sha384、sha512
 @go("rtenc.NewHash") def new(name: str, data: str = "") -> Hash
+# BLAKE2b（对应 Python 的 hashlib.blake2b）。digest_size 参与参数块，不能用截断 64 字节冒充。
+@go("rtenc.NewBlake2b") def blake2b(data: str = "", digest_size: int = 64, key: str = "") -> Hash
+# 把 blake2b 摘要的前 8 字节按小端解释为整数，等价于
+#   int.from_bytes(hashlib.blake2b(data, digest_size=n).digest(), "little")
+# 返回有符号 64 位视图；要拿到与 Python 完全一致的无符号十进制串，用 blake2b_le_uint_str。
+@go("rtenc.B2bLEInt") def blake2b_le_int(data: str, digest_size: int = 8) -> int
+@go("rtenc.B2bLEUintStr") def blake2b_le_uint_str(data: str, digest_size: int = 8) -> str
+@go("rtenc.B2bLEU64") def blake2b_le_u64(data: str, digest_size: int = 8) -> u64

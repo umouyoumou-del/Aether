@@ -130,6 +130,25 @@ func NewWaitGroup() *WaitGroup       { return &WaitGroup{} }
 func (w *WaitGroup) Add(n int)       { w.wg.Add(n) }
 func (w *WaitGroup) Done()           { w.wg.Done() }
 func (w *WaitGroup) Wait()           { w.wg.Wait() }
+
+// WaitTimeout 等待计数归零，最多等 seconds 秒。
+// 返回 true 表示已归零，false 表示超时（协程仍在跑）。
+// 对应 Python 里的 thread.join(timeout) 语义。
+// 实现：后台协程等 Wait，主协程 select 超时通道，二者只取其一。
+func (w *WaitGroup) WaitTimeout(seconds float64) bool {
+	done := make(chan struct{})
+	go func() {
+		w.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return true
+	case <-time.After(time.Duration(seconds * float64(time.Second))):
+		return false
+	}
+}
+
 func (w *WaitGroup) Go(f func()) {
 	w.wg.Add(1)
 	go func() {

@@ -1114,6 +1114,23 @@ func ParseInt(s string) int {
 	return int(v)
 }
 
+// ParseUint 把字符串解析为 uint64。u64("...") 走这条路径：
+// 超过 MaxInt64 的值必须用无符号解析，否则会被误判为溢出。
+func ParseUint(s string) uint64 {
+	c := cleanNum(s)
+	if strings.HasPrefix(c, "-") {
+		Raise("OverflowError", "整数 %s 超出范围", QuoteStr(s))
+	}
+	v, err := strconv.ParseUint(c, 10, 64)
+	if err != nil {
+		if ne, ok := err.(*strconv.NumError); ok && ne.Err == strconv.ErrRange {
+			Raise("OverflowError", "整数 %s 超出范围", QuoteStr(s))
+		}
+		Raise("ValueError", "无效的整数：%s", QuoteStr(s))
+	}
+	return v
+}
+
 func ParseIntBase(s string, base int) int {
 	c := cleanNum(s)
 	low := strings.ToLower(c)

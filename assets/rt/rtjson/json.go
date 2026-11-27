@@ -163,16 +163,18 @@ func (e *jsonEnc) value(v any, depth int) {
 		e.sb.WriteString(jsonQuote(en.EnumNameꞏ()))
 		return
 	}
+	// uint64 必须先于 ToInt 处理：ToInt 会把超过 MaxInt64 的值截成负数，
+	// 而 JSON 里应当输出无符号的十进制形式。
+	if u, ok := v.(uint64); ok {
+		e.sb.WriteString(strconv.FormatUint(u, 10))
+		return
+	}
 	if iv, ok, _ := rt.ToInt(v); ok {
 		if _, isEnum := v.(fmt.Stringer); isEnum {
 			e.sb.WriteString(jsonQuote(rt.Str(v)))
 			return
 		}
 		e.sb.WriteString(strconv.FormatInt(iv, 10))
-		return
-	}
-	if u, ok := v.(uint64); ok {
-		e.sb.WriteString(strconv.FormatUint(u, 10))
 		return
 	}
 	rv := reflect.ValueOf(v)
@@ -267,6 +269,11 @@ func jsonFromToken(dec *json.Decoder, tok json.Token) (any, error) {
 		if !strings.ContainsAny(s, ".eE") {
 			if i, err := strconv.ParseInt(s, 10, 64); err == nil {
 				return int(i), nil
+			}
+			// 超出 int64 的正整数（例如按 uint64 存的无符号哈希）解析为 u64，
+			// 否则会退化成 float 而丢掉精度。
+			if u, err := strconv.ParseUint(s, 10, 64); err == nil {
+				return u, nil
 			}
 		}
 		f, err := strconv.ParseFloat(s, 64)

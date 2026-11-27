@@ -9,6 +9,8 @@ import os.path    # 使 import os 之后可以使用 os.path.join(...)
 @go("rt.ReadFile") def read_file(path: str) -> str
 @go("rt.WriteFile") def write_file(path: str, data: str)
 @go("rt.AppendFile") def append_file(path: str, data: str)
+@go("rt.ReadBytes") def read_bytes(path: str) -> list[u8]
+@go("rt.WriteBytes") def write_bytes(path: str, data: list[u8])
 @go("rt.ReadLines") def read_lines(path: str) -> list[str]
 @go("rt.Exists") def exists(path: str) -> bool
 @go("rt.IsDir") def is_dir(path: str) -> bool

@@ -1,0 +1,43 @@
+# binpack 模块：二进制打包与解包（Python struct 模块的常用子集）
+#     头 = binpack.pack_ints("<iiiqq", [0, 1, 2, 7, 2])
+#     src, dst, layer, eid, n = binpack.unpack_ints("<iiiqq", 头, 0)
+#
+# 模块名用 binpack 而不是 struct，因为 struct 是 Aether 的关键字（用于定义结构体）。
+# 支持可选前缀 <（小端，默认）或 >（大端），格式码前可带十进制重复次数（如 "<3i"、">8q"）。
+# 格式码：b B h H i I q Q f d x（x 为填充字节，不消耗值）。
+# 结果都是 list[u8]；拼接用 concat，切片用 slice_bytes。
+
+# 格式串对应的字节数
+@go("rtstruct.CalcSize") def calcsize(fmt: str) -> int
+
+# 按格式串打包。值按顺序取用，可以是 int / u64 / float。
+@go("rtstruct.Pack") def pack(fmt: str, vals: list[any]) -> list[u8]
+
+# 打包整数专用的快捷方式（协议字段几乎都是整数）
+@go("rtstruct.PackInts") def pack_ints(fmt: str, vals: list[int]) -> list[u8]
+
+# 从 data 的 offset 开始解包，返回 list[any]（q/Q 超出 int64 时给 u64）
+@go("rtstruct.UnpackFrom") def unpack_from(fmt: str, data: list[u8], offset: int = 0) -> list[any]
+
+# 从 data 的开头解包
+@go("rtstruct.Unpack") def unpack(fmt: str, data: list[u8]) -> list[any]
+
+# 解包并要求全是整数，直接返回 list[int]（超出 int 范围会抛 ValueError）
+@go("rtstruct.UnpackInts") def unpack_ints(fmt: str, data: list[u8], offset: int = 0) -> list[int]
+
+# 把 [pos, pos+8) 按小端读为 u64 / int；[pos, pos+4) 按小端读为 int
+@go("rtstruct.IndexU64") def index_u64(data: list[u8], pos: int) -> u64
+@go("rtstruct.IndexI64") def index_i64(data: list[u8], pos: int) -> int
+@go("rtstruct.IndexI32") def index_i32(data: list[u8], pos: int) -> int
+
+# 拼接多个字节列表或字符串（字符串按 UTF-8 追加）
+@go("rtstruct.Concat") def concat(parts: list[any]) -> list[u8]
+
+# 字节切片 data[from:to]，to 为 -1 表示到末尾
+@go("rtstruct.Slice") def slice_bytes(data: list[u8], from_: int, to: int) -> list[u8]
+
+# 调试用：返回 "bytes(len=N)"
+@go("rtstruct.Describe") def describe(data: list[u8]) -> str
+
+# 返回小写十六进制串（等价于 Python 的 bytes.hex()），用于逐字节对齐验证
+@go("rtstruct.HexOf") def hex_of(data: list[u8]) -> str

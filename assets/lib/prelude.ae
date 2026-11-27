@@ -83,6 +83,7 @@ class WaitGroup:
     @go("Add") def add(self, n: int = 1)
     @go("Done") def done(self)
     @go("Wait") def wait(self)
+    @go("WaitTimeout") def wait_for(self, seconds: float) -> bool
     @go("Go") def spawn(self, f: fn())
 
 @go("*rt.AtomicInt", ctor="rt.NewAtomicInt")

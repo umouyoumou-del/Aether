@@ -1371,6 +1371,10 @@ func (g *Gen) convCall(e *Call) string {
 		if basicKind(to) == BInt {
 			return rt + ".ParseInt(" + x + ")"
 		}
+		// u64 需要无符号解析：走 ParseInt 会把 >MaxInt64 的合法值误判成溢出。
+		if basicKind(to) == BU64 {
+			return rt + ".ParseUint(" + x + ")"
+		}
 		return goT + "(" + rt + ".ParseInt(" + x + "))"
 	case isBool(from):
 		return goT + "(" + rt + ".B2I(" + x + "))"

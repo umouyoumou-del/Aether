@@ -280,6 +280,22 @@ func WriteFile(path, data string) {
 	}
 }
 
+// WriteBytes 把字节列表原样写入文件（不做 UTF-8 校验，可写任意二进制）。
+func WriteBytes(path string, data *List[uint8]) {
+	if err := os.WriteFile(path, data.S, 0o644); err != nil {
+		raiseIO(err, path)
+	}
+}
+
+// ReadBytes 读取文件的原始字节。
+func ReadBytes(path string) *List[uint8] {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		raiseIO(err, path)
+	}
+	return &List[uint8]{S: b}
+}
+
 func AppendFile(path, data string) {
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
 	if err != nil {

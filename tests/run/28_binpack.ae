@@ -1,0 +1,53 @@
+import binpack
+import hashlib
+import os
+import time
+
+# ---- binpack：与 Python struct 逐字节一致 ----
+header = binpack.pack_ints("<iiiqq", [7, 2, 1, 100, 200])
+print(binpack.calcsize("<iiiqq"), len(header))
+print(binpack.hex_of(header))
+print(binpack.unpack_ints("<iiiqq", header))
+print(binpack.hex_of(binpack.pack_ints(">2h", [1, 258])))
+print(binpack.hex_of(binpack.pack_ints("<3i", [1, 2, 3])))
+print(binpack.hex_of(binpack.pack_ints("<i4x", [9])))
+print(binpack.unpack("<fd", binpack.pack("<fd", [1.5, 2.25])))
+print(binpack.hex_of(binpack.pack("<Bf", [255, 0.5])))
+
+# 偏移解包、直接索引、切片与拼接
+print(binpack.unpack_from("<i", header, 4))
+print(binpack.index_i32(header, 8), binpack.index_i64(header, 12))
+print(binpack.hex_of(binpack.slice_bytes(header, 0, 4)), binpack.hex_of(binpack.slice_bytes(header, 24, -1)))
+print(binpack.hex_of(binpack.concat([binpack.slice_bytes(header, 0, 2), "AB"])), binpack.describe(header))
+
+# ---- blake2b：digest_size 参与参数块，不是截断 ----
+print(hashlib.blake2b("abc", digest_size=8).hexdigest())
+print(hashlib.blake2b("abc").hexdigest())
+print(hashlib.blake2b_le_uint_str("abc", 8), hashlib.blake2b_le_int("abc", 8))
+print(hashlib.blake2b("", digest_size=32).hexdigest())
+print(hashlib.blake2b("abc", digest_size=8, key="k").hexdigest())
+
+# ---- u64 字符串解析走无符号路径 ----
+print(u64("18446744073709551615") // 2, u64("0"))
+
+# ---- 二进制文件读写 ----
+path = os.join(os.tempdir(), "aether_binpack_test.bin")
+os.write_bytes(path, header)
+back = os.read_bytes(path)
+print(back == header, len(back), binpack.hex_of(back) == binpack.hex_of(header))
+os.remove(path)
+
+# ---- WaitGroup.wait_for ----
+wg = WaitGroup()
+
+def 慢任务():
+    time.sleep(0.02)
+    wg.done()
+
+wg.add(1)
+go 慢任务()
+print(wg.wait_for(2.0))
+
+never = WaitGroup()
+never.add(1)
+print(never.wait_for(0.01))
