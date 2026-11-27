@@ -16,7 +16,7 @@
 2. 把整个目录复制到 VS Code 的扩展目录，然后重启 VS Code：
 
 ```powershell
-Copy-Item -Recurse E:\Aether\editors\vscode "$env:USERPROFILE\.vscode\extensions\aether-0.2.0"
+Copy-Item -Recurse E:\Aether\editors\vscode "$env:USERPROFILE\.vscode\extensions\aether-0.3.0"
 ```
 
 也可以用 `vsce package` 打包成 `.vsix`，再通过“从 VSIX 安装”安装。

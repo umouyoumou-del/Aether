@@ -2,7 +2,7 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Package Name="Aether (五行)"
            Manufacturer="Aether contributors"
-           Version="0.2.0"
+           Version="0.3.0"
            UpgradeCode="{B8F3C2A1-5D47-4E9B-9A31-7C2E8F5D6401}"
            Scope="perMachine"
            Language="2052">

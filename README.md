@@ -65,7 +65,7 @@ Aether 把 `.ae` 源码翻译成 Go，再由 Go 编译为原生程序。
 
 ### Windows（PowerShell）
 
-**方式一：MSI 安装包（推荐）**——下载 Release 中的 `Aether-0.2.0-x64.msi`，双击安装。
+**方式一：MSI 安装包（推荐）**——下载 Release 中的 `Aether-0.3.0-x64.msi`，双击安装。
 它会把编译器装到 `Program Files\Aether`、自动加入系统 PATH、并创建开始菜单快捷方式。
 安装后打开任意终端即可使用 `aether run hello.ae`（编译程序仍需本机有 Go 工具链）。
 
@@ -315,13 +315,57 @@ test "加法":                                   # aether test 文件.ae
 ### 标准库
 
 内置：`print` `input` `len` `range` `enumerate` `zip` `sorted` `reversed` `sum` `min` `max` `any` `all` `abs` `round` `open` 等；
-模块：`math` `random` `time` `datetime` `sys` `os` `os.path` `json` `re` `csv` `http` `heapq` `bisect` `collections` `itertools` `functools` `statistics` `string` `textwrap` `base64` `hashlib`，以及深度学习的 `tensor` `tensor.nn` `tensor.optim`。完整列表见 [docs/标准库.md](docs/标准库.md)。
+模块：`math` `random` `time` `datetime` `sys` `os` `os.path` `json` `re` `csv` `http` `heapq` `bisect` `collections` `itertools` `functools` `statistics` `string` `textwrap` `base64` `binpack` `hashlib`，以及深度学习的 `tensor` `tensor.nn` `tensor.optim`。完整列表见 [docs/标准库.md](docs/标准库.md)。
 
 ```python
 import http
 server = http.Server()
 server.get("/hello/{name}", req => http.text(f"你好，{req.param("name") ?? "世界"}！"))
 server.listen(":8080")
+```
+
+### 二进制打包与哈希
+
+`binpack` 是 Python `struct` 的常用子集：支持可选前缀 `<`（小端，默认）或 `>`（大端）、
+格式码前带重复次数（`<3i`、`>8q`），格式码 `b B h H i I q Q f d x`。
+模块名不叫 `struct`，是因为 `struct` 在 Aether 里是定义结构体的关键字。
+
+```python
+import binpack, hashlib, os
+
+header = binpack.pack_ints("<iiiqq", [7, 2, 1, 100, 200])   # 28 字节
+print(binpack.hex_of(header))                  # 0700000002000000010000006400000000000000c800000000000000
+print(binpack.unpack_ints("<iiiqq", header))   # [7, 2, 1, 100, 200]
+print(binpack.calcsize("<iiiqq"))              # 28
+print(binpack.hex_of(binpack.pack_ints(">2h", [1, 258])))   # 00010102
+```
+
+以上输出与 Python 的 `struct.pack("<iiiqq", 7, 2, 1, 100, 200)` **逐字节一致**。
+另有 `pack` / `unpack` / `unpack_from` / `concat` / `slice_bytes` / `index_u64` / `index_i64` / `index_i32`，
+可直接在字节缓冲区上定位字段，不必先整体解包。
+
+配套的 `os.read_bytes` / `os.write_bytes` 读写原始字节（不做 UTF-8 校验），
+`hashlib.blake2b` 补上了 BLAKE2b——`digest_size` 参与参数块，不是截断 64 字节冒充：
+
+```python
+os.write_bytes("header.bin", header)
+assert os.read_bytes("header.bin") == header
+
+print(hashlib.blake2b("abc", digest_size=8).hexdigest())   # d8bb14d833d59559
+print(hashlib.blake2b_le_uint_str("abc", 8))               # 6455300059550759896
+```
+
+`blake2b_le_int` / `blake2b_le_uint_str` / `blake2b_le_u64` 把摘要前 8 字节按小端解释为整数，
+等价于 Python 的 `int.from_bytes(hashlib.blake2b(data, digest_size=n).digest(), "little")`。
+`WaitGroup` 也新增了超时等待 `wait_for(seconds)`（等价于 `thread.join(timeout)`），
+返回 `false` 表示超时、协程仍在跑：
+
+```python
+wg = WaitGroup()
+wg.add(1)
+go slow_task()
+if not wg.wait_for(2.0):
+    print("超时，任务还没结束")
 ```
 
 ## 深度学习

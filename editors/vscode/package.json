@@ -2,7 +2,7 @@
   "name": "aether",
   "displayName": "Aether",
   "description": "Aether 编程语言：语法高亮、实时诊断、悬停显示类型、跳转到定义、补全与大纲",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "aether-lang",
   "engines": { "vscode": "^1.60.0" },
   "categories": ["Programming Languages"],
