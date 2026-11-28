@@ -1,0 +1,201 @@
+seed 0
+0.8444218515250481 0.7579544029403025 0.420571580830845
+0 0 123 1097954097 2087043557 6034146168 913899456057 8926379391851030281
+7 8 4664860 56 82 3 -46 874659381428118137
+TZIRWZTEJDXC
+[1, 18, 13, 0, 2, 4, 14, 12, 7, 8, 16, 19, 9, 5, 6, 11, 3, 17, 15, 10]
+[5, 46, 25, 45, 42, 40, 0, 39, 31, 21]
+[249, 747, 333, 720, 891, 64, 195, 939]
+[4, 1, 0, 2, 3] []
+-1.1351361846790966 3.0
+ValueError: empty range for randrange()
+ValueError: empty range in randrange(5, 5)
+ValueError: zero step for randrange()
+ValueError: empty range in randrange(10, 0, 2)
+ValueError: empty range in randrange(3, 3)
+IndexError: Cannot choose from an empty sequence
+ValueError: Sample larger than population or is negative
+ValueError: number of bits must be non-negative
+TypeError: Missing a non-None stop argument
+0.40397807494366633
+seed 1
+0.13436424411240122 0.8474337369372327 0.763774618976614
+0 0 15 1063938749 3268308804 1930549411 419410398235 1936491312797304342
+1 10 1475591 98 46 4 -31 2456465800505386285
+XZHSDKAAAURA
+[4, 9, 1, 16, 2, 14, 18, 11, 10, 5, 3, 8, 17, 15, 19, 7, 0, 13, 6, 12]
+[11, 40, 46, 18, 7, 21, 32, 27, 43, 12]
+[310, 290, 601, 996, 903, 511, 866, 963]
+[4, 3, 2, 0, 1] []
+-0.5290401058277294 3.0
+ValueError: empty range for randrange()
+ValueError: empty range in randrange(5, 5)
+ValueError: zero step for randrange()
+ValueError: empty range in randrange(10, 0, 2)
+ValueError: empty range in randrange(3, 3)
+IndexError: Cannot choose from an empty sequence
+ValueError: Sample larger than population or is negative
+ValueError: number of bits must be non-negative
+TypeError: Missing a non-None stop argument
+0.40397807494366633
+seed 42
+0.6394267984578837 0.025010755222666936 0.27502931836911926
+0 0 17 1581559892 440213415 7201369453 600832336208 5446332115853614978
+6 3 1499914 7 73 2 -34 244751123424863812
+RGWUWRNHOSIZ
+[17, 7, 19, 11, 4, 15, 14, 9, 6, 16, 1, 18, 12, 3, 2, 8, 10, 13, 5, 0]
+[34, 7, 24, 5, 35, 18, 40, 39, 23, 36]
+[196, 721, 71, 46, 677, 233, 791, 296]
+[0, 1, 4, 3, 2] []
+0.31364120947374197 3.0
+ValueError: empty range for randrange()
+ValueError: empty range in randrange(5, 5)
+ValueError: zero step for randrange()
+ValueError: empty range in randrange(10, 0, 2)
+ValueError: empty range in randrange(3, 3)
+IndexError: Cannot choose from an empty sequence
+ValueError: Sample larger than population or is negative
+ValueError: number of bits must be non-negative
+TypeError: Missing a non-None stop argument
+0.40397807494366633
+seed 1234
+0.9664535356921388 0.4407325991753527 0.007491470058587191
+0 1 120 2017064808 3466048957 2500648409 763093554578 907783145581771206
+5 6 1292394 0 100 3 -30 4466380225144381435
+TOECFWDAQPHC
+[9, 0, 6, 3, 12, 11, 16, 5, 7, 18, 10, 15, 8, 13, 4, 1, 19, 2, 14, 17]
+[32, 4, 0, 21, 9, 30, 42, 24, 10, 3]
+[78, 601, 508, 167, 77, 570, 220, 147]
+[0, 2, 4, 3, 1] []
+0.31656673668592017 3.0
+ValueError: empty range for randrange()
+ValueError: empty range in randrange(5, 5)
+ValueError: zero step for randrange()
+ValueError: empty range in randrange(10, 0, 2)
+ValueError: empty range in randrange(3, 3)
+IndexError: Cannot choose from an empty sequence
+ValueError: Sample larger than population or is negative
+ValueError: number of bits must be non-negative
+TypeError: Missing a non-None stop argument
+0.40397807494366633
+seed -7
+0.32383276483316237 0.15084917392450192 0.6509344730398537
+0 0 105 1150797845 404285457 5865589240 996681516149 1980241222855773941
+0 4 8275367 42 91 2 -48 3915498429434916558
+BSDHUUSBSSMB
+[19, 14, 3, 11, 5, 10, 0, 13, 12, 16, 15, 18, 8, 2, 6, 9, 4, 17, 1, 7]
+[35, 45, 4, 36, 3, 39, 13, 31, 34, 27]
+[795, 321, 476, 599, 945, 464, 370, 306]
+[1, 4, 2, 0, 3] []
+0.797694841034684 3.0
+ValueError: empty range for randrange()
+ValueError: empty range in randrange(5, 5)
+ValueError: zero step for randrange()
+ValueError: empty range in randrange(10, 0, 2)
+ValueError: empty range in randrange(3, 3)
+IndexError: Cannot choose from an empty sequence
+ValueError: Sample larger than population or is negative
+ValueError: number of bits must be non-negative
+TypeError: Missing a non-None stop argument
+0.40397807494366633
+seed 4294967295
+0.6353574441341173 0.20319993954407756 0.6073666030347188
+0 0 77 730204163 4130059007 5931848964 960735102413 8200970967191672329
+4 8 9342052 42 91 2 -31 4402411206352659146
+ZQLFXWBKBMXO
+[15, 4, 5, 16, 9, 13, 14, 6, 10, 1, 3, 11, 12, 7, 19, 0, 2, 17, 8, 18]
+[41, 2, 25, 20, 5, 15, 31, 27, 30, 34]
+[243, 934, 722, 359, 231, 688, 693, 350]
+[3, 4, 0, 1, 2] []
+2.2136968217880297 3.0
+ValueError: empty range for randrange()
+ValueError: empty range in randrange(5, 5)
+ValueError: zero step for randrange()
+ValueError: empty range in randrange(10, 0, 2)
+ValueError: empty range in randrange(3, 3)
+IndexError: Cannot choose from an empty sequence
+ValueError: Sample larger than population or is negative
+ValueError: number of bits must be non-negative
+TypeError: Missing a non-None stop argument
+0.40397807494366633
+seed 4294967296
+0.11299430095636409 0.41782886486292836 0.0166763664992291
+0 1 112 1730113792 3274195809 5718797025 1093265061770 129111615121010756
+2 4 8267231 56 55 3 -27 4419298599332858982
+OFWDVJWERILQ
+[7, 3, 13, 14, 8, 11, 1, 19, 10, 15, 12, 6, 0, 9, 2, 5, 17, 16, 18, 4]
+[28, 10, 9, 5, 15, 16, 11, 17, 31, 25]
+[951, 921, 46, 290, 189, 821, 804, 279]
+[3, 4, 2, 0, 1] []
+-1.4611994064352865 3.0
+ValueError: empty range for randrange()
+ValueError: empty range in randrange(5, 5)
+ValueError: zero step for randrange()
+ValueError: empty range in randrange(10, 0, 2)
+ValueError: empty range in randrange(3, 3)
+IndexError: Cannot choose from an empty sequence
+ValueError: Sample larger than population or is negative
+ValueError: number of bits must be non-negative
+TypeError: Missing a non-None stop argument
+0.40397807494366633
+seed 1099511627781
+0.5043802970418443 0.2686044399723282 0.9257865475671585
+0 1 97 1756565004 3583148323 7673528353 837126569734 429750265348650091
+2 4 3245780 21 10 6 -46 3507332587303667594
+XDZRHOBDNBKY
+[8, 13, 12, 19, 6, 18, 17, 11, 2, 1, 7, 16, 0, 15, 10, 5, 3, 4, 9, 14]
+[42, 10, 8, 46, 3, 34, 18, 19, 23, 12]
+[282, 279, 930, 536, 815, 454, 493, 580]
+[0, 4, 3, 2, 1] []
+-0.6032942859484072 3.0
+ValueError: empty range for randrange()
+ValueError: empty range in randrange(5, 5)
+ValueError: zero step for randrange()
+ValueError: empty range in randrange(10, 0, 2)
+ValueError: empty range in randrange(3, 3)
+IndexError: Cannot choose from an empty sequence
+ValueError: Sample larger than population or is negative
+ValueError: number of bits must be non-negative
+TypeError: Missing a non-None stop argument
+0.40397807494366633
+seed 9223372036854775807
+0.3166448820870279 0.631259308253863 0.8035542479972343
+0 0 13 1023904728 3321975158 7365695634 647444651803 1531544261869927400
+5 12 2579543 91 28 6 -25 441545242913998467
+YHFRMFYZNMPX
+[0, 15, 4, 19, 9, 18, 16, 7, 1, 3, 5, 17, 13, 14, 8, 11, 6, 2, 10, 12]
+[18, 29, 34, 4, 26, 25, 42, 33, 3, 1]
+[164, 930, 827, 876, 300, 241, 53, 403]
+[4, 2, 1, 0, 3] []
+-0.7385236870489389 3.0
+ValueError: empty range for randrange()
+ValueError: empty range in randrange(5, 5)
+ValueError: zero step for randrange()
+ValueError: empty range in randrange(10, 0, 2)
+ValueError: empty range in randrange(3, 3)
+IndexError: Cannot choose from an empty sequence
+ValueError: Sample larger than population or is negative
+ValueError: number of bits must be non-negative
+TypeError: Missing a non-None stop argument
+0.40397807494366633
+seed -9223372036854775808
+0.5534639983914199 0.9406144709090462 0.24199432111690833
+0 1 64 182011546 1533690558 3238522420 337168431473 6006241985644067126
+3 6 1442055 70 91 3 -33 2316481523744195814
+TVMLKNWDLYIB
+[19, 15, 0, 18, 2, 12, 1, 3, 5, 14, 6, 16, 11, 10, 13, 4, 9, 7, 17, 8]
+[27, 24, 40, 45, 8, 12, 14, 35, 38, 41]
+[587, 426, 138, 391, 862, 498, 258, 444]
+[1, 4, 0, 3, 2] []
+2.296391027534749 3.0
+ValueError: empty range for randrange()
+ValueError: empty range in randrange(5, 5)
+ValueError: zero step for randrange()
+ValueError: empty range in randrange(10, 0, 2)
+ValueError: empty range in randrange(3, 3)
+IndexError: Cannot choose from an empty sequence
+ValueError: Sample larger than population or is negative
+ValueError: number of bits must be non-negative
+TypeError: Missing a non-None stop argument
+0.40397807494366633
+stream 49986288

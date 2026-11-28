@@ -32,6 +32,10 @@ class FileExistsError(IOError): pass
 class PermissionError(IOError): pass
 class EOFError(IOError): pass
 class JSONError(ValueError): pass
+# 与 Python 同名同层级：os.read_text 解码失败抛 UnicodeDecodeError，未知编码名抛 LookupError。
+class LookupError(Exception): pass
+class UnicodeError(ValueError): pass
+class UnicodeDecodeError(UnicodeError): pass
 
 # ===== 运行时类型 =====
 
@@ -113,7 +117,8 @@ interface Comparable[T]:
 
 extend str:
     @go("strings.ToUpper") def upper(self) -> str
-    @go("strings.ToLower") def lower(self) -> str
+    # Python 3.12 的 lower()：完整映射（U+0130 → "i̇"）+ 末尾 sigma 规则，逐码位同 CPython（rt/pyunicode.go）
+    @go("rt.PyLower") def lower(self) -> str
     @go("rt.StrStrip") def strip(self, chars: str? = null) -> str
     @go("rt.StrLStrip") def lstrip(self, chars: str? = null) -> str
     @go("rt.StrRStrip") def rstrip(self, chars: str? = null) -> str
@@ -130,10 +135,16 @@ extend str:
     @go("rt.StrIndex") def index(self, sub: str, start: int = 0) -> int
     @go("rt.StrCount") def count(self, sub: str) -> int
     @go("strings.Contains") def contains(self, sub: str) -> bool
+    # isdigit / isdecimal / isalpha / isalnum / isnumeric / isspace 与 strip / split 的空白：同 CPython 3.12（P12）
     @go("rt.StrIsDigit") def isdigit(self) -> bool
+    @go("rt.StrIsDecimal") def isdecimal(self) -> bool
     @go("rt.StrIsAlpha") def isalpha(self) -> bool
     @go("rt.StrIsAlnum") def isalnum(self) -> bool
     @go("rt.StrIsSpace") def isspace(self) -> bool
+    # Python str.isprintable()：空串为真；码位判据与 CPython 3.12（Unicode 15.0）逐位一致，见 rt/printable.go。
+    @go("rt.StrIsPrintable") def isprintable(self) -> bool
+    # Python 的 repr(str)（CPython 3.12 unicode_repr，逐字节）。内建 repr() / {x!r} 是 Aether 形态（双引号），不同。
+    @go("rt.PyReprStr") def pyrepr(self) -> str
     @go("rt.StrIsUpper") def isupper(self) -> bool
     @go("rt.StrIsLower") def islower(self) -> bool
     @go("rt.StrIsNumeric") def isnumeric(self) -> bool
@@ -160,10 +171,12 @@ extend str:
 
 extend char:
     @go("rt.CharIsDigit") def isdigit(self) -> bool
+    @go("rt.CharIsDecimal") def isdecimal(self) -> bool
     @go("rt.CharIsNumeric") def isnumeric(self) -> bool
     @go("rt.CharIsAlpha") def isalpha(self) -> bool
     @go("rt.CharIsAlnum") def isalnum(self) -> bool
     @go("rt.CharIsSpace") def isspace(self) -> bool
+    @go("rt.CharIsPrintable") def isprintable(self) -> bool
     @go("rt.CharIsUpper") def isupper(self) -> bool
     @go("rt.CharIsLower") def islower(self) -> bool
     @go("rt.CharIsPunct") def ispunct(self) -> bool

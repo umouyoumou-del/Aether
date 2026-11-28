@@ -1,0 +1,61 @@
+glob '**/*.py' recursive=1 hidden=0 -> ['{ROOT}/!bang.py', '{ROOT}/-dash.py', '{ROOT}/[x].py', '{ROOT}/]br.py', '{ROOT}/^caret.py', '{ROOT}/a.py', '{ROOT}/broken.py', '{ROOT}/link_sub/c.py', '{ROOT}/link_sub/sub2/f.py', '{ROOT}/site-packages/s.py', '{ROOT}/sub/c.py', '{ROOT}/sub/sub2/f.py', '{ROOT}/x.py', '{ROOT}/x.py/inner.py']
+glob '**/*.py' recursive=1 hidden=1 -> ['{ROOT}/!bang.py', '{ROOT}/-dash.py', '{ROOT}/.hd/x.py', '{ROOT}/.hidden.py', '{ROOT}/[x].py', '{ROOT}/]br.py', '{ROOT}/^caret.py', '{ROOT}/a.py', '{ROOT}/broken.py', '{ROOT}/link_sub/.h/e.py', '{ROOT}/link_sub/c.py', '{ROOT}/link_sub/sub2/.g.py', '{ROOT}/link_sub/sub2/f.py', '{ROOT}/site-packages/s.py', '{ROOT}/sub/.h/e.py', '{ROOT}/sub/c.py', '{ROOT}/sub/sub2/.g.py', '{ROOT}/sub/sub2/f.py', '{ROOT}/x.py', '{ROOT}/x.py/inner.py']
+glob '*.py' recursive=0 hidden=0 -> ['{ROOT}/!bang.py', '{ROOT}/-dash.py', '{ROOT}/[x].py', '{ROOT}/]br.py', '{ROOT}/^caret.py', '{ROOT}/a.py', '{ROOT}/broken.py', '{ROOT}/x.py']
+glob '**/*.py' recursive=0 hidden=0 -> ['{ROOT}/link_sub/c.py', '{ROOT}/site-packages/s.py', '{ROOT}/sub/c.py', '{ROOT}/x.py/inner.py']
+glob '**' recursive=1 hidden=0 -> ['{ROOT}/', '{ROOT}/!bang.py', '{ROOT}/-dash.py', '{ROOT}/[x].py', '{ROOT}/]br.py', '{ROOT}/^caret.py', '{ROOT}/a.py', '{ROOT}/b.txt', '{ROOT}/broken.py', '{ROOT}/c.PY', '{ROOT}/empty_dir', '{ROOT}/link_sub', '{ROOT}/link_sub/c.py', '{ROOT}/link_sub/d.txt', '{ROOT}/link_sub/sub2', '{ROOT}/link_sub/sub2/f.py', '{ROOT}/site-packages', '{ROOT}/site-packages/s.py', '{ROOT}/sub', '{ROOT}/sub/c.py', '{ROOT}/sub/d.txt', '{ROOT}/sub/sub2', '{ROOT}/sub/sub2/f.py', '{ROOT}/x.py', '{ROOT}/x.py/inner.py']
+glob '**/' recursive=1 hidden=0 -> ['{ROOT}/', '{ROOT}/empty_dir/', '{ROOT}/link_sub/', '{ROOT}/link_sub/sub2/', '{ROOT}/site-packages/', '{ROOT}/sub/', '{ROOT}/sub/sub2/', '{ROOT}/x.py/']
+glob '*/' recursive=0 hidden=0 -> ['{ROOT}/empty_dir/', '{ROOT}/link_sub/', '{ROOT}/site-packages/', '{ROOT}/sub/', '{ROOT}/x.py/']
+glob 'sub/*' recursive=0 hidden=0 -> ['{ROOT}/sub/c.py', '{ROOT}/sub/d.txt', '{ROOT}/sub/sub2']
+glob '[ab].py' recursive=0 hidden=0 -> ['{ROOT}/a.py']
+glob '?.py' recursive=0 hidden=0 -> ['{ROOT}/a.py', '{ROOT}/x.py']
+glob '*.[!t]*' recursive=0 hidden=0 -> ['{ROOT}/!bang.py', '{ROOT}/-dash.py', '{ROOT}/[x].py', '{ROOT}/]br.py', '{ROOT}/^caret.py', '{ROOT}/a.py', '{ROOT}/broken.py', '{ROOT}/c.PY', '{ROOT}/x.py']
+glob '[!a-b]*.py' recursive=0 hidden=0 -> ['{ROOT}/!bang.py', '{ROOT}/-dash.py', '{ROOT}/[x].py', '{ROOT}/]br.py', '{ROOT}/^caret.py', '{ROOT}/x.py']
+glob '[a-]*' recursive=0 hidden=0 -> ['{ROOT}/-dash.py', '{ROOT}/a.py']
+glob '[]]*' recursive=0 hidden=0 -> ['{ROOT}/]br.py']
+glob '[!]]*' recursive=0 hidden=0 -> ['{ROOT}/!bang.py', '{ROOT}/-dash.py', '{ROOT}/[x].py', '{ROOT}/^caret.py', '{ROOT}/a.py', '{ROOT}/b.txt', '{ROOT}/broken.py', '{ROOT}/c.PY', '{ROOT}/empty_dir', '{ROOT}/link_sub', '{ROOT}/site-packages', '{ROOT}/sub', '{ROOT}/x.py']
+glob '[b-a]*' recursive=0 hidden=0 -> []
+glob '[!b-a]*' recursive=0 hidden=0 -> ['{ROOT}/!bang.py', '{ROOT}/-dash.py', '{ROOT}/[x].py', '{ROOT}/]br.py', '{ROOT}/^caret.py', '{ROOT}/a.py', '{ROOT}/b.txt', '{ROOT}/broken.py', '{ROOT}/c.PY', '{ROOT}/empty_dir', '{ROOT}/link_sub', '{ROOT}/site-packages', '{ROOT}/sub', '{ROOT}/x.py']
+glob 'a.py' recursive=0 hidden=0 -> ['{ROOT}/a.py']
+glob 'zz.py' recursive=0 hidden=0 -> []
+glob 'broken.py' recursive=0 hidden=0 -> ['{ROOT}/broken.py']
+glob 'sub/' recursive=0 hidden=0 -> ['{ROOT}/sub/']
+glob '.*' recursive=0 hidden=0 -> ['{ROOT}/.hd', '{ROOT}/.hidden.py']
+glob '**/.*.py' recursive=1 hidden=0 -> ['{ROOT}/.hidden.py', '{ROOT}/link_sub/sub2/.g.py', '{ROOT}/sub/sub2/.g.py']
+glob 'link_sub/*.py' recursive=0 hidden=0 -> ['{ROOT}/link_sub/c.py']
+glob '*/*.py' recursive=0 hidden=0 -> ['{ROOT}/link_sub/c.py', '{ROOT}/site-packages/s.py', '{ROOT}/sub/c.py', '{ROOT}/x.py/inner.py']
+glob '**/sub2/*.py' recursive=1 hidden=0 -> ['{ROOT}/link_sub/sub2/f.py', '{ROOT}/sub/sub2/f.py']
+glob '**/*.py' recursive=1 hidden=0 -> ['{ROOT}/!bang.py', '{ROOT}/-dash.py', '{ROOT}/[x].py', '{ROOT}/]br.py', '{ROOT}/^caret.py', '{ROOT}/a.py', '{ROOT}/broken.py', '{ROOT}/link_sub/c.py', '{ROOT}/link_sub/sub2/f.py', '{ROOT}/site-packages/s.py', '{ROOT}/sub/c.py', '{ROOT}/sub/sub2/f.py', '{ROOT}/x.py', '{ROOT}/x.py/inner.py']
+escape -> '{ROOT}/[[]x].py' ['{ROOT}/[x].py']
+empty -> [] 1 0
+fnmatch 'abc' 'a*c' -> 1
+fnmatch 'abc' 'a?c' -> 1
+fnmatch 'ac' 'a?c' -> 0
+fnmatch 'a-c' '[a-c-e]*' -> 1
+fnmatch '-' '[a-c-e]' -> 1
+fnmatch 'd' '[a-c-e]' -> 0
+fnmatch 'e' '[a-c-e]' -> 1
+fnmatch '\\' '[\\]' -> 1
+fnmatch 'b' '[!a]' -> 1
+fnmatch 'a' '[!a]' -> 0
+fnmatch ']' '[]]' -> 1
+fnmatch ']' '[!]]' -> 0
+fnmatch 'x' '[!]]' -> 1
+fnmatch 'a' '[b-a]' -> 0
+fnmatch 'q' '[!b-a]' -> 1
+fnmatch '-' '[a-]' -> 1
+fnmatch '[' '[' -> 1
+fnmatch '[x' '[x' -> 1
+fnmatch 'aXbYc' 'a*b*c' -> 1
+fnmatch 'abc' '*' -> 1
+fnmatch '' '*' -> 1
+fnmatch '' '?' -> 0
+fnmatch 'a\nb' 'a?b' -> 1
+fnmatch 'A.PY' '*.py' -> 0
+fnmatch '^' '[^]' -> 1
+fnmatch '&' '[&&]' -> 1
+fnmatch 'x' '[a-cx-z]' -> 1
+fnmatch 'é' '[a-z]' -> 0
+fnmatch '中' '?' -> 1
+fnmatch 'ab' 'a**b' -> 1
+fnmatch 'abcabd' '*abd' -> 1
+fnmatch 'a]b' 'a[]]b' -> 1

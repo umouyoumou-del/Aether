@@ -1,0 +1,107 @@
+sweep str.isalpha 26097091ad7b6d79532cbccae60307c37305fbdf92610f9b32cb92d635b21515
+sweep str.isdecimal 850fe467e0e9cb5595006b20619b35f5adec222886c4ed097b247dcbd2a9735e
+sweep str.isdigit e015e00d25928d2c744959448b204bdd4ca5b0ad294840c68a75f21536d5d87a
+sweep str.isnumeric b6e8ccf88355806704d662ebd6ef83449f132fbed8972b7f66a189037fc3e007
+sweep str.isalnum 1525f81c45cfbbb4548350be6fe5c696116f5eca7a42a80605e7bc3f6f044b32
+sweep str.isspace c288835013403941e55c84f9c3f66ba0c3c11f80bd5745e95622db8c61d3bf81
+sweep str.lower edca77a44be2b4e6ffdbe85bfd097ed3725757a3f23c5ab03b627eba66c8f0af
+lower 'ΑΣ' -> 'ας'
+lower 'ΑΣ ' -> 'ας '
+lower 'ΣΑ' -> 'σα'
+lower 'Σ' -> 'σ'
+lower "ΑΣ'Α" -> "ασ'α"
+lower 'ΑΣ.' -> 'ας.'
+lower 'aΣb' -> 'aσb'
+lower 'İst' -> 'i̇st'
+lower 'ΑΣ́' -> 'ας́'
+lower 'ΆΣ' -> 'άς'
+lower 'ᎠA' -> 'ꭰa'
+lower 'ẞKK' -> 'ßkk'
+lower 'AΣΣ' -> 'aσς'
+lower 'ΣΣΣ Σ' -> 'σσς σ'
+lower '\ua7cb\U00010d50' -> '\ua7cb\U00010d50'
+strip '' -> '' '' ''
+split '' -1 -> [] | rsplit -> []
+split '' 0 -> [] | rsplit -> []
+split '' 1 -> [] | rsplit -> []
+split '' 2 -> [] | rsplit -> []
+split '' 5 -> [] | rsplit -> []
+strip ' ' -> '' '' ''
+split ' ' -1 -> [] | rsplit -> []
+split ' ' 0 -> [] | rsplit -> []
+split ' ' 1 -> [] | rsplit -> []
+split ' ' 2 -> [] | rsplit -> []
+split ' ' 5 -> [] | rsplit -> []
+strip '\x1c a \x1f' -> 'a' 'a \x1f' '\x1c a'
+split '\x1c a \x1f' -1 -> ['a'] | rsplit -> ['a']
+split '\x1c a \x1f' 0 -> ['a \x1f'] | rsplit -> ['\x1c a']
+split '\x1c a \x1f' 1 -> ['a'] | rsplit -> ['a']
+split '\x1c a \x1f' 2 -> ['a'] | rsplit -> ['a']
+split '\x1c a \x1f' 5 -> ['a'] | rsplit -> ['a']
+strip '\u3000x\u3000' -> 'x' 'x\u3000' '\u3000x'
+split '\u3000x\u3000' -1 -> ['x'] | rsplit -> ['x']
+split '\u3000x\u3000' 0 -> ['x\u3000'] | rsplit -> ['\u3000x']
+split '\u3000x\u3000' 1 -> ['x'] | rsplit -> ['x']
+split '\u3000x\u3000' 2 -> ['x'] | rsplit -> ['x']
+split '\u3000x\u3000' 5 -> ['x'] | rsplit -> ['x']
+strip '\x85y\xa0' -> 'y' 'y\xa0' '\x85y'
+split '\x85y\xa0' -1 -> ['y'] | rsplit -> ['y']
+split '\x85y\xa0' 0 -> ['y\xa0'] | rsplit -> ['\x85y']
+split '\x85y\xa0' 1 -> ['y'] | rsplit -> ['y']
+split '\x85y\xa0' 2 -> ['y'] | rsplit -> ['y']
+split '\x85y\xa0' 5 -> ['y'] | rsplit -> ['y']
+strip '\u200bz\u200b' -> '\u200bz\u200b' '\u200bz\u200b' '\u200bz\u200b'
+split '\u200bz\u200b' -1 -> ['\u200bz\u200b'] | rsplit -> ['\u200bz\u200b']
+split '\u200bz\u200b' 0 -> ['\u200bz\u200b'] | rsplit -> ['\u200bz\u200b']
+split '\u200bz\u200b' 1 -> ['\u200bz\u200b'] | rsplit -> ['\u200bz\u200b']
+split '\u200bz\u200b' 2 -> ['\u200bz\u200b'] | rsplit -> ['\u200bz\u200b']
+split '\u200bz\u200b' 5 -> ['\u200bz\u200b'] | rsplit -> ['\u200bz\u200b']
+strip '  a b c  ' -> 'a b c' 'a b c  ' '  a b c'
+split '  a b c  ' -1 -> ['a', 'b', 'c'] | rsplit -> ['a', 'b', 'c']
+split '  a b c  ' 0 -> ['a b c  '] | rsplit -> ['  a b c']
+split '  a b c  ' 1 -> ['a', 'b c  '] | rsplit -> ['  a b', 'c']
+split '  a b c  ' 2 -> ['a', 'b', 'c  '] | rsplit -> ['  a', 'b', 'c']
+split '  a b c  ' 5 -> ['a', 'b', 'c'] | rsplit -> ['a', 'b', 'c']
+strip '\x1ca\x1db\x1e' -> 'a\x1db' 'a\x1db\x1e' '\x1ca\x1db'
+split '\x1ca\x1db\x1e' -1 -> ['a', 'b'] | rsplit -> ['a', 'b']
+split '\x1ca\x1db\x1e' 0 -> ['a\x1db\x1e'] | rsplit -> ['\x1ca\x1db']
+split '\x1ca\x1db\x1e' 1 -> ['a', 'b\x1e'] | rsplit -> ['\x1ca', 'b']
+split '\x1ca\x1db\x1e' 2 -> ['a', 'b'] | rsplit -> ['a', 'b']
+split '\x1ca\x1db\x1e' 5 -> ['a', 'b'] | rsplit -> ['a', 'b']
+strip 'a\u2028b\u2029c' -> 'a\u2028b\u2029c' 'a\u2028b\u2029c' 'a\u2028b\u2029c'
+split 'a\u2028b\u2029c' -1 -> ['a', 'b', 'c'] | rsplit -> ['a', 'b', 'c']
+split 'a\u2028b\u2029c' 0 -> ['a\u2028b\u2029c'] | rsplit -> ['a\u2028b\u2029c']
+split 'a\u2028b\u2029c' 1 -> ['a', 'b\u2029c'] | rsplit -> ['a\u2028b', 'c']
+split 'a\u2028b\u2029c' 2 -> ['a', 'b', 'c'] | rsplit -> ['a', 'b', 'c']
+split 'a\u2028b\u2029c' 5 -> ['a', 'b', 'c'] | rsplit -> ['a', 'b', 'c']
+strip 'a' -> 'a' 'a' 'a'
+split 'a' -1 -> ['a'] | rsplit -> ['a']
+split 'a' 0 -> ['a'] | rsplit -> ['a']
+split 'a' 1 -> ['a'] | rsplit -> ['a']
+split 'a' 2 -> ['a'] | rsplit -> ['a']
+split 'a' 5 -> ['a'] | rsplit -> ['a']
+strip ' a' -> 'a' 'a' ' a'
+split ' a' -1 -> ['a'] | rsplit -> ['a']
+split ' a' 0 -> ['a'] | rsplit -> [' a']
+split ' a' 1 -> ['a'] | rsplit -> ['a']
+split ' a' 2 -> ['a'] | rsplit -> ['a']
+split ' a' 5 -> ['a'] | rsplit -> ['a']
+strip 'a ' -> 'a' 'a ' 'a'
+split 'a ' -1 -> ['a'] | rsplit -> ['a']
+split 'a ' 0 -> ['a '] | rsplit -> ['a']
+split 'a ' 1 -> ['a'] | rsplit -> ['a']
+split 'a ' 2 -> ['a'] | rsplit -> ['a']
+split 'a ' 5 -> ['a'] | rsplit -> ['a']
+is '' isalpha=0 isdecimal=0 isdigit=0 isnumeric=0 isalnum=0 isspace=0
+is '²' isalpha=0 isdecimal=0 isdigit=1 isnumeric=1 isalnum=1 isspace=0
+is '½' isalpha=0 isdecimal=0 isdigit=0 isnumeric=1 isalnum=1 isspace=0
+is '一' isalpha=1 isdecimal=0 isdigit=0 isnumeric=1 isalnum=1 isspace=0
+is 'abc' isalpha=1 isdecimal=0 isdigit=0 isnumeric=0 isalnum=1 isspace=0
+is 'a1' isalpha=0 isdecimal=0 isdigit=0 isnumeric=0 isalnum=1 isspace=0
+is '١٢٣' isalpha=0 isdecimal=1 isdigit=1 isnumeric=1 isalnum=1 isspace=0
+is 'Ⅳ' isalpha=0 isdecimal=0 isdigit=0 isnumeric=1 isalnum=1 isspace=0
+is '𝟎' isalpha=0 isdecimal=1 isdigit=1 isnumeric=1 isalnum=1 isspace=0
+is '_' isalpha=0 isdecimal=0 isdigit=0 isnumeric=0 isalnum=0 isspace=0
+is ' \x1c' isalpha=0 isdecimal=0 isdigit=0 isnumeric=0 isalnum=0 isspace=1
+is '\u088f' isalpha=0 isdecimal=0 isdigit=0 isnumeric=0 isalnum=0 isspace=0
+is '1²' isalpha=0 isdecimal=0 isdigit=1 isnumeric=1 isalnum=1 isspace=0

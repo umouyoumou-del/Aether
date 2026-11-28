@@ -1,0 +1,36 @@
+# str.pyrepr()：CPython 3.12 的 repr(str)，逐字节。期望输出（32_pyrepr.out）由 CPython 3.12 生成：
+# 先是若干边界样例（引号选择、反斜杠、控制符、C1、Latin-1、BMP、增补平面、Unicode 15.0 之后新分配的码位），
+# 再是全部码位（代理区 D800–DFFF 除外）逐个 repr 后按行拼接的 sha256。
+import hashlib
+
+SAMPLES: list[(str, list[int])] = [
+    ("empty", []),
+    ("plain", [0x61, 0x62]),
+    ("single", [0x69, 0x74, 0x27, 0x73]),
+    ("double", [0x22, 0x78]),
+    ("both", [0x27, 0x22]),
+    ("backslash", [0x5c, 0x6e]),
+    ("ws", [0x9, 0xa, 0xd]),
+    ("ctrl", [0x0, 0x1, 0x1f, 0x7f]),
+    ("c1", [0x80, 0x85, 0x9f]),
+    ("latin1", [0xa0, 0xad, 0xe9, 0xff]),
+    ("bmp", [0x2028, 0x200b, 0xfeff, 0xfffd, 0x4e2d]),
+    ("astral", [0x1f600, 0xe0001, 0x10ffff, 0x1fae9]),
+    ("u15_1", [0x2fffc]),
+    ("quote_only_double", [0x22]),
+]
+
+for sample in SAMPLES:
+    name, cps = sample
+    text = ""
+    for c in cps:
+        text += chr(c)
+    print(name + " " + text.pyrepr())
+
+h = hashlib.sha256()
+c = 0
+while c < 0x110000:
+    if c < 0xD800 or c > 0xDFFF:
+        h.update(chr(c).pyrepr() + "\n")
+    c += 1
+print("sweep " + h.hexdigest())

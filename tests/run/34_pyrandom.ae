@@ -1,0 +1,100 @@
+# random.Random：与 CPython 3.12 逐位相同的随机流（MT19937 + Lib/random.py 的方法与报错文案），P12。
+# 期望输出（34_pyrandom.out）由 CPython 3.12 用同样的种子与调用序列生成。
+import random
+import string
+
+def join_ints(xs: list[int]) -> str:
+    parts: list[str] = []
+    for x in xs:
+        parts.append(str(x))
+    return "[" + ", ".join(parts) + "]"
+
+def run(r: random.Random):
+    print(str(r.random()) + " " + str(r.random()) + " " + str(r.random()))
+    bits: list[str] = []
+    for k in [0, 1, 7, 31, 32, 33, 40, 63]:
+        bits.append(str(r.getrandbits(k)))
+    print(" ".join(bits))
+    vals: list[int] = []
+    vals.append(r.randrange(10))
+    vals.append(r.randrange(3, 17))
+    vals.append(r.randrange(1000000, 10000000))
+    vals.append(r.randrange(0, 100, 7))
+    vals.append(r.randrange(100, 0, -9))
+    vals.append(r.randint(1, 6))
+    vals.append(r.randrange(-50, -20))
+    vals.append(r.randrange(4611686018427387904))
+    parts: list[str] = []
+    for v in vals:
+        parts.append(str(v))
+    print(" ".join(parts))
+    letters: list[str] = []
+    for ch in string.ascii_uppercase:
+        letters.append(str(ch))
+    word = ""
+    i = 0
+    while i < 12:
+        word += r.choice(letters)
+        i += 1
+    print(word)
+    xs: list[int] = []
+    i = 0
+    while i < 20:
+        xs.append(i)
+        i += 1
+    r.shuffle(xs)
+    print(join_ints(xs))
+    pop50: list[int] = []
+    i = 0
+    while i < 50:
+        pop50.append(i)
+        i += 1
+    print(join_ints(r.sample(pop50, 10)))
+    pop1000: list[int] = []
+    i = 0
+    while i < 1000:
+        pop1000.append(i)
+        i += 1
+    print(join_ints(r.sample(pop1000, 8)))
+    print(join_ints(r.sample([0, 1, 2, 3, 4], 5)) + " " + join_ints(r.sample([0, 1, 2, 3, 4, 5, 6, 7, 8], 0)))
+    print(str(r.uniform(-1.5, 2.5)) + " " + str(r.uniform(3.0, 3.0)))
+    case = 0
+    while case < 9:
+        try:
+            if case == 0:
+                r.randrange(0)
+            elif case == 1:
+                r.randrange(5, 5)
+            elif case == 2:
+                r.randrange(0, 10, 0)
+            elif case == 3:
+                r.randrange(10, 0, 2)
+            elif case == 4:
+                r.randint(3, 2)
+            elif case == 5:
+                empty: list[int] = []
+                r.choice(empty)
+            elif case == 6:
+                r.sample([0, 1, 2], 5)
+            elif case == 7:
+                r.getrandbits(-1)
+            else:
+                r.randrange(5, null, 2)
+            print("no error")
+        except Exception as e:
+            print(type_name(e) + ": " + e.message)
+        case += 1
+    r.seed(99)
+    print(str(r.random()))
+
+SEEDS: list[int] = [0, 1, 42, 1234, -7, 4294967295, 4294967296, 1099511627781, 9223372036854775807, -9223372036854775807 - 1]
+for s in SEEDS:
+    print("seed " + str(s))
+    run(random.Random(s))
+r = random.Random(20261127)
+acc = 0
+i = 0
+while i < 2000:
+    acc = (acc * 31 + r.getrandbits(32)) % 2147483647
+    i += 1
+print("stream " + str(acc))

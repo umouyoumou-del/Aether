@@ -1,0 +1,52 @@
+plain [utf-8] OK [7b 22 61 22 3a 20 31 7d]
+plain [UTF8] OK [7b 22 61 22 3a 20 31 7d]
+plain [utf_8] OK [7b 22 61 22 3a 20 31 7d]
+plain [U8] OK [7b 22 61 22 3a 20 31 7d]
+plain [utf-8-sig] OK [7b 22 61 22 3a 20 31 7d]
+plain [UTF-8-SIG] OK [7b 22 61 22 3a 20 31 7d]
+plain [utf8-sig] ERR LookupError: unknown encoding: utf8-sig
+plain [latin-x] ERR LookupError: unknown encoding: latin-x
+bom [utf-8] OK [feff 7b 22 61 22 3a 20 31 7d]
+bom [utf-8-sig] OK [7b 22 61 22 3a 20 31 7d]
+crlf [utf-8] OK [61 a 62 a 63 a]
+crlf [utf-8-sig] OK [61 a 62 a 63 a]
+cjk [utf-8] OK [4e2d 6587]
+cjk [utf-8-sig] OK [4e2d 6587]
+empty [utf-8] OK []
+empty [utf-8-sig] OK []
+bad_start [utf-8] ERR UnicodeDecodeError: 'utf-8' codec can't decode byte 0xff in position 0: invalid start byte
+bad_start [utf-8-sig] ERR UnicodeDecodeError: 'utf-8' codec can't decode byte 0xff in position 0: invalid start byte
+bad_start_mid [utf-8] ERR UnicodeDecodeError: 'utf-8' codec can't decode byte 0x80 in position 2: invalid start byte
+bad_start_mid [utf-8-sig] ERR UnicodeDecodeError: 'utf-8' codec can't decode byte 0x80 in position 2: invalid start byte
+c0 [utf-8] ERR UnicodeDecodeError: 'utf-8' codec can't decode byte 0xc0 in position 0: invalid start byte
+c0 [utf-8-sig] ERR UnicodeDecodeError: 'utf-8' codec can't decode byte 0xc0 in position 0: invalid start byte
+cont2 [utf-8] ERR UnicodeDecodeError: 'utf-8' codec can't decode byte 0xc3 in position 1: invalid continuation byte
+cont2 [utf-8-sig] ERR UnicodeDecodeError: 'utf-8' codec can't decode byte 0xc3 in position 1: invalid continuation byte
+cont3a [utf-8] ERR UnicodeDecodeError: 'utf-8' codec can't decode byte 0xe4 in position 0: invalid continuation byte
+cont3a [utf-8-sig] ERR UnicodeDecodeError: 'utf-8' codec can't decode byte 0xe4 in position 0: invalid continuation byte
+cont3b [utf-8] ERR UnicodeDecodeError: 'utf-8' codec can't decode bytes in position 0-1: invalid continuation byte
+cont3b [utf-8-sig] ERR UnicodeDecodeError: 'utf-8' codec can't decode bytes in position 0-1: invalid continuation byte
+overlong_e0 [utf-8] ERR UnicodeDecodeError: 'utf-8' codec can't decode byte 0xe0 in position 0: invalid continuation byte
+overlong_e0 [utf-8-sig] ERR UnicodeDecodeError: 'utf-8' codec can't decode byte 0xe0 in position 0: invalid continuation byte
+surrogate_ed [utf-8] ERR UnicodeDecodeError: 'utf-8' codec can't decode byte 0xed in position 0: invalid continuation byte
+surrogate_ed [utf-8-sig] ERR UnicodeDecodeError: 'utf-8' codec can't decode byte 0xed in position 0: invalid continuation byte
+cont4a [utf-8] ERR UnicodeDecodeError: 'utf-8' codec can't decode byte 0xf0 in position 0: invalid continuation byte
+cont4a [utf-8-sig] ERR UnicodeDecodeError: 'utf-8' codec can't decode byte 0xf0 in position 0: invalid continuation byte
+cont4b [utf-8] ERR UnicodeDecodeError: 'utf-8' codec can't decode bytes in position 0-1: invalid continuation byte
+cont4b [utf-8-sig] ERR UnicodeDecodeError: 'utf-8' codec can't decode bytes in position 0-1: invalid continuation byte
+cont4c [utf-8] ERR UnicodeDecodeError: 'utf-8' codec can't decode bytes in position 0-2: invalid continuation byte
+cont4c [utf-8-sig] ERR UnicodeDecodeError: 'utf-8' codec can't decode bytes in position 0-2: invalid continuation byte
+f4_high [utf-8] ERR UnicodeDecodeError: 'utf-8' codec can't decode byte 0xf4 in position 0: invalid continuation byte
+f4_high [utf-8-sig] ERR UnicodeDecodeError: 'utf-8' codec can't decode byte 0xf4 in position 0: invalid continuation byte
+f5 [utf-8] ERR UnicodeDecodeError: 'utf-8' codec can't decode byte 0xf5 in position 0: invalid start byte
+f5 [utf-8-sig] ERR UnicodeDecodeError: 'utf-8' codec can't decode byte 0xf5 in position 0: invalid start byte
+eod1 [utf-8] ERR UnicodeDecodeError: 'utf-8' codec can't decode byte 0xe4 in position 2: unexpected end of data
+eod1 [utf-8-sig] ERR UnicodeDecodeError: 'utf-8' codec can't decode byte 0xe4 in position 2: unexpected end of data
+eod2 [utf-8] ERR UnicodeDecodeError: 'utf-8' codec can't decode bytes in position 2-3: unexpected end of data
+eod2 [utf-8-sig] ERR UnicodeDecodeError: 'utf-8' codec can't decode bytes in position 2-3: unexpected end of data
+eod4_3 [utf-8] ERR UnicodeDecodeError: 'utf-8' codec can't decode bytes in position 2-4: unexpected end of data
+eod4_3 [utf-8-sig] ERR UnicodeDecodeError: 'utf-8' codec can't decode bytes in position 2-4: unexpected end of data
+eod3_bad2 [utf-8] ERR UnicodeDecodeError: 'utf-8' codec can't decode byte 0xe0 in position 2: invalid continuation byte
+eod3_bad2 [utf-8-sig] ERR UnicodeDecodeError: 'utf-8' codec can't decode byte 0xe0 in position 2: invalid continuation byte
+bom_then_bad [utf-8] ERR UnicodeDecodeError: 'utf-8' codec can't decode byte 0xff in position 3: invalid start byte
+bom_then_bad [utf-8-sig] ERR UnicodeDecodeError: 'utf-8' codec can't decode byte 0xff in position 0: invalid start byte

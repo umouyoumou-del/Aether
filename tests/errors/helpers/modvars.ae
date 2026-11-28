@@ -1,0 +1,4 @@
+# init_module_vars.ae 用的辅助模块（放在子目录里，不被 tests/errors/*.ae 当成测试用例）：
+# 一个没有类型注解的模块级变量、一个有注解的。
+LIMIT = 7
+TYPED: int = 8

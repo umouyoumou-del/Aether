@@ -1,0 +1,9 @@
+# glob 模块：Python 3.12 的 glob.glob / glob.escape / glob.has_magic（P12，rt/pyglob.go）。
+# POSIX 规则：fnmatch 大小写敏感；不带 include_hidden 时 * / ** 不匹配点开头的名字；recursive 时 ** 匹配零到多层目录
+# （跟随指向目录的符号链接）。与 CPython 唯一的差别是结果顺序：这里每层目录按名字排序，Python 按 os.scandir 的
+# 目录顺序（未定义）——要确定顺序请 sorted()。root_dir / dir_fd 未实现。
+# 与 os.glob（Go 的 filepath.Glob）不同：那个不认 **，点文件规则也不一样。
+
+@go("rt.PyGlob") def glob(pathname: str, recursive: bool = false, include_hidden: bool = false) -> list[str]
+@go("rt.PyGlobEscape") def escape(pathname: str) -> str
+@go("rt.PyGlobHasMagic") def has_magic(s: str) -> bool

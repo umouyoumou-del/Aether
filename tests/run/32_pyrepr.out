@@ -1,0 +1,15 @@
+empty ''
+plain 'ab'
+single "it's"
+double '"x'
+both '\'"'
+backslash '\\n'
+ws '\t\n\r'
+ctrl '\x00\x01\x1f\x7f'
+c1 '\x80\x85\x9f'
+latin1 '\xa0\xadéÿ'
+bmp '\u2028\u200b\ufeff�中'
+astral '😀\U000e0001\U0010ffff\U0001fae9'
+u15_1 '\U0002fffc'
+quote_only_double '"'
+sweep 3f19ffb45ed3fd9a56d50fe395f7abbda75d44ddd37ab2631ac4c88aefd862f7

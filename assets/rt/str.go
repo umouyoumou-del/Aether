@@ -793,23 +793,7 @@ func StrReplace(s, old, new string, count int) string {
 
 func StrSplit(s string, sep Opt[string], maxsplit int) *List[string] {
 	if !sep.Ok {
-		if maxsplit < 0 {
-			return &List[string]{S: strings.Fields(s)}
-		}
-		var out []string
-		rest := strings.TrimLeftFunc(s, unicode.IsSpace)
-		for len(out) < maxsplit && rest != "" {
-			i := strings.IndexFunc(rest, unicode.IsSpace)
-			if i < 0 {
-				break
-			}
-			out = append(out, rest[:i])
-			rest = strings.TrimLeftFunc(rest[i:], unicode.IsSpace)
-		}
-		if rest != "" {
-			out = append(out, rest)
-		}
-		return &List[string]{S: out}
+		return &List[string]{S: pySplitWhitespace(s, maxsplit)}     // 空白按 Python（pyunicode.go）
 	}
 	if sep.V == "" {
 		Raise("ValueError", "分隔符不能为空字符串")
@@ -826,31 +810,7 @@ func StrRSplit(s string, sep Opt[string], maxsplit int) *List[string] {
 		return StrSplit(s, sep, -1)
 	}
 	if !sep.Ok {
-		fields := strings.Fields(s)
-		if len(fields) <= maxsplit+1 {
-			return &List[string]{S: fields}
-		}
-		// 保留左侧原文
-		k := len(fields) - maxsplit
-		cut := 0
-		count := 0
-		inField := false
-		for i, r := range s {
-			if unicode.IsSpace(r) {
-				if inField {
-					count++
-					inField = false
-					if count == k {
-						cut = i
-						break
-					}
-				}
-			} else {
-				inField = true
-			}
-		}
-		left := strings.TrimSpace(s[:cut])
-		return &List[string]{S: append([]string{left}, fields[k:]...)}
+		return &List[string]{S: pyRSplitWhitespace(s, maxsplit)}    // 左段保留开头空白，同 CPython
 	}
 	parts := strings.Split(s, sep.V)
 	if len(parts) <= maxsplit+1 {
@@ -888,21 +848,21 @@ func StrJoin(sep string, it iter.Seq[string]) string {
 
 func StrStrip(s string, chars Opt[string]) string {
 	if !chars.Ok {
-		return strings.TrimSpace(s)
+		return pyTrimSpace(s)
 	}
 	return strings.Trim(s, chars.V)
 }
 
 func StrLStrip(s string, chars Opt[string]) string {
 	if !chars.Ok {
-		return strings.TrimLeftFunc(s, unicode.IsSpace)
+		return strings.TrimLeftFunc(s, PyIsSpace)
 	}
 	return strings.TrimLeft(s, chars.V)
 }
 
 func StrRStrip(s string, chars Opt[string]) string {
 	if !chars.Ok {
-		return strings.TrimRightFunc(s, unicode.IsSpace)
+		return strings.TrimRightFunc(s, PyIsSpace)
 	}
 	return strings.TrimRight(s, chars.V)
 }
@@ -919,13 +879,13 @@ func strAll(s string, f func(rune) bool) bool {
 	return true
 }
 
-func StrIsDigit(s string) bool { return strAll(s, unicode.IsDigit) }
-func StrIsAlpha(s string) bool { return strAll(s, unicode.IsLetter) }
-func StrIsSpace(s string) bool { return strAll(s, unicode.IsSpace) }
-func StrIsAlnum(s string) bool {
-	return strAll(s, func(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) })
-}
-func StrIsNumeric(s string) bool { return strAll(s, unicode.IsNumber) }
+// 以下判定与 CPython 3.12 逐码位一致（pyunicode.go）。
+func StrIsDigit(s string) bool   { return strAll(s, PyIsDigit) }
+func StrIsDecimal(s string) bool { return strAll(s, PyIsDecimal) }
+func StrIsAlpha(s string) bool   { return strAll(s, PyIsAlpha) }
+func StrIsSpace(s string) bool   { return strAll(s, PyIsSpace) }
+func StrIsAlnum(s string) bool   { return strAll(s, PyIsAlnum) }
+func StrIsNumeric(s string) bool { return strAll(s, PyIsNumeric) }
 
 func StrIsUpper(s string) bool {
 	cased := false
@@ -1075,15 +1035,16 @@ func StrIsEmpty(s string) bool { return s == "" }
 
 // ===== 字符方法 =====
 
-func CharIsDigit(c Char) bool  { return unicode.IsDigit(rune(c)) }
-func CharIsNumeric(c Char) bool { return unicode.IsNumber(rune(c)) }
-func CharIsAlpha(c Char) bool  { return unicode.IsLetter(rune(c)) }
-func CharIsSpace(c Char) bool  { return unicode.IsSpace(rune(c)) }
+func CharIsDigit(c Char) bool   { return PyIsDigit(rune(c)) }
+func CharIsDecimal(c Char) bool { return PyIsDecimal(rune(c)) }
+func CharIsNumeric(c Char) bool { return PyIsNumeric(rune(c)) }
+func CharIsAlpha(c Char) bool   { return PyIsAlpha(rune(c)) }
+func CharIsSpace(c Char) bool   { return PyIsSpace(rune(c)) }
 func CharIsUpper(c Char) bool  { return unicode.IsUpper(rune(c)) }
 func CharIsLower(c Char) bool  { return unicode.IsLower(rune(c)) }
-func CharIsAlnum(c Char) bool  { return unicode.IsLetter(rune(c)) || unicode.IsDigit(rune(c)) }
+func CharIsAlnum(c Char) bool  { return PyIsAlnum(rune(c)) }
 func CharUpper(c Char) Char    { return Char(unicode.ToUpper(rune(c))) }
-func CharLower(c Char) Char    { return Char(unicode.ToLower(rune(c))) }
+func CharLower(c Char) Char    { return Char(PyCharLower(rune(c))) }
 func CharIsPunct(c Char) bool  { return unicode.IsPunct(rune(c)) }
 func CharDigitValue(c Char) int {
 	if c >= '0' && c <= '9' {

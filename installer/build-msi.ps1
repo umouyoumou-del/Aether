@@ -16,9 +16,9 @@ try {
         Write-Host '未找到 WiX，正在安装到 installer\.wix ...'
         dotnet tool install --tool-path (Join-Path $PSScriptRoot '.wix') wix --version 5.0.2
     }
-    & $wix build (Join-Path $PSScriptRoot 'Aether.wxs') -o (Join-Path $PSScriptRoot 'Aether-0.3.0-x64.msi')
-    & $wix msi validate (Join-Path $PSScriptRoot 'Aether-0.3.0-x64.msi')
-    Write-Host '已生成 installer\Aether-0.3.0-x64.msi'
+    & $wix build (Join-Path $PSScriptRoot 'Aether.wxs') -o (Join-Path $PSScriptRoot 'Aether-0.4.0-x64.msi')
+    & $wix msi validate (Join-Path $PSScriptRoot 'Aether-0.4.0-x64.msi')
+    Write-Host '已生成 installer\Aether-0.4.0-x64.msi'
 }
 finally {
     Pop-Location

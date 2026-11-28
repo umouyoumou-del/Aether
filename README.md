@@ -65,7 +65,7 @@ Aether 把 `.ae` 源码翻译成 Go，再由 Go 编译为原生程序。
 
 ### Windows（PowerShell）
 
-**方式一：MSI 安装包（推荐）**——下载 Release 中的 `Aether-0.3.0-x64.msi`，双击安装。
+**方式一：MSI 安装包（推荐）**——下载 Release 中的 `Aether-0.4.0-x64.msi`，双击安装。
 它会把编译器装到 `Program Files\Aether`、自动加入系统 PATH、并创建开始菜单快捷方式。
 安装后打开任意终端即可使用 `aether run hello.ae`（编译程序仍需本机有 Go 工具链）。
 
@@ -315,7 +315,7 @@ test "加法":                                   # aether test 文件.ae
 ### 标准库
 
 内置：`print` `input` `len` `range` `enumerate` `zip` `sorted` `reversed` `sum` `min` `max` `any` `all` `abs` `round` `open` 等；
-模块：`math` `random` `time` `datetime` `sys` `os` `os.path` `json` `re` `csv` `http` `heapq` `bisect` `collections` `itertools` `functools` `statistics` `string` `textwrap` `base64` `binpack` `hashlib`，以及深度学习的 `tensor` `tensor.nn` `tensor.optim`。完整列表见 [docs/标准库.md](docs/标准库.md)。
+模块：`math` `random` `time` `datetime` `sys` `os` `os.path` `json` `re` `csv` `http` `heapq` `bisect` `collections` `itertools` `functools` `statistics` `string` `textwrap` `base64` `binpack` `hashlib` `fnmatch` `glob`，以及深度学习的 `tensor` `tensor.nn` `tensor.optim`。完整列表见 [docs/标准库.md](docs/标准库.md)。
 
 ```python
 import http
@@ -366,6 +366,31 @@ wg.add(1)
 go slow_task()
 if not wg.wait_for(2.0):
     print("超时，任务还没结束")
+```
+
+### Python 兼容的文本、路径与随机（0.4.0 新增）
+
+这一版把标准库里几处长期与 CPython 不一致的行为补齐，逐码位/逐字节对齐 CPython 3.12：
+
+- **`fnmatch` / `glob`（新模块）**：Python 3.12 的 `fnmatch` `fnmatchcase` `filter` 与
+  `glob` `escape` `has_magic`。POSIX 下大小写敏感，`glob` 支持 `**` 与点文件规则；
+  与 CPython 唯一差别是结果按名字排序（CPython 依赖未定义的目录顺序）。
+- **`random.Random`**：新增与 CPython 逐位相同的 MT19937 随机流，提供
+  `seed` `random` `getrandbits` `randrange` `randint` `choice` `shuffle` `sample` `uniform`。
+  原来模块级的 `choice` / `shuffle` 等仍走 Go 运行时的 PCG，两者随机流不同。
+- **Unicode 与字符串**：`str.lower()` 改为完整 Unicode 映射（含 U+0130 → `i̇` 与希腊末尾 sigma），
+  新增 `str.isprintable()` / `str.pyrepr()`、`str`/`char` 的 `isdecimal()`；
+  `isalpha` / `isdigit` / `isnumeric` / `isspace` 的判定改为按 CPython 逐码位生成的表。
+- **文件与路径**：`os.read_text()` 支持严格 UTF-8、BOM 保留/剥离、`errors` 处理器与通用换行，
+  错误信息与 CPython 一致；新增 `os.symlink()` 与 `os.path.islink()`（断链也算）。
+
+```python
+import glob, random, os
+
+print(glob.glob("src/**/*.ae", recursive=True))   # 按名字排序
+rng = random.Random(1234)
+print(rng.randint(1, 10))                         # 与 CPython 同种子结果相同
+os.read_text("README.md", encoding="utf-8-sig")  # 严格 UTF-8，自动去 BOM
 ```
 
 ## 深度学习

@@ -1,0 +1,94 @@
+# str / char 的 Unicode 判定、lower()、strip()、split() / rsplit() 的空白：与 CPython 3.12 逐码位一致（P12）。
+# 期望输出（33_pyunicode.out）由 CPython 3.12 生成：先是全部码位（代理区除外）逐个判定 / 小写后的 sha256，
+# 再是末尾 sigma、U+0130、\x1c 空白、split / rsplit 各种 maxsplit 的样例。
+import hashlib
+
+def mk(cps: list[int]) -> str:
+    s = ""
+    for c in cps:
+        s += chr(c)
+    return s
+
+def rl(xs: list[str]) -> str:
+    parts: list[str] = []
+    for x in xs:
+        parts.append(x.pyrepr())
+    return "[" + ", ".join(parts) + "]"
+
+def bit(b: bool) -> str:
+    if b:
+        return "1"
+    return "0"
+
+PREDS: list[str] = ["isalpha", "isdecimal", "isdigit", "isnumeric", "isalnum", "isspace"]
+
+def pred(name: str, s: str) -> bool:
+    if name == "isalpha":
+        return s.isalpha()
+    if name == "isdecimal":
+        return s.isdecimal()
+    if name == "isdigit":
+        return s.isdigit()
+    if name == "isnumeric":
+        return s.isnumeric()
+    if name == "isalnum":
+        return s.isalnum()
+    return s.isspace()
+
+def cpred(name: str, ch: char) -> bool:
+    if name == "isalpha":
+        return ch.isalpha()
+    if name == "isdecimal":
+        return ch.isdecimal()
+    if name == "isdigit":
+        return ch.isdigit()
+    if name == "isnumeric":
+        return ch.isnumeric()
+    if name == "isalnum":
+        return ch.isalnum()
+    return ch.isspace()
+
+for name in PREDS:
+    h = hashlib.sha256()
+    hc = hashlib.sha256()
+    c = 0
+    while c < 0x110000:
+        if c < 0xD800 or c > 0xDFFF:
+            s = chr(c)
+            h.update(bit(pred(name, s)))
+            for ch in s:
+                hc.update(bit(cpred(name, ch)))
+        c += 1
+    d = h.hexdigest()
+    if d != hc.hexdigest():
+        print("char." + name + " disagrees with str." + name)
+    print("sweep str." + name + " " + d)
+h = hashlib.sha256()
+c = 0
+first = true
+while c < 0x110000:
+    if c < 0xD800 or c > 0xDFFF:
+        if not first:
+            h.update("\n")
+        h.update(chr(c).lower())
+        first = false
+    c += 1
+print("sweep str.lower " + h.hexdigest())
+LOWER: list[list[int]] = [[0x391, 0x3a3], [0x391, 0x3a3, 0x20], [0x3a3, 0x391], [0x3a3], [0x391, 0x3a3, 0x27, 0x391], [0x391, 0x3a3, 0x2e], [0x61, 0x3a3, 0x62], [0x130, 0x73, 0x74], [0x391, 0x3a3, 0x301], [0x391, 0x301, 0x3a3], [0x13a0, 0x41], [0x1e9e, 0x4b, 0x212a], [0x41, 0x3a3, 0x3a3], [0x3a3, 0x3a3, 0x3a3, 0x20, 0x3a3], [0xa7cb, 0x10d50]]
+STRS: list[list[int]] = [[], [0x20], [0x1c, 0x20, 0x61, 0x20, 0x1f], [0x3000, 0x78, 0x3000], [0x85, 0x79, 0xa0], [0x200b, 0x7a, 0x200b], [0x20, 0x20, 0x61, 0x20, 0x62, 0x20, 0x63, 0x20, 0x20], [0x1c, 0x61, 0x1d, 0x62, 0x1e], [0x61, 0x2028, 0x62, 0x2029, 0x63], [0x61], [0x20, 0x61], [0x61, 0x20]]
+ISSTRS: list[list[int]] = [[], [0xb2], [0xbd], [0x4e00], [0x61, 0x62, 0x63], [0x61, 0x31], [0x661, 0x662, 0x663], [0x2163], [0x1d7ce], [0x5f], [0x20, 0x1c], [0x88f], [0x31, 0xb2]]
+MAXS: list[int] = [-1, 0, 1, 2, 5]
+for cp in LOWER:
+    s = mk(cp)
+    print("lower " + s.pyrepr() + " -> " + s.lower().pyrepr())
+for cp in STRS:
+    s = mk(cp)
+    print("strip " + s.pyrepr() + " -> " + s.strip().pyrepr() + " " + s.lstrip().pyrepr() + " " + s.rstrip().pyrepr())
+    for m in MAXS:
+        print("split " + s.pyrepr() + " " + str(m) + " -> " + rl(s.split(null, m)) + " | rsplit -> " + rl(s.rsplit(null, m)))
+for cp in ISSTRS:
+    s = mk(cp)
+    parts: list[str] = []
+    for name in PREDS:
+        parts.append(name + "=" + bit(pred(name, s)))
+    print("is " + s.pyrepr() + " " + " ".join(parts))

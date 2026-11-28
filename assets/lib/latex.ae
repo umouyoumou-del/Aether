@@ -1303,7 +1303,7 @@ def _matching_delim(open_delim: str) -> str:
 
 # 约定用作函数名的字母。只有这些字母（以及希腊字母）后面紧跟括号时才读成函数调用，
 # x(x+1) 仍然是乘法 x*(x+1)。要表示别的函数，用 \phi(t) 这样的希腊字母或 sym.ufunc。
-FN_LETTERS = "fghuvwFGHUVW"
+FN_LETTERS: str = "fghuvwFGHUVW"
 
 def _is_fn_letter(name: str) -> bool:
     if len(name) != 1:

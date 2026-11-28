@@ -1,0 +1,51 @@
+# glob / fnmatch：与 CPython 3.12 的 glob.glob、glob.escape、fnmatch.fnmatchcase 一致（结果排序后比；P12）。
+# 期望输出（35_glob.out）由 CPython 3.12 在同样的目录树上生成；根目录替换成 {ROOT}。
+import fnmatch
+import glob
+import os
+
+ROOT = os.join(os.tempdir(), "ae-glob-golden")
+
+def show(xs: list[str]) -> str:
+    parts: list[str] = []
+    for x in sorted(xs):
+        parts.append(x.replace(ROOT, "{ROOT}").pyrepr())
+    return "[" + ", ".join(parts) + "]"
+
+def bit(b: bool) -> str:
+    if b:
+        return "1"
+    return "0"
+
+FILES: list[str] = ["a.py", "b.txt", ".hidden.py", "c.PY", "sub/c.py", "sub/d.txt", "sub/.h/e.py", "sub/sub2/f.py", "sub/sub2/.g.py", ".hd/x.py", "site-packages/s.py", "x.py/inner.py", "[x].py", "-dash.py", "!bang.py", "^caret.py", "]br.py"]
+DIRS: list[str] = ["empty_dir"]
+LINKS: list[(str, str)] = [("sub", "link_sub"), ("nonexistent", "broken.py")]
+PATTERNS: list[(str, bool, bool)] = [("**/*.py", true, false), ("**/*.py", true, true), ("*.py", false, false), ("**/*.py", false, false), ("**", true, false), ("**/", true, false), ("*/", false, false), ("sub/*", false, false), ("[ab].py", false, false), ("?.py", false, false), ("*.[!t]*", false, false), ("[!a-b]*.py", false, false), ("[a-]*", false, false), ("[]]*", false, false), ("[!]]*", false, false), ("[b-a]*", false, false), ("[!b-a]*", false, false), ("a.py", false, false), ("zz.py", false, false), ("broken.py", false, false), ("sub/", false, false), (".*", false, false), ("**/.*.py", true, false), ("link_sub/*.py", false, false), ("*/*.py", false, false), ("**/sub2/*.py", true, false), ("**/*.py", true, false)]
+FN: list[(str, str)] = [("abc", "a*c"), ("abc", "a?c"), ("ac", "a?c"), ("a-c", "[a-c-e]*"), ("-", "[a-c-e]"), ("d", "[a-c-e]"), ("e", "[a-c-e]"), ("\\", "[\\]"), ("b", "[!a]"), ("a", "[!a]"), ("]", "[]]"), ("]", "[!]]"), ("x", "[!]]"), ("a", "[b-a]"), ("q", "[!b-a]"), ("-", "[a-]"), ("[", "["), ("[x", "[x"), ("aXbYc", "a*b*c"), ("abc", "*"), ("", "*"), ("", "?"), ("a\nb", "a?b"), ("A.PY", "*.py"), ("^", "[^]"), ("&", "[&&]"), ("x", "[a-cx-z]"), ("é", "[a-z]"), ("中", "?"), ("ab", "a**b"), ("abcabd", "*abd"), ("a]b", "a[]]b")]
+
+if os.exists(ROOT):
+    os.remove(ROOT)
+os.mkdir(ROOT)
+for d in DIRS:
+    os.mkdir(ROOT + "/" + d)
+for f in FILES:
+    p = ROOT + "/" + f
+    parent = os.dirname(p)
+    if not os.exists(parent):
+        os.mkdir(parent)
+    os.write_file(p, "x")
+for link in LINKS:
+    src, dst = link
+    os.symlink(src, ROOT + "/" + dst)
+for case in PATTERNS:
+    pat, rec, hid = case
+    print("glob " + pat.pyrepr() + " recursive=" + bit(rec) + " hidden=" + bit(hid) + " -> "
+          + show(glob.glob(ROOT + "/" + pat, rec, hid)))
+esc = glob.escape(ROOT + "/[x].py")
+print("escape -> " + esc.replace(ROOT, "{ROOT}").pyrepr() + " " + show(glob.glob(esc)))
+print("empty -> " + show(glob.glob("")) + " " + bit(glob.has_magic("a[b")) + " " + bit(glob.has_magic("ab")))
+for pair in FN:
+    name, pat = pair
+    print("fnmatch " + name.pyrepr() + " " + pat.pyrepr() + " -> " + bit(fnmatch.fnmatchcase(name, pat)))
+os.remove(ROOT)
+

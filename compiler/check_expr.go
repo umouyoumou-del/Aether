@@ -2553,6 +2553,13 @@ func (c *Checker) moduleMember(e *Attr, m *Module) Type {
 	sym := m.Scope.Syms[e.Name]
 	if sym == nil || sym.Mod != m && sym.Kind != SFunc && sym.Kind != SType {
 		if sym == nil {
+			// 与 ident() 里本模块的同类情形一致：各类的 __init__ 先于所有模块的顶层代码检查，
+			// 没写类型注解的模块级变量此时还没进作用域。不要报成「没有」，那会误导人去找拼写。
+			if c.initPhase && m.pendingGlobals[e.Name] {
+				d := c.errorf(e.NamePos, "模块 %s 的全局变量 %s 的类型要在该模块顶层代码检查后才能确定，__init__ 中暂时不能使用", m.Name, e.Name)
+				d.Notes = append(d.Notes, "在模块 "+m.Name+" 里给它加上类型注解即可，例如 "+e.Name+": int = 0")
+				return tInvalid
+			}
 			c.errorf(e.NamePos, "模块 %s 中没有 '%s'", m.Name, e.Name)
 			return tInvalid
 		}

@@ -1,0 +1,31 @@
+# __init__ 里读取标准库的模块级变量（os.path.sep、sys.argv、sys.platform、sys.stdout）。
+# 这些变量以前没有类型注解，而各类的 __init__ 先于所有模块的顶层代码检查，
+# 于是 __init__ 里一读就报「模块 os.path 中没有 'sep'」。
+import os
+import sys
+
+class Paths:
+    sep: str
+    argc: int
+    plat: str
+
+    def __init__(self):
+        self.sep = os.path.sep
+        self.argc = len(sys.argv)
+        self.plat = sys.platform
+
+class Logger:
+    stream: File
+
+    def __init__(self):
+        self.stream = sys.stdout
+
+    def log(self, msg: str):
+        print("log: " + msg, file=self.stream)
+
+p = Paths()
+print(p.sep == "/" or p.sep == "\\")
+print(p.sep == os.path.sep)
+print(p.argc >= 1)
+print(p.plat == sys.platform and p.plat != "")
+Logger().log("ok")

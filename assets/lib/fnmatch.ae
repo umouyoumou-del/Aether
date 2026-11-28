@@ -1,0 +1,15 @@
+# fnmatch 模块：Python 3.12 的 fnmatch / fnmatchcase / filter（POSIX：二者都大小写敏感），P12，rt/pyglob.go。
+# 模式语义逐条对应 fnmatch._translate 产出的正则（[!...] 否定、首位 ] 为字面、空区间删除、末尾 - 为字面……），
+# 但不经过正则引擎：直接按记号匹配，因此不受 Go RE2 与 Python re 语法差别的影响。
+
+@go("rt.PyFnmatch") def fnmatchcase(name: str, pat: str) -> bool
+
+def fnmatch(name: str, pat: str) -> bool:
+    return fnmatchcase(name, pat)
+
+def filter(names: list[str], pat: str) -> list[str]:
+    out: list[str] = []
+    for name in names:
+        if fnmatchcase(name, pat):
+            out.append(name)
+    return out

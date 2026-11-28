@@ -1,0 +1,35 @@
+# 各类的 __init__ 先于所有模块的顶层代码检查：没有类型注解的模块级变量在 __init__ 里还不能用，
+# 报错要说清原因。跨模块的情形以前报的是误导性的「模块 X 中没有 'LIMIT'」。
+import helpers.modvars
+
+LOCAL = 1
+LOCAL_TYPED: int = 2
+
+class A:
+    x: int
+
+    def __init__(self):
+        self.x = modvars.LIMIT        # 错误: 的全局变量 LIMIT 的类型要在该模块顶层代码检查后才能确定
+
+class B:
+    y: int
+
+    def __init__(self):
+        self.y = LOCAL                # 错误: 全局变量 LOCAL 的类型要在模块顶层代码检查后才能确定
+
+# 有类型注解的模块级变量（本模块的、别的模块的）在 __init__ 里都能用
+class C:
+    z: int
+
+    def __init__(self):
+        self.z = modvars.TYPED + LOCAL_TYPED
+
+# 普通方法在顶层代码之后才检查，读没注解的模块级变量没有问题
+class D:
+    w: int
+
+    def __init__(self):
+        self.w = 0
+
+    def later(self):
+        self.w = modvars.LIMIT

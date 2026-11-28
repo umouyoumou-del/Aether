@@ -7,6 +7,12 @@ import os.path    # 使 import os 之后可以使用 os.path.join(...)
 @go("rt.Setenv") def setenv(name: str, value: str)
 @go("rt.Exit") def exit(code: int = 0)
 @go("rt.ReadFile") def read_file(path: str) -> str
+# Python 的 Path(path).read_text(encoding=...)：严格 UTF-8（非法字节抛 UnicodeDecodeError，文案同 CPython）、
+# "utf-8" 保留 BOM / "utf-8-sig" 去掉 BOM、通用换行；errors 取 "strict" / "ignore" / "replace"（P12，同 CPython：
+# 未知的处理器名只在真遇到解码错误时才抛 LookupError）。read_file 则总是去 BOM、不校验、不转换换行。
+@go("rt.ReadText") def read_text(path: str, encoding: str = "utf-8", errors: str = "strict") -> str
+# os.symlink(src, dst)（P12）
+@go("rt.Symlink") def symlink(src: str, dst: str)
 @go("rt.WriteFile") def write_file(path: str, data: str)
 @go("rt.AppendFile") def append_file(path: str, data: str)
 @go("rt.ReadBytes") def read_bytes(path: str) -> list[u8]

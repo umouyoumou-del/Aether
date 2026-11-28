@@ -1,0 +1,61 @@
+# os.read_text(path, encoding, errors)：errors 取 ignore / replace 时与 CPython 3.12 的 read_text 逐码位一致；
+# 未知的处理器名只在真遇到解码错误时才抛 LookupError（P12）。期望输出由 CPython 3.12 生成。
+import base64
+import os
+
+CASES: list[(str, str)] = [
+    ("plain", "eyJhIjogMX0="),
+    ("bom", "77u/eyJhIjogMX0="),
+    ("crlf", "YQ0KYg1jCg=="),
+    ("cjk", "5Lit5paH"),
+    ("empty", ""),
+    ("bad_start", "/3t9"),
+    ("bad_start_mid", "YWKAY2Q="),
+    ("c0", "wIA="),
+    ("cont2", "eMNB"),
+    ("cont3a", "5EFC"),
+    ("cont3b", "5L1B"),
+    ("overlong_e0", "4ICA"),
+    ("surrogate_ed", "7aCA"),
+    ("cont4a", "8EFBQQ=="),
+    ("cont4b", "8J9BQQ=="),
+    ("cont4c", "8J+YQQ=="),
+    ("f4_high", "9JCAgA=="),
+    ("f5", "9YCAgA=="),
+    ("eod1", "b2vk"),
+    ("eod2", "b2vkvQ=="),
+    ("eod4_3", "b2vwn5g="),
+    ("eod3_bad2", "b2vggA=="),
+    ("bom_then_bad", "77u//w=="),
+    ("crlf_bad", "YQ3/CmINCuQN"),
+    ("bad_bom_mid", "eO+7v3nD"),
+]
+
+def hex_of(code: int) -> str:
+    digits = "0123456789abcdef"
+    if code == 0:
+        return "0"
+    out = ""
+    n = code
+    while n > 0:
+        out = str(digits[n % 16]) + out
+        n = n // 16
+    return out
+
+def render(s: str) -> str:
+    parts: list[str] = []
+    for ch in s:
+        parts.append(hex_of(ord(ch)))
+    return "[" + " ".join(parts) + "]"
+
+for case in CASES:
+    name, b64 = case
+    os.write_bytes(name, base64.decode_bytes(b64))
+    for enc in ["utf-8", "utf-8-sig"]:
+        for errors in ["ignore", "replace", "bogus"]:
+            out = ""
+            try:
+                out = "OK " + render(os.read_text(name, enc, errors))
+            except Exception as e:
+                out = "ERR " + type_name(e) + ": " + e.message
+            print(name + " [" + enc + "/" + errors + "] " + out)

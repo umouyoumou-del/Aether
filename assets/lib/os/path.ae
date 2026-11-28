@@ -4,6 +4,8 @@
 @go("rt.Exists") def exists(path: str) -> bool
 @go("rt.IsFile") def isfile(path: str) -> bool
 @go("rt.IsDir") def isdir(path: str) -> bool
+# os.path.islink（P13）：Lstat 判符号链接，断链也算
+@go("rt.IsLink") def islink(path: str) -> bool
 @go("rt.PathIsAbs") def isabs(path: str) -> bool
 @go("rt.PathBase") def basename(path: str) -> str
 @go("rt.PathDir") def dirname(path: str) -> str
@@ -16,7 +18,9 @@
 @go("rt.PathSep") def _sep() -> str
 
 # 路径分隔符（Windows 上是 \，其它系统是 /）
-sep = _sep()
+# 模块级变量一律写明类型：各类的 __init__ 先于所有模块的顶层代码检查，不注解的话
+# 在 __init__ 里读 os.path.sep 会因为类型尚未确定而无法使用。
+sep: str = _sep()
 
 # 分为 (目录, 文件名)
 def split(path: str) -> (str, str):

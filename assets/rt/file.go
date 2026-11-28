@@ -274,6 +274,157 @@ func ReadFile(path string) string {
 	return strings.TrimPrefix(s, string(rune(0xFEFF)))
 }
 
+// ReadText 对应 Python 的 Path(path).read_text(encoding=...)（文本模式、errors="strict"、通用换行）。
+// 与 ReadFile 的区别正是 Python 文本读的可观测语义：
+//   - "utf-8"（及其别名）**保留**开头的 BOM（解出 U+FEFF）；"utf-8-sig" 去掉它——ReadFile 总是去掉；
+//   - 非法 UTF-8 抛 UnicodeDecodeError，出错区间、原因与文案与 CPython 的 'utf-8' 编解码器相同；
+//   - "\r\n" 与单独的 "\r" 都换成 "\n"；
+//   - 其它编码名抛 LookupError("unknown encoding: <名>")。
+func ReadText(path, encoding, errors string) string {
+	sig, ok := utf8CodecOf(encoding)
+	if !ok {
+		Raise("LookupError", "unknown encoding: %s", encoding)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		raiseIO(err, path)
+	}
+	if sig && len(b) >= 3 && b[0] == 0xEF && b[1] == 0xBB && b[2] == 0xBF {
+		b = b[3:]
+	}
+	// errors（P12）：每段非法序列 [start, end) 与 strict 报错的区间相同；ignore 跳过它、replace 换成一个 U+FFFD。
+	var sb strings.Builder
+	pos := 0
+	for {
+		start, end, reason, bad := utf8FirstError(b[pos:])
+		if !bad {
+			sb.Write(b[pos:])
+			break
+		}
+		start, end = start+pos, end+pos
+		switch errors {
+		case "strict":
+			if end == start+1 {
+				Raise("UnicodeDecodeError", "'utf-8' codec can't decode byte 0x%02x in position %d: %s", b[start], start, reason)
+			}
+			Raise("UnicodeDecodeError", "'utf-8' codec can't decode bytes in position %d-%d: %s", start, end-1, reason)
+		case "ignore":
+			sb.Write(b[pos:start])
+		case "replace":
+			sb.Write(b[pos:start])
+			sb.WriteRune(0xFFFD)
+		default:
+			Raise("LookupError", "unknown error handler name '%s'", errors)
+		}
+		pos = end
+	}
+	s := sb.String()
+	if strings.IndexByte(s, '\r') >= 0 {
+		s = strings.ReplaceAll(s, "\r\n", "\n")
+		s = strings.ReplaceAll(s, "\r", "\n")
+	}
+	return s
+}
+
+// utf8CodecOf 按 Python 的编码名规范化（小写；连续的非字母数字（点除外）折成一个 "_"）
+// 认出 utf-8 与 utf-8-sig 两族。返回 (是否 -sig, 是否认得)。
+func utf8CodecOf(encoding string) (bool, bool) {
+	var sb strings.Builder
+	punct := false
+	for _, c := range strings.ToLower(encoding) {
+		if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '.' {
+			if punct && sb.Len() > 0 {
+				sb.WriteByte('_')
+			}
+			sb.WriteRune(c)
+			punct = false
+		} else {
+			punct = true
+		}
+	}
+	for _, name := range []string{sb.String(), strings.ReplaceAll(sb.String(), ".", "_")} {
+		switch name {
+		case "utf_8", "utf8", "u8", "utf", "utf8_ucs2", "utf8_ucs4", "cp65001":
+			return false, true
+		case "utf_8_sig":
+			return true, true
+		}
+	}
+	return false, false
+}
+
+// utf8FirstError 找第一处非法 UTF-8 序列，返回出错区间 [start, end) 与原因。逐分支对应 CPython
+// Objects/stringlib/codecs.h 的 utf8_decode（InvalidStart / InvalidContinuation1..3 / 截断）
+// 与 unicodeobject.c 里 unicode_decode_utf8 对这些返回值的区间约定（全量解码，final=True）。
+func utf8FirstError(b []byte) (int, int, string, bool) {
+	isCont := func(c byte) bool { return c >= 0x80 && c <= 0xBF }
+	n := len(b)
+	i := 0
+	for i < n {
+		c := b[i]
+		switch {
+		case c < 0x80:
+			i++
+			continue
+		case c < 0xC2: // 0x80..0xBF 是续字节，0xC0 / 0xC1 只能编码 0000-007F（过长）
+			return i, i + 1, "invalid start byte", true
+		case c < 0xE0: // 0080-07FF
+			if n-i < 2 {
+				return i, n, "unexpected end of data", true
+			}
+			if !isCont(b[i+1]) {
+				return i, i + 1, "invalid continuation byte", true
+			}
+			i += 2
+		case c < 0xF0: // 0800-FFFF：E0 的第二字节须 >= A0（防过长），ED 的须 < A0（防代理）
+			badSecond := func(c2 byte) bool {
+				return !isCont(c2) || (c2 < 0xA0 && c == 0xE0) || (c2 >= 0xA0 && c == 0xED)
+			}
+			if n-i < 3 {
+				if n-i >= 2 && badSecond(b[i+1]) {
+					return i, i + 1, "invalid continuation byte", true
+				}
+				return i, n, "unexpected end of data", true
+			}
+			if badSecond(b[i+1]) {
+				return i, i + 1, "invalid continuation byte", true
+			}
+			if !isCont(b[i+2]) {
+				return i, i + 2, "invalid continuation byte", true
+			}
+			i += 3
+		case c < 0xF5: // 10000-10FFFF：F0 的第二字节须 >= 90，F4 的须 < 90
+			badSecond := func(c2 byte) bool {
+				return !isCont(c2) || (c2 < 0x90 && c == 0xF0) || (c2 >= 0x90 && c == 0xF4)
+			}
+			if n-i < 4 {
+				if n-i >= 2 {
+					if badSecond(b[i+1]) {
+						return i, i + 1, "invalid continuation byte", true
+					}
+					if n-i >= 3 && !isCont(b[i+2]) {
+						return i, i + 2, "invalid continuation byte", true
+					}
+				}
+				return i, n, "unexpected end of data", true
+			}
+			if badSecond(b[i+1]) {
+				return i, i + 1, "invalid continuation byte", true
+			}
+			if !isCont(b[i+2]) {
+				return i, i + 2, "invalid continuation byte", true
+			}
+			if !isCont(b[i+3]) {
+				return i, i + 3, "invalid continuation byte", true
+			}
+			i += 4
+		default: // 0xF5..0xFF
+			return i, i + 1, "invalid start byte", true
+		}
+	}
+	return 0, 0, "", false
+}
+
 func WriteFile(path, data string) {
 	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
 		raiseIO(err, path)

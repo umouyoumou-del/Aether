@@ -10,14 +10,17 @@
 @go("rt.Stderr") def _stderr() -> File
 @go("rt.SysPlatform") def _platform() -> str
 
+# 模块级变量一律写明类型：各类的 __init__ 先于所有模块的顶层代码检查，不注解的话
+# 在 __init__ 里读 sys.argv / sys.stderr 等会因为类型尚未确定而无法使用。
+
 # 命令行参数：argv[0] 是程序的源文件名，其后是传给程序的参数
-argv = _argv()
+argv: list[str] = _argv()
 # 标准输入（与 input() 共用缓冲）、标准输出（与 print 共用缓冲）、标准错误
-stdin = _stdin()
-stdout = _stdout()
-stderr = _stderr()
+stdin: File = _stdin()
+stdout: File = _stdout()
+stderr: File = _stderr()
 # 平台：win32、linux、darwin……
-platform = _platform()
+platform: str = _platform()
 const maxsize: int = 9223372036854775807
 
 # 刷新输出后以给定的状态码退出

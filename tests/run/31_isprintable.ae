@@ -1,0 +1,40 @@
+# str.isprintable() / char.isprintable()：与 CPython 3.12（Unicode 15.0）逐码位一致。
+# 期望输出（31_isprintable.out）由 CPython 3.12 对同一批码位跑出来：先打印全部可打印码位的区间
+# （0..0x10FFFF，代理区 D800–DFFF 除外——Aether 的串是 UTF-8，chr() 给不出孤立代理），再打印几条整串判定。
+
+def hex_of(code: int) -> str:
+    digits = "0123456789abcdef"
+    if code == 0:
+        return "0"
+    out = ""
+    n = code
+    while n > 0:
+        out = str(digits[n % 16]) + out
+        n = n // 16
+    return out
+
+
+in_run = false
+lo = 0
+r = 0
+while r <= 0x110000:
+    p = false
+    if r <= 0x10FFFF and not (r >= 0xD800 and r <= 0xDFFF):
+        p = chr(r).isprintable()
+    if p and not in_run:
+        lo = r
+        in_run = true
+    elif not p and in_run:
+        print(hex_of(lo) + " " + hex_of(r - 1))
+        in_run = false
+    r += 1
+
+samples: list[(str, str)] = [("empty", ""), ("ascii", "abc"), ("space", " "), ("tab", "a\tb"), ("nl", "x\n"),
+                             ("cjk", "中文"), ("ls", "a "), ("nbsp", " "), ("shy", "­"),
+                             ("del", "\u007f"), ("c1", "\u0085"), ("emoji", "\U0001F600"), ("tag", "\U000E0001"),
+                             ("u17", "\U0001FAE9")]
+for s in samples:
+    name, text = s
+    print(name + " " + str(text.isprintable()))
+for ch in "a  ­中":
+    print("char " + hex_of(ord(ch)) + " " + str(ch.isprintable()))

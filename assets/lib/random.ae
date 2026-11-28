@@ -9,3 +9,102 @@
 @go("rt.Choice") def choice[T](xs: list[T]) -> T
 @go("rt.Shuffle") def shuffle[T](xs: list[T])
 @go("rt.Sample") def sample[T](xs: list[T], k: int) -> list[T]
+
+# ===== Python 兼容的 random.Random（P12）=====
+# 与 CPython 3.12 逐位相同的随机流：MT19937 内核在 rt/pyrandom.go（对应 Modules/_randommodule.c），下面的方法
+# 逐行对应 Lib/random.py（randrange 的报错文案也是原文）。上面那些模块级函数仍是 Go 运行时的 PCG，
+# 与 Python 的随机流不同；要和 Python 对齐就用 random.Random(seed)。种子只收 int（64 位）。
+
+@go("*rt.PyRandom", ctor="rt.NewPyRandom")
+class MT19937:
+    def __init__(self, seed: int)
+    @go("Seed") def seed(self, seed: int)
+    @go("Random") def random(self) -> float
+    @go("GetRandBits") def getrandbits(self, k: int) -> int
+    @go("RandBelow") def randbelow(self, n: int) -> int
+    @go("SampleSetSize") def sample_setsize(self, k: int) -> int
+
+class Random:
+    mt: MT19937
+
+    def __init__(self, seed: int):
+        self.mt = MT19937(seed)
+
+    def seed(self, a: int):
+        self.mt.seed(a)
+
+    def random(self) -> float:
+        return self.mt.random()
+
+    def getrandbits(self, k: int) -> int:
+        return self.mt.getrandbits(k)
+
+    def randrange(self, start: int, stop: int? = null, step: int = 1) -> int:
+        if stop == null:
+            if step != 1:
+                raise TypeError("Missing a non-None stop argument")
+            if start > 0:
+                return self.mt.randbelow(start)
+            raise ValueError("empty range for randrange()")
+        width = stop - start
+        if step == 1:
+            if width > 0:
+                return start + self.mt.randbelow(width)
+            raise ValueError("empty range in randrange(" + str(start) + ", " + str(stop) + ")")
+        n = 0
+        if step > 0:
+            n = (width + step - 1) // step
+        elif step < 0:
+            n = (width + step + 1) // step
+        else:
+            raise ValueError("zero step for randrange()")
+        if n <= 0:
+            raise ValueError("empty range in randrange(" + str(start) + ", " + str(stop) + ", " + str(step) + ")")
+        return start + step * self.mt.randbelow(n)
+
+    def randint(self, a: int, b: int) -> int:
+        return self.randrange(a, b + 1)
+
+    def choice[T](self, seq: list[T]) -> T:
+        if len(seq) == 0:
+            raise IndexError("Cannot choose from an empty sequence")
+        return seq[self.mt.randbelow(len(seq))]
+
+    def shuffle[T](self, x: list[T]):
+        i = len(x) - 1
+        while i >= 1:
+            j = self.mt.randbelow(i + 1)
+            t = x[i]
+            x[i] = x[j]
+            x[j] = t
+            i -= 1
+
+    def sample[T](self, population: list[T], k: int) -> list[T]:
+        n = len(population)
+        if k < 0 or k > n:
+            raise ValueError("Sample larger than population or is negative")
+        result: list[T] = []
+        if n <= self.mt.sample_setsize(k):
+            pool: list[T] = []
+            for item in population:
+                pool.append(item)
+            i = 0
+            while i < k:
+                j = self.mt.randbelow(n - i)
+                result.append(pool[j])
+                pool[j] = pool[n - i - 1]
+                i += 1
+            return result
+        selected: set[int] = set()
+        i = 0
+        while i < k:
+            j = self.mt.randbelow(n)
+            while selected.contains(j):
+                j = self.mt.randbelow(n)
+            selected.add(j)
+            result.append(population[j])
+            i += 1
+        return result
+
+    def uniform(self, a: float, b: float) -> float:
+        return a + (b - a) * self.random()

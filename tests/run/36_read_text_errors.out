@@ -1,0 +1,150 @@
+plain [utf-8/ignore] OK [7b 22 61 22 3a 20 31 7d]
+plain [utf-8/replace] OK [7b 22 61 22 3a 20 31 7d]
+plain [utf-8/bogus] OK [7b 22 61 22 3a 20 31 7d]
+plain [utf-8-sig/ignore] OK [7b 22 61 22 3a 20 31 7d]
+plain [utf-8-sig/replace] OK [7b 22 61 22 3a 20 31 7d]
+plain [utf-8-sig/bogus] OK [7b 22 61 22 3a 20 31 7d]
+bom [utf-8/ignore] OK [feff 7b 22 61 22 3a 20 31 7d]
+bom [utf-8/replace] OK [feff 7b 22 61 22 3a 20 31 7d]
+bom [utf-8/bogus] OK [feff 7b 22 61 22 3a 20 31 7d]
+bom [utf-8-sig/ignore] OK [7b 22 61 22 3a 20 31 7d]
+bom [utf-8-sig/replace] OK [7b 22 61 22 3a 20 31 7d]
+bom [utf-8-sig/bogus] OK [7b 22 61 22 3a 20 31 7d]
+crlf [utf-8/ignore] OK [61 a 62 a 63 a]
+crlf [utf-8/replace] OK [61 a 62 a 63 a]
+crlf [utf-8/bogus] OK [61 a 62 a 63 a]
+crlf [utf-8-sig/ignore] OK [61 a 62 a 63 a]
+crlf [utf-8-sig/replace] OK [61 a 62 a 63 a]
+crlf [utf-8-sig/bogus] OK [61 a 62 a 63 a]
+cjk [utf-8/ignore] OK [4e2d 6587]
+cjk [utf-8/replace] OK [4e2d 6587]
+cjk [utf-8/bogus] OK [4e2d 6587]
+cjk [utf-8-sig/ignore] OK [4e2d 6587]
+cjk [utf-8-sig/replace] OK [4e2d 6587]
+cjk [utf-8-sig/bogus] OK [4e2d 6587]
+empty [utf-8/ignore] OK []
+empty [utf-8/replace] OK []
+empty [utf-8/bogus] OK []
+empty [utf-8-sig/ignore] OK []
+empty [utf-8-sig/replace] OK []
+empty [utf-8-sig/bogus] OK []
+bad_start [utf-8/ignore] OK [7b 7d]
+bad_start [utf-8/replace] OK [fffd 7b 7d]
+bad_start [utf-8/bogus] ERR LookupError: unknown error handler name 'bogus'
+bad_start [utf-8-sig/ignore] OK [7b 7d]
+bad_start [utf-8-sig/replace] OK [fffd 7b 7d]
+bad_start [utf-8-sig/bogus] ERR LookupError: unknown error handler name 'bogus'
+bad_start_mid [utf-8/ignore] OK [61 62 63 64]
+bad_start_mid [utf-8/replace] OK [61 62 fffd 63 64]
+bad_start_mid [utf-8/bogus] ERR LookupError: unknown error handler name 'bogus'
+bad_start_mid [utf-8-sig/ignore] OK [61 62 63 64]
+bad_start_mid [utf-8-sig/replace] OK [61 62 fffd 63 64]
+bad_start_mid [utf-8-sig/bogus] ERR LookupError: unknown error handler name 'bogus'
+c0 [utf-8/ignore] OK []
+c0 [utf-8/replace] OK [fffd fffd]
+c0 [utf-8/bogus] ERR LookupError: unknown error handler name 'bogus'
+c0 [utf-8-sig/ignore] OK []
+c0 [utf-8-sig/replace] OK [fffd fffd]
+c0 [utf-8-sig/bogus] ERR LookupError: unknown error handler name 'bogus'
+cont2 [utf-8/ignore] OK [78 41]
+cont2 [utf-8/replace] OK [78 fffd 41]
+cont2 [utf-8/bogus] ERR LookupError: unknown error handler name 'bogus'
+cont2 [utf-8-sig/ignore] OK [78 41]
+cont2 [utf-8-sig/replace] OK [78 fffd 41]
+cont2 [utf-8-sig/bogus] ERR LookupError: unknown error handler name 'bogus'
+cont3a [utf-8/ignore] OK [41 42]
+cont3a [utf-8/replace] OK [fffd 41 42]
+cont3a [utf-8/bogus] ERR LookupError: unknown error handler name 'bogus'
+cont3a [utf-8-sig/ignore] OK [41 42]
+cont3a [utf-8-sig/replace] OK [fffd 41 42]
+cont3a [utf-8-sig/bogus] ERR LookupError: unknown error handler name 'bogus'
+cont3b [utf-8/ignore] OK [41]
+cont3b [utf-8/replace] OK [fffd 41]
+cont3b [utf-8/bogus] ERR LookupError: unknown error handler name 'bogus'
+cont3b [utf-8-sig/ignore] OK [41]
+cont3b [utf-8-sig/replace] OK [fffd 41]
+cont3b [utf-8-sig/bogus] ERR LookupError: unknown error handler name 'bogus'
+overlong_e0 [utf-8/ignore] OK []
+overlong_e0 [utf-8/replace] OK [fffd fffd fffd]
+overlong_e0 [utf-8/bogus] ERR LookupError: unknown error handler name 'bogus'
+overlong_e0 [utf-8-sig/ignore] OK []
+overlong_e0 [utf-8-sig/replace] OK [fffd fffd fffd]
+overlong_e0 [utf-8-sig/bogus] ERR LookupError: unknown error handler name 'bogus'
+surrogate_ed [utf-8/ignore] OK []
+surrogate_ed [utf-8/replace] OK [fffd fffd fffd]
+surrogate_ed [utf-8/bogus] ERR LookupError: unknown error handler name 'bogus'
+surrogate_ed [utf-8-sig/ignore] OK []
+surrogate_ed [utf-8-sig/replace] OK [fffd fffd fffd]
+surrogate_ed [utf-8-sig/bogus] ERR LookupError: unknown error handler name 'bogus'
+cont4a [utf-8/ignore] OK [41 41 41]
+cont4a [utf-8/replace] OK [fffd 41 41 41]
+cont4a [utf-8/bogus] ERR LookupError: unknown error handler name 'bogus'
+cont4a [utf-8-sig/ignore] OK [41 41 41]
+cont4a [utf-8-sig/replace] OK [fffd 41 41 41]
+cont4a [utf-8-sig/bogus] ERR LookupError: unknown error handler name 'bogus'
+cont4b [utf-8/ignore] OK [41 41]
+cont4b [utf-8/replace] OK [fffd 41 41]
+cont4b [utf-8/bogus] ERR LookupError: unknown error handler name 'bogus'
+cont4b [utf-8-sig/ignore] OK [41 41]
+cont4b [utf-8-sig/replace] OK [fffd 41 41]
+cont4b [utf-8-sig/bogus] ERR LookupError: unknown error handler name 'bogus'
+cont4c [utf-8/ignore] OK [41]
+cont4c [utf-8/replace] OK [fffd 41]
+cont4c [utf-8/bogus] ERR LookupError: unknown error handler name 'bogus'
+cont4c [utf-8-sig/ignore] OK [41]
+cont4c [utf-8-sig/replace] OK [fffd 41]
+cont4c [utf-8-sig/bogus] ERR LookupError: unknown error handler name 'bogus'
+f4_high [utf-8/ignore] OK []
+f4_high [utf-8/replace] OK [fffd fffd fffd fffd]
+f4_high [utf-8/bogus] ERR LookupError: unknown error handler name 'bogus'
+f4_high [utf-8-sig/ignore] OK []
+f4_high [utf-8-sig/replace] OK [fffd fffd fffd fffd]
+f4_high [utf-8-sig/bogus] ERR LookupError: unknown error handler name 'bogus'
+f5 [utf-8/ignore] OK []
+f5 [utf-8/replace] OK [fffd fffd fffd fffd]
+f5 [utf-8/bogus] ERR LookupError: unknown error handler name 'bogus'
+f5 [utf-8-sig/ignore] OK []
+f5 [utf-8-sig/replace] OK [fffd fffd fffd fffd]
+f5 [utf-8-sig/bogus] ERR LookupError: unknown error handler name 'bogus'
+eod1 [utf-8/ignore] OK [6f 6b]
+eod1 [utf-8/replace] OK [6f 6b fffd]
+eod1 [utf-8/bogus] ERR LookupError: unknown error handler name 'bogus'
+eod1 [utf-8-sig/ignore] OK [6f 6b]
+eod1 [utf-8-sig/replace] OK [6f 6b fffd]
+eod1 [utf-8-sig/bogus] ERR LookupError: unknown error handler name 'bogus'
+eod2 [utf-8/ignore] OK [6f 6b]
+eod2 [utf-8/replace] OK [6f 6b fffd]
+eod2 [utf-8/bogus] ERR LookupError: unknown error handler name 'bogus'
+eod2 [utf-8-sig/ignore] OK [6f 6b]
+eod2 [utf-8-sig/replace] OK [6f 6b fffd]
+eod2 [utf-8-sig/bogus] ERR LookupError: unknown error handler name 'bogus'
+eod4_3 [utf-8/ignore] OK [6f 6b]
+eod4_3 [utf-8/replace] OK [6f 6b fffd]
+eod4_3 [utf-8/bogus] ERR LookupError: unknown error handler name 'bogus'
+eod4_3 [utf-8-sig/ignore] OK [6f 6b]
+eod4_3 [utf-8-sig/replace] OK [6f 6b fffd]
+eod4_3 [utf-8-sig/bogus] ERR LookupError: unknown error handler name 'bogus'
+eod3_bad2 [utf-8/ignore] OK [6f 6b]
+eod3_bad2 [utf-8/replace] OK [6f 6b fffd fffd]
+eod3_bad2 [utf-8/bogus] ERR LookupError: unknown error handler name 'bogus'
+eod3_bad2 [utf-8-sig/ignore] OK [6f 6b]
+eod3_bad2 [utf-8-sig/replace] OK [6f 6b fffd fffd]
+eod3_bad2 [utf-8-sig/bogus] ERR LookupError: unknown error handler name 'bogus'
+bom_then_bad [utf-8/ignore] OK [feff]
+bom_then_bad [utf-8/replace] OK [feff fffd]
+bom_then_bad [utf-8/bogus] ERR LookupError: unknown error handler name 'bogus'
+bom_then_bad [utf-8-sig/ignore] OK []
+bom_then_bad [utf-8-sig/replace] OK [fffd]
+bom_then_bad [utf-8-sig/bogus] ERR LookupError: unknown error handler name 'bogus'
+crlf_bad [utf-8/ignore] OK [61 a 62 a a]
+crlf_bad [utf-8/replace] OK [61 a fffd a 62 a fffd a]
+crlf_bad [utf-8/bogus] ERR LookupError: unknown error handler name 'bogus'
+crlf_bad [utf-8-sig/ignore] OK [61 a 62 a a]
+crlf_bad [utf-8-sig/replace] OK [61 a fffd a 62 a fffd a]
+crlf_bad [utf-8-sig/bogus] ERR LookupError: unknown error handler name 'bogus'
+bad_bom_mid [utf-8/ignore] OK [78 feff 79]
+bad_bom_mid [utf-8/replace] OK [78 feff 79 fffd]
+bad_bom_mid [utf-8/bogus] ERR LookupError: unknown error handler name 'bogus'
+bad_bom_mid [utf-8-sig/ignore] OK [78 feff 79]
+bad_bom_mid [utf-8-sig/replace] OK [78 feff 79 fffd]
+bad_bom_mid [utf-8-sig/bogus] ERR LookupError: unknown error handler name 'bogus'
